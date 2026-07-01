@@ -22,7 +22,7 @@
 html,body{height:100%;overflow:hidden}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;display:flex;flex-direction:column}
 
-/* ── TOP BAR ── */
+/* -- TOP BAR -- */
 #topbar{display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
 #topbar-logo{font-weight:900;font-size:15px;color:var(--accent);letter-spacing:-0.5px;margin-right:4px}
 #topbar-title{font-size:13px;color:var(--muted);flex:1}
@@ -38,10 +38,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 #scout-status-text{color:var(--muted);white-space:nowrap}
 #scout-status-count{color:var(--accent);font-weight:700;white-space:nowrap}
 
-/* ── MAIN LAYOUT ── */
+/* -- MAIN LAYOUT -- */
 #main{display:flex;flex:1;overflow:hidden}
 
-/* ── QUEUE PANEL ── */
+/* -- QUEUE PANEL -- */
 #queue-panel{width:320px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
 #qp-head{padding:12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
 #qp-search{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:7px 11px;color:var(--text);font-size:13px;width:100%}
@@ -60,7 +60,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 #queue-empty .icon{font-size:32px;margin-bottom:8px}
 #queue-empty p{font-size:12px;line-height:1.6}
 
-/* ── QUEUE ITEM ── */
+/* -- QUEUE ITEM -- */
 .qi{border:1px solid var(--border);border-radius:8px;padding:9px 10px 7px;cursor:pointer;transition:.12s;background:var(--card);position:relative}
 .qi:hover{border-color:var(--faint)}
 .qi.active{border-color:var(--accent);background:var(--card2)}
@@ -80,20 +80,20 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .qi-profile-link{font-size:10px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* ── CONTENT PANEL ── */
+/* -- CONTENT PANEL -- */
 #content{flex:1;display:flex;flex-direction:column;overflow:hidden}
 
-/* ── TABS ── */
+/* -- TABS -- */
 #nav-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface);padding:0 16px;flex-shrink:0}
 .nav-tab{padding:10px 16px;border-bottom:2px solid transparent;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;transition:.12s;white-space:nowrap}
 .nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
 .nav-tab:hover:not(.active){color:var(--text)}
 
-/* ── TAB PANELS ── */
+/* -- TAB PANELS -- */
 .tab-panel{display:none;flex:1;overflow:hidden;flex-direction:column}
 .tab-panel.active{display:flex}
 
-/* ── BUSINESS DETAIL ── */
+/* -- BUSINESS DETAIL -- */
 #detail-panel{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
 #detail-empty{display:flex;flex:1;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--muted)}
 #detail-empty .icon{font-size:40px;opacity:.4}
@@ -150,7 +150,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .ai-dot:nth-child(3){animation-delay:.3s}
 @keyframes ai-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
 
-/* ── UPLOAD TAB ── */
+/* -- UPLOAD TAB -- */
 #upload-panel{padding:24px;overflow-y:auto}
 .upload-zone{border:2px dashed var(--border);border-radius:14px;padding:40px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:20px}
 .upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:rgba(91,110,245,.04)}
@@ -168,7 +168,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .upload-opt-label{font-size:12px;color:var(--muted)}
 .upload-opt-select{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--text);font-size:12px}
 
-/* ── BATCH APPROVE TAB ── */
+/* -- BATCH APPROVE TAB -- */
 #batch-panel{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
 .batch-empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:13px}
 .batch-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;flex-wrap:wrap;gap:8px}
@@ -192,7 +192,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .batch-open-btn{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:7px;padding:5px 12px;font-size:11px;cursor:pointer;transition:.12s}
 .batch-open-btn:hover{border-color:var(--accent);color:var(--accent)}
 
-/* ── AUTO-SCOUT TAB ── */
+/* -- AUTO-SCOUT TAB -- */
 #autoscout-panel{padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:20px}
 .as-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
 .as-card h3{font-size:13px;font-weight:700;margin-bottom:4px;color:var(--text)}
@@ -225,7 +225,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .ext-disconnected{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--amber)}
 .ext-dot{width:8px;height:8px;border-radius:50%;background:currentColor}
 
-/* ── SETTINGS TAB ── */
+/* -- SETTINGS TAB -- */
 #settings-panel{padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:20px}
 .settings-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
 .settings-card h3{font-size:13px;font-weight:700;margin-bottom:4px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
@@ -241,7 +241,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .settings-btn.danger{background:var(--red)}
 .claude-key-note{font-size:11px;color:var(--faint);line-height:1.5;padding:8px 12px;background:rgba(91,110,245,.07);border-radius:8px;border:1px solid rgba(91,110,245,.15)}
 
-/* ── TIMELINE TAB ── */
+/* -- TIMELINE TAB -- */
 #timeline-panel-tab{padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
 .tl-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
 .tl-chip{padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;transition:.12s}
@@ -255,26 +255,26 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .tl-export-bar label{font-size:11px;color:var(--muted)}
 .tl-date-input{background:var(--card);border:1px solid var(--border);border-radius:7px;padding:5px 9px;color:var(--text);font-size:12px}
 
-/* ── TOAST ── */
+/* -- TOAST -- */
 #toast{position:fixed;bottom:24px;right:24px;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px 18px;font-size:13px;font-weight:500;opacity:0;transition:.2s;z-index:999;pointer-events:none;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,.4)}
 #toast.show{opacity:1}
 #toast.toast-ok{border-color:var(--green);color:var(--green)}
 #toast.toast-err{border-color:var(--red);color:var(--red)}
 
-/* ── MODAL ── */
+/* -- MODAL -- */
 #modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;display:none;align-items:center;justify-content:center}
 #modal-overlay.open{display:flex}
 #modal-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;max-width:480px;width:90%;max-height:85vh;overflow-y:auto}
 #modal-box h3{font-size:15px;font-weight:700;margin-bottom:14px}
 .modal-close{float:right;background:transparent;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1}
 
-/* ── SCROLLBARS ── */
+/* -- SCROLLBARS -- */
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:var(--faint)}
 
-/* ── MOBILE RESPONSIVE ── */
+/* -- MOBILE RESPONSIVE -- */
 @media(max-width:768px){
   #topbar{padding:8px 12px;gap:6px;flex-wrap:wrap}
   #topbar-left{font-size:13px}
@@ -377,7 +377,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
     <div id="send-progress-fill" style="height:100%;background:var(--green);transition:.3s;width:0%"></div>
   </div>
   <span id="send-progress-text" style="font-size:12px;color:var(--text);white-space:nowrap">Sending…</span>
-  <button id="send-next-btn" class="topbar-btn primary" onclick="nextSend()" style="display:none;font-size:12px">Next →</button>
+  <button id="send-next-btn" class="topbar-btn primary" onclick="nextSend()" style="display:none;font-size:12px">Next -></button>
   <button class="topbar-btn danger" onclick="stopSendQueue()" style="font-size:11px">Stop</button>
 </div>
 
@@ -558,7 +558,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
           <div id="es-send-stats" style="font-size:12px;color:var(--muted);margin-bottom:10px">No contacts loaded yet.</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="as-big-btn as-start" onclick="startEsSend()" id="es-start-btn">📧 Start Sending</button>
-            <button class="topbar-btn" onclick="nextEsSend()" id="es-next-btn" style="display:none">Next →</button>
+            <button class="topbar-btn" onclick="nextEsSend()" id="es-next-btn" style="display:none">Next -></button>
             <button class="topbar-btn danger" onclick="stopEsSend()" id="es-stop-btn" style="display:none">⏹ Stop</button>
           </div>
           <div style="margin-top:10px;background:var(--bg);border-radius:6px;height:6px;overflow:hidden">
@@ -706,8 +706,8 @@ Elevate Business Solutions
             <p style="font-size:11px;color:var(--muted);margin-bottom:10px">Connect each Gmail account to automatically detect when prospects reply. The app checks every 10 minutes and shows replies directly in the business detail. No manual copy-pasting.</p>
             <div style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--muted)">
               ⚠️ <strong>Setup required first:</strong> You need a Google Cloud OAuth Client ID. 
-              <a href="https://console.cloud.google.com" target="_blank" style="color:var(--accent)">console.cloud.google.com</a> → 
-              Create Project → Enable Gmail API → Credentials → OAuth 2.0 Client ID → Web Application → 
+              <a href="https://console.cloud.google.com" target="_blank" style="color:var(--accent)">console.cloud.google.com</a> -> 
+              Create Project -> Enable Gmail API -> Credentials -> OAuth 2.0 Client ID -> Web Application -> 
               Add redirect URI: <code style="background:var(--bg);padding:1px 4px;border-radius:3px">https://scout-app-oyeola.vercel.app/</code>
             </div>
             <div class="settings-field" style="margin-bottom:10px">
@@ -841,55 +841,55 @@ Elevate Business Solutions
 <input type="file" id="json-import-input" accept=".json" style="display:none" onchange="handleJsonImport(event)">
 
 <script>
-// ═══════════════════════════════════════════════════════════════
-// INDUSTRY PLAYBOOK — extracted from your V3 document
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
+// INDUSTRY PLAYBOOK  -  extracted from your V3 document
+// ---------------------------------------------------------------
 const PLAYBOOK = {
   restaurant: {
     label: 'Restaurants & Food Service',
     thesis: 'operational clarity',
     positioning: 'service operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI was looking at ${biz.name}'s listing${biz.rating ? ` — ${biz.rating}★ across ${biz.reviews || 'several'} reviews` : ''} and a pattern caught my attention around ${pickSignal(['wait times, wrong orders, great food but inconsistent experience','food quality and speed but coordination gaps behind the scenes','service consistency during busy periods'])}.\n\nFor ${categoryLabel(biz)}, that usually means a lot is happening behind the scenes with reservations, orders, staffing, and follow-ups that customers never see. Out of curiosity — which part of that is hardest to keep consistent when things get busy?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI was looking at ${biz.name}'s listing${biz.rating ? `  -  ${biz.rating}★ across ${biz.reviews || 'several'} reviews` : ''} and a pattern caught my attention around ${pickSignal(['wait times, wrong orders, great food but inconsistent experience','food quality and speed but coordination gaps behind the scenes','service consistency during busy periods'])}.\n\nFor ${categoryLabel(biz)}, that usually means a lot is happening behind the scenes with reservations, orders, staffing, and follow-ups that customers never see. Out of curiosity  -  which part of that is hardest to keep consistent when things get busy?`,
     airtable_angle: 'service operations hub connecting reservations, prep, inventory, staff tasks, customer issues, suppliers, and review recovery',
-    stage2: (biz) => `That makes sense. I wouldn't assume it's a people problem — in food service, it often happens because busy periods turn small coordination gaps into public reviews very quickly.\n\nWhen the pressure shows up, where does it land first — the team, the customer experience, or your own time?`,
+    stage2: (biz) => `That makes sense. I wouldn't assume it's a people problem  -  in food service, it often happens because busy periods turn small coordination gaps into public reviews very quickly.\n\nWhen the pressure shows up, where does it land first  -  the team, the customer experience, or your own time?`,
   },
   beauty: {
     label: 'Beauty & Personal Care',
     thesis: 'client experience and rebooking',
     positioning: 'client experience and rebooking hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something worth mentioning around ${pickSignal(['appointment consistency and rebooking rates','client preferences not being tracked between visits','staff scheduling and no-show patterns'])}.\n\nFor ${categoryLabel(biz)}, that usually means a lot is happening behind the scenes with stylist schedules, client notes, and product stock. Out of curiosity — which part of that is hardest to keep consistent when things get busy?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something worth mentioning around ${pickSignal(['appointment consistency and rebooking rates','client preferences not being tracked between visits','staff scheduling and no-show patterns'])}.\n\nFor ${categoryLabel(biz)}, that usually means a lot is happening behind the scenes with stylist schedules, client notes, and product stock. Out of curiosity  -  which part of that is hardest to keep consistent when things get busy?`,
     airtable_angle: 'client experience and rebooking hub centralizing appointments, preferences, treatment notes, retail stock, follow-ups, and staff performance',
-    stage2: (biz) => `That makes sense. In beauty and personal care, small coordination gaps reduce rebooking — and rebooking is where the real revenue is.\n\nWhere does the pressure show up first when things get busy?`,
+    stage2: (biz) => `That makes sense. In beauty and personal care, small coordination gaps reduce rebooking  -  and rebooking is where the real revenue is.\n\nWhere does the pressure show up first when things get busy?`,
   },
   home_services: {
     label: 'Home Services',
     thesis: 'field service visibility',
     positioning: 'field service command center',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI was looking at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and something stood out around ${pickSignal(['job scheduling and dispatch coordination','estimate follow-up and invoice timing','technician communication and job status updates'])}.\n\nFor ${categoryLabel(biz)}, that usually means managing people, parts, and paperwork across multiple jobs at once. Out of curiosity — which part of that is hardest to keep smooth when things get busy?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI was looking at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and something stood out around ${pickSignal(['job scheduling and dispatch coordination','estimate follow-up and invoice timing','technician communication and job status updates'])}.\n\nFor ${categoryLabel(biz)}, that usually means managing people, parts, and paperwork across multiple jobs at once. Out of curiosity  -  which part of that is hardest to keep smooth when things get busy?`,
     airtable_angle: 'field service command center connecting leads, estimates, technician schedules, job photos, parts, invoices, warranties, and review follow-up',
-    stage2: (biz) => `That makes sense. In home services, the customer sees one job — but you're coordinating people, parts, traffic, and documentation all at once.\n\nWhere does the pressure appear first?`,
+    stage2: (biz) => `That makes sense. In home services, the customer sees one job  -  but you're coordinating people, parts, traffic, and documentation all at once.\n\nWhere does the pressure appear first?`,
   },
   healthcare: {
     label: 'Healthcare Clinics',
     thesis: 'patient operations clarity',
     positioning: 'non-clinical operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['appointment availability and recall follow-up','patient communication and intake coordination','billing and admin fragmentation'])}.\n\nFor ${categoryLabel(biz)}, that usually means good care can still feel poor if scheduling, intake, and follow-up are fragmented. Out of curiosity — which part of that is hardest to keep consistent when you're busy?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['appointment availability and recall follow-up','patient communication and intake coordination','billing and admin fragmentation'])}.\n\nFor ${categoryLabel(biz)}, that usually means good care can still feel poor if scheduling, intake, and follow-up are fragmented. Out of curiosity  -  which part of that is hardest to keep consistent when you're busy?`,
     airtable_angle: 'non-clinical operations hub for intake tracking, recalls, admin tasks, patient communication workflows, referral sources, and service recovery',
-    stage2: (biz) => `That makes sense. In healthcare, good care can still feel poor to patients if the coordination around it — scheduling, reminders, follow-up — isn't connected.\n\nWhere does the pressure show up first for you?`,
+    stage2: (biz) => `That makes sense. In healthcare, good care can still feel poor to patients if the coordination around it  -  scheduling, reminders, follow-up  -  isn't connected.\n\nWhere does the pressure show up first for you?`,
   },
   fitness: {
     label: 'Fitness & Wellness',
     thesis: 'member retention and growth',
     positioning: 'member growth and retention system',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI was looking at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['member retention and churn patterns','class scheduling and capacity tracking','new member onboarding and follow-up'])}.\n\nFor ${categoryLabel(biz)}, getting members is hard — but keeping them requires constant visibility into attendance, progress, and renewals. Out of curiosity — which part of that is hardest to keep on top of?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI was looking at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['member retention and churn patterns','class scheduling and capacity tracking','new member onboarding and follow-up'])}.\n\nFor ${categoryLabel(biz)}, getting members is hard  -  but keeping them requires constant visibility into attendance, progress, and renewals. Out of curiosity  -  which part of that is hardest to keep on top of?`,
     airtable_angle: 'member growth and retention system connecting leads, trials, onboarding, attendance, progress notes, renewals, and at-risk member follow-up',
-    stage2: (biz) => `That makes sense. In fitness, the real pressure isn't getting members — it's retaining them. That requires follow-up that's easy to fall behind on.\n\nWhere does it usually slip first?`,
+    stage2: (biz) => `That makes sense. In fitness, the real pressure isn't getting members  -  it's retaining them. That requires follow-up that's easy to fall behind on.\n\nWhere does it usually slip first?`,
   },
   real_estate: {
     label: 'Real Estate & Property',
     thesis: 'deal visibility and follow-up speed',
     positioning: 'deal and property operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['lead follow-up speed and viewing coordination','property management and tenant communication','document tracking and pipeline visibility'])}.\n\nFor ${categoryLabel(biz)}, revenue depends on follow-up speed and details not falling through the cracks. Out of curiosity — which part of that is hardest to keep tight when things get busy?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['lead follow-up speed and viewing coordination','property management and tenant communication','document tracking and pipeline visibility'])}.\n\nFor ${categoryLabel(biz)}, revenue depends on follow-up speed and details not falling through the cracks. Out of curiosity  -  which part of that is hardest to keep tight when things get busy?`,
     airtable_angle: 'deal and property operations hub connecting leads, listings, showings, documents, owner communication, maintenance, and pipeline reporting',
     stage2: (biz) => `That makes sense. In real estate, the difference between a deal and a missed deal is often just one dropped follow-up.\n\nWhere does the pressure show up first for you?`,
   },
@@ -897,39 +897,39 @@ const PLAYBOOK = {
     label: 'Legal Services',
     thesis: 'matter visibility and client trust',
     positioning: 'matter intake and client communication hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed a pattern around ${pickSignal(['client communication and case update frequency','document collection and deadline tracking','intake and matter status visibility'])}.\n\nFor ${categoryLabel(biz)}, clients judge a firm by communication clarity before they understand the legal outcomes. Out of curiosity — which part of that is hardest to keep consistent when you're handling multiple matters?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed a pattern around ${pickSignal(['client communication and case update frequency','document collection and deadline tracking','intake and matter status visibility'])}.\n\nFor ${categoryLabel(biz)}, clients judge a firm by communication clarity before they understand the legal outcomes. Out of curiosity  -  which part of that is hardest to keep consistent when you're handling multiple matters?`,
     airtable_angle: 'matter intake and client communication hub tracking consultations, documents, deadlines, responsible staff, status updates, and referral sources',
-    stage2: (biz) => `That makes sense. In legal services, clients judge the firm by how clearly they're kept informed — not just by the outcome.\n\nWhere does the coordination pressure show up first?`,
+    stage2: (biz) => `That makes sense. In legal services, clients judge the firm by how clearly they're kept informed  -  not just by the outcome.\n\nWhere does the coordination pressure show up first?`,
   },
   accounting: {
     label: 'Accounting, Tax & Advisory',
     thesis: 'deadline and document visibility',
     positioning: 'client work-in-progress system',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['document chasing and deadline tracking','client communication and return status visibility','seasonal bottlenecks and work-in-progress tracking'])}.\n\nFor ${categoryLabel(biz)}, the pressure isn't just the technical work — it's chasing documents, tracking status, and keeping clients informed. Out of curiosity — which part of that takes most of your time?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['document chasing and deadline tracking','client communication and return status visibility','seasonal bottlenecks and work-in-progress tracking'])}.\n\nFor ${categoryLabel(biz)}, the pressure isn't just the technical work  -  it's chasing documents, tracking status, and keeping clients informed. Out of curiosity  -  which part of that takes most of your time?`,
     airtable_angle: 'client work-in-progress system for onboarding, document requests, deadline tracking, task ownership, review stages, and client follow-up',
-    stage2: (biz) => `That makes sense. In accounting, the visible work is the technical output — but the hidden pressure is the coordination around it.\n\nWhere does it get hardest to manage?`,
+    stage2: (biz) => `That makes sense. In accounting, the visible work is the technical output  -  but the hidden pressure is the coordination around it.\n\nWhere does it get hardest to manage?`,
   },
   automotive: {
     label: 'Automotive Services',
     thesis: 'shop visibility and customer trust',
     positioning: 'shop operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['estimate clarity and approval delays','parts tracking and technician coordination','customer updates and job status communication'])}.\n\nFor ${categoryLabel(biz)}, the customer sees one drop-off — but you're managing diagnostics, parts, approvals, and updates all at once. Out of curiosity — which part is hardest to keep smooth when the shop is busy?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['estimate clarity and approval delays','parts tracking and technician coordination','customer updates and job status communication'])}.\n\nFor ${categoryLabel(biz)}, the customer sees one drop-off  -  but you're managing diagnostics, parts, approvals, and updates all at once. Out of curiosity  -  which part is hardest to keep smooth when the shop is busy?`,
     airtable_angle: 'shop operations hub connecting vehicle history, estimates, parts, approvals, technician workload, customer updates, and service reminders',
-    stage2: (biz) => `That makes sense. In automotive, customers become anxious fast when they don't hear updates — even if the repair is moving.\n\nWhere does the pressure usually build?`,
+    stage2: (biz) => `That makes sense. In automotive, customers become anxious fast when they don't hear updates  -  even if the repair is moving.\n\nWhere does the pressure usually build?`,
   },
   education: {
     label: 'Education & Training',
     thesis: 'student progress and retention',
     positioning: 'student journey hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['student progress tracking and parent communication','scheduling and attendance visibility','enrollment follow-up and renewal rates'])}.\n\nFor ${categoryLabel(biz)}, education businesses win trust through visible progress — not just lessons delivered. Out of curiosity — which part of that is hardest to keep consistent when you're busy?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['student progress tracking and parent communication','scheduling and attendance visibility','enrollment follow-up and renewal rates'])}.\n\nFor ${categoryLabel(biz)}, education businesses win trust through visible progress  -  not just lessons delivered. Out of curiosity  -  which part of that is hardest to keep consistent when you're busy?`,
     airtable_angle: 'student journey hub tracking leads, assessments, schedules, attendance, progress, parent communication, renewals, and teacher workload',
-    stage2: (biz) => `That makes sense. In education, parents and students judge results through visible progress — and that takes consistent tracking and communication.\n\nWhere does it slip first?`,
+    stage2: (biz) => `That makes sense. In education, parents and students judge results through visible progress  -  and that takes consistent tracking and communication.\n\nWhere does it slip first?`,
   },
   events: {
     label: 'Events & Entertainment',
     thesis: 'event coordination and vendor management',
     positioning: 'event production command center',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['vendor coordination and timeline management','booking management and deposit tracking','event logistics and client approval workflows'])}.\n\nFor ${categoryLabel(biz)}, the client sees the event — but the business survives on checklists, timing, and clean handoffs. Out of curiosity — which part of that is hardest to keep on top of when you have multiple events running?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['vendor coordination and timeline management','booking management and deposit tracking','event logistics and client approval workflows'])}.\n\nFor ${categoryLabel(biz)}, the client sees the event  -  but the business survives on checklists, timing, and clean handoffs. Out of curiosity  -  which part of that is hardest to keep on top of when you have multiple events running?`,
     airtable_angle: 'event production command center connecting inquiries, quotes, timelines, vendors, equipment, staff, tasks, documents, and post-event follow-up',
     stage2: (biz) => `That makes sense. In events, one missed coordination gap becomes a visible problem in front of everyone.\n\nWhere does the pressure usually come from first?`,
   },
@@ -937,31 +937,31 @@ const PLAYBOOK = {
     label: 'Hospitality & Travel',
     thesis: 'guest experience and operations',
     positioning: 'guest operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed a pattern around ${pickSignal(['guest experience consistency and housekeeping coordination','reservation management and check-in quality','maintenance requests and staff communication'])}.\n\nFor ${categoryLabel(biz)}, guest satisfaction depends on coordination that guests never see — between front desk, housekeeping, and maintenance. Out of curiosity — which part of that is hardest to keep consistent?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed a pattern around ${pickSignal(['guest experience consistency and housekeeping coordination','reservation management and check-in quality','maintenance requests and staff communication'])}.\n\nFor ${categoryLabel(biz)}, guest satisfaction depends on coordination that guests never see  -  between front desk, housekeeping, and maintenance. Out of curiosity  -  which part of that is hardest to keep consistent?`,
     airtable_angle: 'guest operations hub for reservations, housekeeping, maintenance, guest requests, tours, vendor tasks, and review recovery',
-    stage2: (biz) => `That makes sense. In hospitality, guests notice what goes wrong — rarely what goes right. That means invisible coordination is everything.\n\nWhere does the pressure show up first?`,
+    stage2: (biz) => `That makes sense. In hospitality, guests notice what goes wrong  -  rarely what goes right. That means invisible coordination is everything.\n\nWhere does the pressure show up first?`,
   },
   retail: {
     label: 'Retail & Ecommerce',
     thesis: 'inventory and customer operations',
     positioning: 'commerce operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['stock accuracy and supplier coordination','customer service and return management','product availability and order tracking'])}.\n\nFor ${categoryLabel(biz)}, selling more creates hidden work around stock, customer questions, and supplier follow-up. Out of curiosity — which part of that is hardest to stay on top of?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['stock accuracy and supplier coordination','customer service and return management','product availability and order tracking'])}.\n\nFor ${categoryLabel(biz)}, selling more creates hidden work around stock, customer questions, and supplier follow-up. Out of curiosity  -  which part of that is hardest to stay on top of?`,
     airtable_angle: 'commerce operations hub connecting product data, suppliers, inventory, orders, returns, customer issues, promotions, and review insights',
-    stage2: (biz) => `That makes sense. In retail, growth creates coordination pressure that's invisible to customers — but very visible to the team.\n\nWhere does it build first?`,
+    stage2: (biz) => `That makes sense. In retail, growth creates coordination pressure that's invisible to customers  -  but very visible to the team.\n\nWhere does it build first?`,
   },
   construction: {
     label: 'Construction & Trades',
     thesis: 'project visibility and margin protection',
     positioning: 'project control hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['project communication and change order tracking','subcontractor coordination and material management','estimate accuracy and invoice timing'])}.\n\nFor ${categoryLabel(biz)}, profit disappears when estimates, change orders, and crew handoffs aren't visible in one place. Out of curiosity — which part of that is hardest to keep tight?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['project communication and change order tracking','subcontractor coordination and material management','estimate accuracy and invoice timing'])}.\n\nFor ${categoryLabel(biz)}, profit disappears when estimates, change orders, and crew handoffs aren't visible in one place. Out of curiosity  -  which part of that is hardest to keep tight?`,
     airtable_angle: 'project control hub for leads, estimates, materials, permits, subcontractors, change orders, site photos, invoices, and punch lists',
-    stage2: (biz) => `That makes sense. In construction, the margin is in the details — and the details are the first things to slip when you're busy.\n\nWhere does the pressure show up first?`,
+    stage2: (biz) => `That makes sense. In construction, the margin is in the details  -  and the details are the first things to slip when you're busy.\n\nWhere does the pressure show up first?`,
   },
   logistics: {
     label: 'Logistics & Transportation',
     thesis: 'dispatch visibility and delivery reliability',
     positioning: 'dispatch visibility hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['delivery status and proof of delivery tracking','driver communication and route coordination','customer updates and exception management'])}.\n\nFor ${categoryLabel(biz)}, customers notice delays — but operators need real-time visibility into routes, drivers, and exceptions. Out of curiosity — which part of that is hardest to keep visible when you're running multiple jobs?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['delivery status and proof of delivery tracking','driver communication and route coordination','customer updates and exception management'])}.\n\nFor ${categoryLabel(biz)}, customers notice delays  -  but operators need real-time visibility into routes, drivers, and exceptions. Out of curiosity  -  which part of that is hardest to keep visible when you're running multiple jobs?`,
     airtable_angle: 'dispatch visibility hub connecting bookings, drivers, routes, vehicles, proof of delivery, maintenance, exceptions, and customer updates',
     stage2: (biz) => `That makes sense. In logistics, the visibility gap between what's happening on the road and what's visible to management is where problems grow.\n\nWhere does the pressure usually come from?`,
   },
@@ -969,56 +969,56 @@ const PLAYBOOK = {
     label: 'Professional B2B Services',
     thesis: 'client delivery and retention',
     positioning: 'client delivery operating system',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['client visibility and delivery tracking','project approvals and status communication','onboarding and renewal coordination'])}.\n\nFor ${categoryLabel(biz)}, client trust drops when the work is happening but the client can't clearly see progress. Out of curiosity — which part of that is hardest to manage as you take on more clients?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['client visibility and delivery tracking','project approvals and status communication','onboarding and renewal coordination'])}.\n\nFor ${categoryLabel(biz)}, client trust drops when the work is happening but the client can't clearly see progress. Out of curiosity  -  which part of that is hardest to manage as you take on more clients?`,
     airtable_angle: 'client delivery operating system connecting sales, onboarding, projects, deliverables, approvals, reporting, renewals, and referral opportunities',
-    stage2: (biz) => `That makes sense. In professional services, delivery quality is only half the equation — the other half is whether the client can see it.\n\nWhere does coordination get hardest?`,
+    stage2: (biz) => `That makes sense. In professional services, delivery quality is only half the equation  -  the other half is whether the client can see it.\n\nWhere does coordination get hardest?`,
   },
   childcare: {
     label: 'Childcare & Kids Programs',
     thesis: 'family trust and operational safety',
     positioning: 'family enrollment and operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['parent communication and attendance tracking','enrollment documentation and waitlist management','staff ratio and incident documentation'])}.\n\nFor ${categoryLabel(biz)}, parents judge the business by communication and safety signals as much as the program itself. Out of curiosity — which part of that is hardest to keep consistent when you're fully enrolled?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['parent communication and attendance tracking','enrollment documentation and waitlist management','staff ratio and incident documentation'])}.\n\nFor ${categoryLabel(biz)}, parents judge the business by communication and safety signals as much as the program itself. Out of curiosity  -  which part of that is hardest to keep consistent when you're fully enrolled?`,
     airtable_angle: 'family enrollment and operations hub for waitlists, documents, attendance, staff ratios, incidents, parent follow-ups, and payments',
-    stage2: (biz) => `That makes sense. In childcare, the program might be excellent — but parents stay based on how clearly they're kept informed.\n\nWhere does the admin pressure show up most?`,
+    stage2: (biz) => `That makes sense. In childcare, the program might be excellent  -  but parents stay based on how clearly they're kept informed.\n\nWhere does the admin pressure show up most?`,
   },
   pet: {
     label: 'Pet Services',
     thesis: 'pet safety and owner reassurance',
     positioning: 'pet client operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['pet preferences and appointment history tracking','owner communication and update frequency','vaccination tracking and rebooking reminders'])}.\n\nFor ${categoryLabel(biz)}, pet owners expect emotional reassurance — which requires accurate notes and fast communication. Out of curiosity — which part of that is hardest to stay on top of when you're busy?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['pet preferences and appointment history tracking','owner communication and update frequency','vaccination tracking and rebooking reminders'])}.\n\nFor ${categoryLabel(biz)}, pet owners expect emotional reassurance  -  which requires accurate notes and fast communication. Out of curiosity  -  which part of that is hardest to stay on top of when you're busy?`,
     airtable_angle: 'pet client operations hub connecting pet profiles, bookings, vaccination status, staff tasks, incidents, packages, inventory, and rebooking',
-    stage2: (biz) => `That makes sense. Pet owners are deeply invested — and they need to feel their pet is known and cared for, not just another booking.\n\nWhere does the coordination pressure show up first?`,
+    stage2: (biz) => `That makes sense. Pet owners are deeply invested  -  and they need to feel their pet is known and cared for, not just another booking.\n\nWhere does the coordination pressure show up first?`,
   },
   cleaning: {
     label: 'Cleaning & Facilities',
     thesis: 'consistent quality and crew reliability',
     positioning: 'facilities operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['crew scheduling and quality consistency','client checklist management and inspection tracking','supply tracking and issue reporting'])}.\n\nFor ${categoryLabel(biz)}, quality problems usually come from unclear checklists or missed inspections — not lack of effort. Out of curiosity — which part of that is hardest to keep tight when you're managing multiple sites?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['crew scheduling and quality consistency','client checklist management and inspection tracking','supply tracking and issue reporting'])}.\n\nFor ${categoryLabel(biz)}, quality problems usually come from unclear checklists or missed inspections  -  not lack of effort. Out of curiosity  -  which part of that is hardest to keep tight when you're managing multiple sites?`,
     airtable_angle: 'facilities operations hub connecting sites, schedules, crews, checklists, supplies, inspections, issues, and client reporting',
-    stage2: (biz) => `That makes sense. In cleaning, the most common quality issues come from coordination gaps — not people problems.\n\nWhere does it usually show up first for you?`,
+    stage2: (biz) => `That makes sense. In cleaning, the most common quality issues come from coordination gaps  -  not people problems.\n\nWhere does it usually show up first for you?`,
   },
   security: {
     label: 'Security Services',
     thesis: 'coverage visibility and documentation',
     positioning: 'security operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['shift coverage and guard accountability','incident documentation and client reporting','site management and compliance tracking'])}.\n\nFor ${categoryLabel(biz)}, security is judged when something goes wrong — so documentation and visibility matter as much as staffing. Out of curiosity — which part of that is hardest to keep consistent?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['shift coverage and guard accountability','incident documentation and client reporting','site management and compliance tracking'])}.\n\nFor ${categoryLabel(biz)}, security is judged when something goes wrong  -  so documentation and visibility matter as much as staffing. Out of curiosity  -  which part of that is hardest to keep consistent?`,
     airtable_angle: 'security operations hub connecting sites, shifts, guards, incidents, patrol logs, equipment, compliance documents, and client reports',
-    stage2: (biz) => `That makes sense. In security, the real value is being able to prove coverage and response — and that requires documentation that's often scattered.\n\nWhere does the pressure usually come from?`,
+    stage2: (biz) => `That makes sense. In security, the real value is being able to prove coverage and response  -  and that requires documentation that's often scattered.\n\nWhere does the pressure usually come from?`,
   },
   general: {
     label: 'Business',
     thesis: 'operational clarity',
     positioning: 'operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★, ${biz.reviews || 'several'} reviews)` : ''} and wanted to ask about something I noticed.\n\nFor a business like ${biz.name}, there's usually a lot happening behind the scenes — tracking customers, following up, managing staff, and keeping everything coordinated. Out of curiosity — which part of that is hardest to keep consistent when things get busy?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★, ${biz.reviews || 'several'} reviews)` : ''} and wanted to ask about something I noticed.\n\nFor a business like ${biz.name}, there's usually a lot happening behind the scenes  -  tracking customers, following up, managing staff, and keeping everything coordinated. Out of curiosity  -  which part of that is hardest to keep consistent when things get busy?`,
     airtable_angle: 'operations hub to centralise your client tracking, task management, follow-ups, and reporting in one place',
-    stage2: (biz) => `That makes sense. In most service businesses, the coordination layer — follow-up, tracking, communication — is where things slip first.\n\nWhere does it show up most for you?`,
+    stage2: (biz) => `That makes sense. In most service businesses, the coordination layer  -  follow-up, tracking, communication  -  is where things slip first.\n\nWhere does it show up most for you?`,
   },
 
   photography: {
     label: 'Photography & Videography',
     thesis: 'client delivery and project management',
     positioning: 'creative project management hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['client communication and deliverable tracking','booking and deposit management','editing queue and delivery timelines'])}.\n\nFor ${categoryLabel(biz)}, clients remember the experience as much as the photos — and that's shaped by how clearly you communicate before and after. Out of curiosity — which part of that is hardest to stay on top of?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['client communication and deliverable tracking','booking and deposit management','editing queue and delivery timelines'])}.\n\nFor ${categoryLabel(biz)}, clients remember the experience as much as the photos  -  and that's shaped by how clearly you communicate before and after. Out of curiosity  -  which part of that is hardest to stay on top of?`,
     airtable_angle: 'creative project hub connecting enquiries, bookings, deposits, shot lists, editing status, delivery, testimonials, and rebooking',
     stage2: (biz) => `That makes sense. In photography, the client experience is shaped long before and after the shoot itself.\n\nWhere does the coordination pressure show up most?`,
   },
@@ -1026,7 +1026,7 @@ const PLAYBOOK = {
     label: 'Dental Practices',
     thesis: 'patient recall and treatment coordination',
     positioning: 'patient lifecycle hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['patient recall and appointment fill rates','treatment plan follow-up and acceptance rates','front desk communication and patient experience'])}.\n\nFor ${categoryLabel(biz)}, production depends on recall rates and treatment acceptance — both of which are driven by how well patients are followed up. Out of curiosity — which part of that is hardest to keep consistent?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['patient recall and appointment fill rates','treatment plan follow-up and acceptance rates','front desk communication and patient experience'])}.\n\nFor ${categoryLabel(biz)}, production depends on recall rates and treatment acceptance  -  both of which are driven by how well patients are followed up. Out of curiosity  -  which part of that is hardest to keep consistent?`,
     airtable_angle: 'patient lifecycle hub for recalls, treatment plans, follow-ups, lab tracking, insurance, referrals, and review recovery',
     stage2: (biz) => `That makes sense. In dental, the gap between recommended treatment and accepted treatment is often a follow-up problem.\n\nWhere does it slip most?`,
   },
@@ -1034,15 +1034,15 @@ const PLAYBOOK = {
     label: 'Physiotherapy & Rehab',
     thesis: 'patient compliance and outcome tracking',
     positioning: 'patient progress and compliance hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['patient compliance and home exercise follow-up','session notes and progress tracking','discharge planning and outcome documentation'])}.\n\nFor ${categoryLabel(biz)}, outcomes depend on what happens between sessions — and that requires follow-up most clinics find hard to systematise. Out of curiosity — which part of that is hardest to keep consistent?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['patient compliance and home exercise follow-up','session notes and progress tracking','discharge planning and outcome documentation'])}.\n\nFor ${categoryLabel(biz)}, outcomes depend on what happens between sessions  -  and that requires follow-up most clinics find hard to systematise. Out of curiosity  -  which part of that is hardest to keep consistent?`,
     airtable_angle: 'patient progress hub connecting assessments, session notes, exercise programs, progress milestones, communication, and outcome reporting',
-    stage2: (biz) => `That makes sense. In physiotherapy, the session is just one part — home compliance and follow-through is where outcomes are really made.\n\nWhere does the coordination pressure show up first?`,
+    stage2: (biz) => `That makes sense. In physiotherapy, the session is just one part  -  home compliance and follow-through is where outcomes are really made.\n\nWhere does the coordination pressure show up first?`,
   },
   veterinary: {
     label: 'Veterinary Clinics',
     thesis: 'patient records and owner communication',
     positioning: 'pet patient management hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['vaccination reminders and recall management','owner communication and follow-up care instructions','appointment scheduling and no-show patterns'])}.\n\nFor ${categoryLabel(biz)}, pet owners are loyal when they feel their pet is truly known and cared for. Out of curiosity — which part of the client relationship is hardest to keep consistent?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['vaccination reminders and recall management','owner communication and follow-up care instructions','appointment scheduling and no-show patterns'])}.\n\nFor ${categoryLabel(biz)}, pet owners are loyal when they feel their pet is truly known and cared for. Out of curiosity  -  which part of the client relationship is hardest to keep consistent?`,
     airtable_angle: 'pet patient hub connecting patient records, vaccinations, treatments, reminders, owner communication, referrals, and inventory',
     stage2: (biz) => `That makes sense. In veterinary practice, client loyalty is built through consistent communication and a feeling that their pet's history is truly known.\n\nWhere does the coordination pressure show up first?`,
   },
@@ -1050,155 +1050,155 @@ const PLAYBOOK = {
     label: 'Pharmacy & Dispensary',
     thesis: 'prescription management and patient adherence',
     positioning: 'patient adherence and dispensary hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['prescription refill reminders and adherence follow-up','customer communication and wait time management','stock management and supplier coordination'])}.\n\nFor ${categoryLabel(biz)}, patient outcomes depend on adherence — and adherence depends on reminders and follow-up most pharmacies struggle to systematise. Out of curiosity — which part of that is hardest?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['prescription refill reminders and adherence follow-up','customer communication and wait time management','stock management and supplier coordination'])}.\n\nFor ${categoryLabel(biz)}, patient outcomes depend on adherence  -  and adherence depends on reminders and follow-up most pharmacies struggle to systematise. Out of curiosity  -  which part of that is hardest?`,
     airtable_angle: 'patient adherence hub for prescriptions, refill reminders, adherence tracking, stock levels, supplier orders, and customer follow-up',
-    stage2: (biz) => `That makes sense. In pharmacy, the clinical value is often in consistent follow-up on adherence — which requires systems most pharmacies don't have.\n\nWhere does the pressure show up most?`,
+    stage2: (biz) => `That makes sense. In pharmacy, the clinical value is often in consistent follow-up on adherence  -  which requires systems most pharmacies don't have.\n\nWhere does the pressure show up most?`,
   },
   optometry: {
     label: 'Optometry & Eye Care',
     thesis: 'patient recall and eyewear management',
     positioning: 'patient recall and practice hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['patient recall for annual exams','frame and lens order tracking and patient communication','insurance coordination and billing follow-up'])}.\n\nFor ${categoryLabel(biz)}, revenue consistency depends on recall rates — and most practices lose patients simply through lack of follow-up. Out of curiosity — which part of that is hardest to keep consistent?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['patient recall for annual exams','frame and lens order tracking and patient communication','insurance coordination and billing follow-up'])}.\n\nFor ${categoryLabel(biz)}, revenue consistency depends on recall rates  -  and most practices lose patients simply through lack of follow-up. Out of curiosity  -  which part of that is hardest to keep consistent?`,
     airtable_angle: 'patient recall hub connecting exam scheduling, prescriptions, frame orders, insurance, recall campaigns, and referral tracking',
-    stage2: (biz) => `That makes sense. In optometry, annual recall is one of the most reliable revenue streams — and one of the easiest to let slip.\n\nWhere does the coordination pressure come from?`,
+    stage2: (biz) => `That makes sense. In optometry, annual recall is one of the most reliable revenue streams  -  and one of the easiest to let slip.\n\nWhere does the coordination pressure come from?`,
   },
   catering: {
     label: 'Catering & Food Delivery',
     thesis: 'order management and delivery coordination',
     positioning: 'catering operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['order accuracy and menu confirmation workflows','delivery coordination and driver communication','client follow-up and repeat booking rates'])}.\n\nFor ${categoryLabel(biz)}, getting the food right is just the start — coordination around orders, delivery, and follow-up is where the experience is made or broken. Out of curiosity — which part is hardest to keep smooth?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['order accuracy and menu confirmation workflows','delivery coordination and driver communication','client follow-up and repeat booking rates'])}.\n\nFor ${categoryLabel(biz)}, getting the food right is just the start  -  coordination around orders, delivery, and follow-up is where the experience is made or broken. Out of curiosity  -  which part is hardest to keep smooth?`,
     airtable_angle: 'catering operations hub connecting enquiries, menus, orders, prep schedules, drivers, delivery tracking, invoicing, and feedback',
-    stage2: (biz) => `That makes sense. In catering, the visible product is the food — but the hidden work is in coordination that clients never see.\n\nWhere does the pressure usually build first?`,
+    stage2: (biz) => `That makes sense. In catering, the visible product is the food  -  but the hidden work is in coordination that clients never see.\n\nWhere does the pressure usually build first?`,
   },
   landscaping: {
     label: 'Landscaping & Garden Services',
     thesis: 'crew scheduling and client communication',
     positioning: 'landscape operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['crew scheduling and route efficiency','quote follow-up and job approval timelines','seasonal service reminders and client retention'])}.\n\nFor ${categoryLabel(biz)}, the margin is in scheduling efficiency and retention — both require systems most landscapers are managing manually. Out of curiosity — which part is hardest to keep tight?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['crew scheduling and route efficiency','quote follow-up and job approval timelines','seasonal service reminders and client retention'])}.\n\nFor ${categoryLabel(biz)}, the margin is in scheduling efficiency and retention  -  both require systems most landscapers are managing manually. Out of curiosity  -  which part is hardest to keep tight?`,
     airtable_angle: 'landscape operations hub for leads, quotes, crew schedules, job sites, materials, seasonal reminders, invoicing, and client history',
-    stage2: (biz) => `That makes sense. In landscaping, the work quality is visible — but the business health depends on scheduling efficiency and client retention.\n\nWhere does the pressure show up first?`,
+    stage2: (biz) => `That makes sense. In landscaping, the work quality is visible  -  but the business health depends on scheduling efficiency and client retention.\n\nWhere does the pressure show up first?`,
   },
   plumbing: {
     label: 'Plumbing & Drainage',
     thesis: 'job dispatch and customer communication',
     positioning: 'job dispatch and follow-up hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['emergency dispatch and technician availability','estimate follow-up and job approval','parts tracking and invoice accuracy'])}.\n\nFor ${categoryLabel(biz)}, speed is everything — but so is follow-up on estimates and keeping customers informed during the job. Out of curiosity — which part of that is hardest to keep smooth?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['emergency dispatch and technician availability','estimate follow-up and job approval','parts tracking and invoice accuracy'])}.\n\nFor ${categoryLabel(biz)}, speed is everything  -  but so is follow-up on estimates and keeping customers informed during the job. Out of curiosity  -  which part of that is hardest to keep smooth?`,
     airtable_angle: 'job dispatch hub connecting enquiries, technician availability, job cards, parts, estimates, approvals, invoices, and warranty follow-up',
-    stage2: (biz) => `That makes sense. In plumbing, response time is critical — but so is the coordination around estimates, parts, and customer updates.\n\nWhere does the pressure usually come from?`,
+    stage2: (biz) => `That makes sense. In plumbing, response time is critical  -  but so is the coordination around estimates, parts, and customer updates.\n\nWhere does the pressure usually come from?`,
   },
   electrical: {
     label: 'Electrical Services',
     thesis: 'compliance and job management',
     positioning: 'electrical job management hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['job scheduling and crew coordination','compliance documentation and certificate tracking','quote follow-up and customer communication'])}.\n\nFor ${categoryLabel(biz)}, compliance and documentation are non-negotiable — but most electrical businesses are managing them manually. Out of curiosity — which part of that is hardest to keep organised?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['job scheduling and crew coordination','compliance documentation and certificate tracking','quote follow-up and customer communication'])}.\n\nFor ${categoryLabel(biz)}, compliance and documentation are non-negotiable  -  but most electrical businesses are managing them manually. Out of curiosity  -  which part of that is hardest to keep organised?`,
     airtable_angle: 'electrical job hub connecting leads, quotes, permits, crew schedules, job cards, compliance docs, certificates, and invoices',
-    stage2: (biz) => `That makes sense. In electrical, the compliance and documentation layer is as important as the technical work — and it's often the most scattered.\n\nWhere does the pressure show up most?`,
+    stage2: (biz) => `That makes sense. In electrical, the compliance and documentation layer is as important as the technical work  -  and it's often the most scattered.\n\nWhere does the pressure show up most?`,
   },
   printing: {
     label: 'Printing & Signage',
     thesis: 'artwork approval and production tracking',
     positioning: 'print production hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['artwork approval and revision tracking','production queue and deadline management','client communication and collection coordination'])}.\n\nFor ${categoryLabel(biz)}, delays usually come from approval bottlenecks — not production. Out of curiosity — which part of the workflow is hardest to keep moving?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['artwork approval and revision tracking','production queue and deadline management','client communication and collection coordination'])}.\n\nFor ${categoryLabel(biz)}, delays usually come from approval bottlenecks  -  not production. Out of curiosity  -  which part of the workflow is hardest to keep moving?`,
     airtable_angle: 'print production hub connecting enquiries, artwork, approvals, revisions, production queue, delivery, invoicing, and repeat client tracking',
-    stage2: (biz) => `That makes sense. In printing, the technical production is usually fast — it's the approval and communication layer that causes delays.\n\nWhere does it slow down most?`,
+    stage2: (biz) => `That makes sense. In printing, the technical production is usually fast  -  it's the approval and communication layer that causes delays.\n\nWhere does it slow down most?`,
   },
   recruitment: {
     label: 'Recruitment & Staffing',
     thesis: 'candidate pipeline and client delivery',
     positioning: 'candidate and client pipeline hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['candidate pipeline visibility and follow-up','client communication and placement tracking','compliance documentation and onboarding coordination'])}.\n\nFor ${categoryLabel(biz)}, placement speed depends on pipeline visibility and follow-up — both of which are easy to lose track of at volume. Out of curiosity — which part is hardest to manage?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['candidate pipeline visibility and follow-up','client communication and placement tracking','compliance documentation and onboarding coordination'])}.\n\nFor ${categoryLabel(biz)}, placement speed depends on pipeline visibility and follow-up  -  both of which are easy to lose track of at volume. Out of curiosity  -  which part is hardest to manage?`,
     airtable_angle: 'recruitment pipeline hub for candidates, clients, vacancies, interviews, placements, compliance docs, and client relationship tracking',
-    stage2: (biz) => `That makes sense. In recruitment, the pipeline moves fast — and things fall through when there's no central place for candidate and client status.\n\nWhere does the pressure show up most?`,
+    stage2: (biz) => `That makes sense. In recruitment, the pipeline moves fast  -  and things fall through when there's no central place for candidate and client status.\n\nWhere does the pressure show up most?`,
   },
   marketing_agency: {
     label: 'Marketing Agencies',
     thesis: 'client delivery and campaign visibility',
     positioning: 'agency delivery operating system',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['campaign delivery and client reporting','project approvals and revision management','retainer tracking and renewal coordination'])}.\n\nFor ${categoryLabel(biz)}, clients churn when they can't see value — and that requires consistent reporting and communication. Out of curiosity — which part of that is hardest to keep tight?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['campaign delivery and client reporting','project approvals and revision management','retainer tracking and renewal coordination'])}.\n\nFor ${categoryLabel(biz)}, clients churn when they can't see value  -  and that requires consistent reporting and communication. Out of curiosity  -  which part of that is hardest to keep tight?`,
     airtable_angle: 'agency delivery OS connecting clients, campaigns, tasks, assets, approvals, reporting, invoices, and renewal pipeline',
-    stage2: (biz) => `That makes sense. In agencies, delivery quality is only half the equation — clients stay based on how clearly they can see results.\n\nWhere does the coordination pressure come from most?`,
+    stage2: (biz) => `That makes sense. In agencies, delivery quality is only half the equation  -  clients stay based on how clearly they can see results.\n\nWhere does the coordination pressure come from most?`,
   },
   it_services: {
     label: 'IT Services & MSP',
     thesis: 'ticket management and client SLA',
     positioning: 'IT service delivery hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['ticket resolution tracking and SLA compliance','client communication and proactive maintenance updates','contract renewal and asset management'])}.\n\nFor ${categoryLabel(biz)}, clients judge IT partners by response speed and communication — not just technical skill. Out of curiosity — which part of that is hardest to keep consistent?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['ticket resolution tracking and SLA compliance','client communication and proactive maintenance updates','contract renewal and asset management'])}.\n\nFor ${categoryLabel(biz)}, clients judge IT partners by response speed and communication  -  not just technical skill. Out of curiosity  -  which part of that is hardest to keep consistent?`,
     airtable_angle: 'IT service hub connecting clients, contracts, assets, tickets, SLA tracking, maintenance schedules, and renewal pipeline',
-    stage2: (biz) => `That makes sense. In IT services, the technical work is expected — clients notice the communication layer most.\n\nWhere does the coordination pressure show up first?`,
+    stage2: (biz) => `That makes sense. In IT services, the technical work is expected  -  clients notice the communication layer most.\n\nWhere does the coordination pressure show up first?`,
   },
   accounting_small: {
     label: 'Bookkeeping & Small Accounting Firms',
     thesis: 'document management and client deadlines',
     positioning: 'client compliance and deadline hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['document collection and client chasing','deadline tracking and work-in-progress visibility','client onboarding and annual review coordination'])}.\n\nFor ${categoryLabel(biz)}, the pressure isn't the technical work — it's the coordination around it. Out of curiosity — which part takes most of your time?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['document collection and client chasing','deadline tracking and work-in-progress visibility','client onboarding and annual review coordination'])}.\n\nFor ${categoryLabel(biz)}, the pressure isn't the technical work  -  it's the coordination around it. Out of curiosity  -  which part takes most of your time?`,
     airtable_angle: 'client compliance hub for onboarding, document requests, deadline tracking, task assignments, client communication, and billing',
-    stage2: (biz) => `That makes sense. In bookkeeping, the value delivered is clear — but the hidden cost is all the coordination around it.\n\nWhere does it get hardest to manage?`,
+    stage2: (biz) => `That makes sense. In bookkeeping, the value delivered is clear  -  but the hidden cost is all the coordination around it.\n\nWhere does it get hardest to manage?`,
   },
   insurance: {
     label: 'Insurance Brokers & Agents',
     thesis: 'renewal pipeline and client retention',
     positioning: 'policy and renewal management hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['renewal pipeline visibility and early outreach','claims follow-up and client communication','cross-selling and policy review coordination'])}.\n\nFor ${categoryLabel(biz)}, retention is everything — and it depends on reaching clients before renewal, not at it. Out of curiosity — which part of that is hardest to stay ahead of?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['renewal pipeline visibility and early outreach','claims follow-up and client communication','cross-selling and policy review coordination'])}.\n\nFor ${categoryLabel(biz)}, retention is everything  -  and it depends on reaching clients before renewal, not at it. Out of curiosity  -  which part of that is hardest to stay ahead of?`,
     airtable_angle: 'policy hub for clients, policies, renewal dates, claims, follow-up tasks, cross-sell opportunities, and pipeline reporting',
-    stage2: (biz) => `That makes sense. In insurance, the retention battle is won or lost in the 90 days before renewal — and that requires proactive visibility.\n\nWhere does the coordination pressure come from most?`,
+    stage2: (biz) => `That makes sense. In insurance, the retention battle is won or lost in the 90 days before renewal  -  and that requires proactive visibility.\n\nWhere does the coordination pressure come from most?`,
   },
   coaching: {
     label: 'Coaching & Consulting',
     thesis: 'client outcomes and programme delivery',
     positioning: 'client programme and delivery hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['client progress tracking and accountability follow-up','programme delivery and content management','referral generation and testimonial collection'])}.\n\nFor ${categoryLabel(biz)}, results depend on what happens between sessions — and that requires follow-up that's easy to let slip. Out of curiosity — which part is hardest to keep consistent?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['client progress tracking and accountability follow-up','programme delivery and content management','referral generation and testimonial collection'])}.\n\nFor ${categoryLabel(biz)}, results depend on what happens between sessions  -  and that requires follow-up that's easy to let slip. Out of curiosity  -  which part is hardest to keep consistent?`,
     airtable_angle: 'coaching delivery hub connecting leads, intake, sessions, progress notes, homework, milestones, referrals, and programme management',
-    stage2: (biz) => `That makes sense. In coaching, the transformation happens between sessions — and that's where follow-up and accountability make the real difference.\n\nWhere does the coordination pressure show up most?`,
+    stage2: (biz) => `That makes sense. In coaching, the transformation happens between sessions  -  and that's where follow-up and accountability make the real difference.\n\nWhere does the coordination pressure show up most?`,
   },
   clothing: {
     label: 'Fashion & Clothing Retail',
     thesis: 'inventory management and customer experience',
     positioning: 'fashion retail operations hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? ` — ${biz.rating}★` : ''} and noticed something around ${pickSignal(['stock management and reorder coordination','customer communication and returns handling','seasonal planning and supplier coordination'])}.\n\nFor ${categoryLabel(biz)}, selling more creates hidden operational pressure around stock, suppliers, and customer service. Out of curiosity — which part is hardest to stay on top of?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI looked at ${biz.name}${biz.rating ? `  -  ${biz.rating}★` : ''} and noticed something around ${pickSignal(['stock management and reorder coordination','customer communication and returns handling','seasonal planning and supplier coordination'])}.\n\nFor ${categoryLabel(biz)}, selling more creates hidden operational pressure around stock, suppliers, and customer service. Out of curiosity  -  which part is hardest to stay on top of?`,
     airtable_angle: 'fashion retail hub for products, suppliers, stock levels, orders, returns, customer data, promotions, and seasonal planning',
-    stage2: (biz) => `That makes sense. In fashion retail, the customer experience depends on stock accuracy and communication quality — both easy to lose at scale.\n\nWhere does the pressure show up most?`,
+    stage2: (biz) => `That makes sense. In fashion retail, the customer experience depends on stock accuracy and communication quality  -  both easy to lose at scale.\n\nWhere does the pressure show up most?`,
   },
   furniture: {
     label: 'Furniture & Interior Retail',
     thesis: 'order management and delivery coordination',
     positioning: 'furniture order and delivery hub',
-    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['order tracking and delivery communication','supplier coordination and stock availability','customer follow-up after purchase'])}.\n\nFor ${categoryLabel(biz)}, the sale is just the start — delivery and follow-up are where the review is made or broken. Out of curiosity — which part is hardest to manage?`,
+    opener: (biz) => `Hi ${firstName(biz.name)},\n\nI came across ${biz.name}${biz.rating ? ` (${biz.rating}★)` : ''} and noticed something around ${pickSignal(['order tracking and delivery communication','supplier coordination and stock availability','customer follow-up after purchase'])}.\n\nFor ${categoryLabel(biz)}, the sale is just the start  -  delivery and follow-up are where the review is made or broken. Out of curiosity  -  which part is hardest to manage?`,
     airtable_angle: 'furniture order hub for enquiries, orders, supplier tracking, delivery scheduling, installation, and post-purchase follow-up',
-    stage2: (biz) => `That makes sense. In furniture retail, the customer experience extends well beyond the purchase — and that requires coordination most businesses manage manually.\n\nWhere does the pressure come from most?`,
+    stage2: (biz) => `That makes sense. In furniture retail, the customer experience extends well beyond the purchase  -  and that requires coordination most businesses manage manually.\n\nWhere does the pressure come from most?`,
   },
 };
 
 
 const STAGE_MESSAGES = {
   stage3: {
-    curious: `I appreciate you sharing that. Let me ask differently — when that pressure shows up, what does it actually look like day to day? Is it more about information getting lost, people not knowing what to do next, or something else?`,
-    engaged: `That's a useful distinction. In my experience working with similar businesses, that usually comes down to one of two things — either the information is scattered, or the follow-up falls through. Which feels closer to your situation?`,
-    default: `That makes sense. When you think about the last time that caused a real problem — what happened, and what did you wish you'd had in place?`,
+    curious: `I appreciate you sharing that. Let me ask differently  -  when that pressure shows up, what does it actually look like day to day? Is it more about information getting lost, people not knowing what to do next, or something else?`,
+    engaged: `That's a useful distinction. In my experience working with similar businesses, that usually comes down to one of two things  -  either the information is scattered, or the follow-up falls through. Which feels closer to your situation?`,
+    default: `That makes sense. When you think about the last time that caused a real problem  -  what happened, and what did you wish you'd had in place?`,
   },
   stage4: {
     curious: `How often does that actually affect a customer or client relationship? I'm asking because it helps me understand whether this is a daily friction or something that costs you occasionally but significantly.`,
-    engaged: `And when it does cause a problem — what's the cost? I mean that practically: does it result in a lost client, a refund, a team firefight, or something else?`,
-    default: `I want to make sure I understand the impact clearly. When this breaks down — what's the actual cost to the business? Time, money, relationships?`,
+    engaged: `And when it does cause a problem  -  what's the cost? I mean that practically: does it result in a lost client, a refund, a team firefight, or something else?`,
+    default: `I want to make sure I understand the impact clearly. When this breaks down  -  what's the actual cost to the business? Time, money, relationships?`,
   },
   stage5: {
-    curious: `If you had a system where that was handled automatically — where nothing fell through and you had visibility at every stage — what would that free you up to focus on?`,
+    curious: `If you had a system where that was handled automatically  -  where nothing fell through and you had visibility at every stage  -  what would that free you up to focus on?`,
     engaged: `I always find this useful to think about: if this problem was completely solved six months from now, what would be different about how you spend your week?`,
     default: `What does "good" look like here? If this was working perfectly, what would you be able to do that you can't do easily now?`,
   },
   stage6: {
-    curious: `I work with ${categoryLabel ? 'businesses like yours' : 'service businesses'} to build systems in Airtable that make this kind of coordination visible and automatic. Not software you need to train a team on — a simple hub that connects the moving parts you're managing.`,
-    engaged: `The way I usually approach this: rather than adding more tools, we build one central place where your team can see everything — jobs, clients, follow-ups, and status — without chasing each other for updates. Would it be useful to show you what that looks like for your type of business?`,
-    default: `I'd like to share how I've solved this for similar businesses. It's not a software product — it's a custom-built system in Airtable that connects your specific moving parts. Would you be open to a quick look?`,
+    curious: `I work with ${categoryLabel ? 'businesses like yours' : 'service businesses'} to build systems in Airtable that make this kind of coordination visible and automatic. Not software you need to train a team on  -  a simple hub that connects the moving parts you're managing.`,
+    engaged: `The way I usually approach this: rather than adding more tools, we build one central place where your team can see everything  -  jobs, clients, follow-ups, and status  -  without chasing each other for updates. Would it be useful to show you what that looks like for your type of business?`,
+    default: `I'd like to share how I've solved this for similar businesses. It's not a software product  -  it's a custom-built system in Airtable that connects your specific moving parts. Would you be open to a quick look?`,
   },
   stage7: {
-    curious: `I use Airtable because it's flexible enough to match how your business actually works — not a generic tool you have to adapt to. Most of my clients say the biggest change is that they stop losing things between people and between steps.`,
-    engaged: `The reason I build these in Airtable specifically is that it can be shaped around your exact workflow. You don't change how you work — the system adapts to you. It also means your team can actually use it without weeks of training.`,
-    default: `Airtable is the platform I use because it's powerful enough to handle complex workflows but simple enough for a whole team to use without friction. I'd build it around how you already work — not force you into a template.`,
+    curious: `I use Airtable because it's flexible enough to match how your business actually works  -  not a generic tool you have to adapt to. Most of my clients say the biggest change is that they stop losing things between people and between steps.`,
+    engaged: `The reason I build these in Airtable specifically is that it can be shaped around your exact workflow. You don't change how you work  -  the system adapts to you. It also means your team can actually use it without weeks of training.`,
+    default: `Airtable is the platform I use because it's powerful enough to handle complex workflows but simple enough for a whole team to use without friction. I'd build it around how you already work  -  not force you into a template.`,
   },
   stage8: {
-    curious: `Before I go further — can I ask a few quick questions? How many people are on your team? And right now, where does most of the coordination information actually live — is it in someone's head, a WhatsApp group, a spreadsheet, or something else?`,
+    curious: `Before I go further  -  can I ask a few quick questions? How many people are on your team? And right now, where does most of the coordination information actually live  -  is it in someone's head, a WhatsApp group, a spreadsheet, or something else?`,
     engaged: `I want to make sure I'm building you something that actually fits. Quick question: how does your team currently track ${pickSignal ? 'jobs and follow-ups' : 'work and clients'}? And what breaks down most often?`,
-    default: `To make sure I suggest the right structure — can I ask: how big is your team, and what's the main thing you're currently using to track work and clients? Even if it's just WhatsApp or a notebook — I want to start from where you actually are.`,
+    default: `To make sure I suggest the right structure  -  can I ask: how big is your team, and what's the main thing you're currently using to track work and clients? Even if it's just WhatsApp or a notebook  -  I want to start from where you actually are.`,
   },
   stage9: {
     curious: `Based on what you've shared, here's what I'd build: a central hub that handles [specific pain from their replies]. It would connect your [key workflow elements] so nothing falls through. I can have a first version ready within a week of us starting. Does that sound like something worth exploring?`,
@@ -1206,20 +1206,20 @@ const STAGE_MESSAGES = {
     default: `I have a clear enough picture now to suggest a structure. It would be a central hub for [their main pain], built in Airtable, that your team can use immediately. I'd build it in stages so you see value within the first week. Would you like me to put together a simple proposal?`,
   },
   stage10: {
-    curious: `Here's what I'm proposing: a custom Airtable system built around your specific workflow — [pain area addressed], [key feature], and [outcome]. I handle the full build. You get a walkthrough, and your team is up and running within a week. My rate for this is [your rate]. Shall we book a quick call to confirm the details?`,
+    curious: `Here's what I'm proposing: a custom Airtable system built around your specific workflow  -  [pain area addressed], [key feature], and [outcome]. I handle the full build. You get a walkthrough, and your team is up and running within a week. My rate for this is [your rate]. Shall we book a quick call to confirm the details?`,
     engaged: `To summarise: I'd build you a [industry] operations hub in Airtable that solves [their main pain] and gives your team a single place to [key benefit]. Full build, walkthrough included. I usually work on a fixed project fee. Want me to send a simple one-page proposal?`,
-    default: `Based on everything we've discussed — I'd build a custom Airtable system that gives you [key benefit], eliminates [their main pain], and gets your team coordinated without adding more tools. I can send a simple proposal today if you'd like to move forward. What's the best way to do that?`,
+    default: `Based on everything we've discussed  -  I'd build a custom Airtable system that gives you [key benefit], eliminates [their main pain], and gets your team coordinated without adding more tools. I can send a simple proposal today if you'd like to move forward. What's the best way to do that?`,
   },
 };
 
-// Rule-based reply classifier — no AI needed
+// Rule-based reply classifier  -  no AI needed
 const REPLY_SIGNALS = {
-  interested: ['interested', 'yes', 'sure', 'tell me more', 'sounds good', 'love to', 'would like', 'let's talk', 'book', 'call', 'meeting', 'when', 'how much', 'price', 'cost', 'fee', 'what does it cost', 'how does it work', 'more info', 'send me', 'i'd like', 'happy to', 'open to', 'absolutely', 'definitely', 'great idea', 'good point'],
+  interested: ['interested', 'yes', 'sure', 'tell me more', 'sounds good', 'love to', 'would like', "let's talk", 'book', 'call', 'meeting', 'when', 'how much', 'price', 'cost', 'fee', 'what does it cost', 'how does it work', 'more info', 'send me', "i'd like", 'happy to', 'open to', 'absolutely', 'definitely', 'great idea', 'good point'],
   busy: ['busy', 'not right now', 'later', 'bad time', 'hectic', 'swamped', 'tied up', 'another time', 'maybe later', 'next month', 'next quarter', 'come back', 'reach out again', 'in a few'],
-  has_system: ['already have', 'we use', 'we have', 'got something', 'using software', 'we're sorted', 'sorted', 'covered', 'system in place', 'already sorted', 'working with someone'],
-  not_interested: ['not interested', 'no thank you', 'no thanks', 'unsubscribe', 'remove me', 'stop emailing', 'please don't', 'don't contact', 'not for us', 'doesn't apply', 'not relevant'],
+  has_system: ['already have', 'we use', 'we have', 'got something', 'using software', "we're sorted", 'sorted', 'covered', 'system in place', 'already sorted', 'working with someone'],
+  not_interested: ['not interested', 'no thank you', 'no thanks', 'unsubscribe', 'remove me', 'stop emailing', "please don't", "don't contact", 'not for us', "doesn't apply", 'not relevant'],
   question: ['?', 'what is', 'what does', 'how does', 'can you explain', 'tell me about', 'what exactly', 'how would', 'what would'],
-  pain_confirmed: ['yes that's', 'you're right', 'exactly', 'that's us', 'that's exactly', 'spot on', 'nailed it', 'you hit', 'true', 'that is a problem', 'struggle with', 'been meaning to', 'been trying'],
+  pain_confirmed: ["yes that's", "you're right", 'exactly', "that's us", "that's exactly", 'spot on', 'nailed it', 'you hit', 'true', 'that is a problem', 'struggle with', 'been meaning to', 'been trying'],
 };
 
 function classifyReply(replyText) {
@@ -1241,13 +1241,13 @@ function suggestResponseNoAI(biz, replyText) {
 
   // Response based on classification
   const responses = {
-    interested: `Hi ${name},\n\nGreat to hear from you. ${STAGE_MESSAGES.stage6.engaged}\n\nWould a quick 15-minute call this week work for you?\n\n— ${senderName}`,
-    busy: `Hi ${name},\n\nNo problem at all — I completely understand.\n\nWould it be okay if I reached back out in a few weeks? And just out of curiosity — when things settle down, is this something you'd want to look at?\n\n— ${senderName}`,
-    has_system: `Hi ${name},\n\nThat's good to know. I'm not looking to replace what's working — if anything, I might be able to show you how to get more out of what you already have, or fill a specific gap.\n\nWhat does your current setup handle well, and where does it still feel manual or scattered?\n\n— ${senderName}`,
-    not_interested: `Hi ${name},\n\nNo problem at all — I appreciate you taking the time to reply.\n\nI won't reach out again. All the best with ${biz.name}.\n\n— ${senderName}`,
-    question: `Hi ${name},\n\n${STAGE_MESSAGES.stage7.engaged}\n\nHappy to answer any specific questions too — what would be most useful to know?\n\n— ${senderName}`,
-    pain_confirmed: `Hi ${name},\n\n${STAGE_MESSAGES.stage4.engaged}\n\n${STAGE_MESSAGES.stage5.curious}\n\n— ${senderName}`,
-    default: `Hi ${name},\n\n${STAGE_MESSAGES['stage' + Math.min(stageIdx + 1, 10)]?.default || STAGE_MESSAGES.stage3.default}\n\n— ${senderName}`,
+    interested: `Hi ${name},\n\nGreat to hear from you. ${STAGE_MESSAGES.stage6.engaged}\n\nWould a quick 15-minute call this week work for you?\n\n -  ${senderName}`,
+    busy: `Hi ${name},\n\nNo problem at all  -  I completely understand.\n\nWould it be okay if I reached back out in a few weeks? And just out of curiosity  -  when things settle down, is this something you'd want to look at?\n\n -  ${senderName}`,
+    has_system: `Hi ${name},\n\nThat's good to know. I'm not looking to replace what's working  -  if anything, I might be able to show you how to get more out of what you already have, or fill a specific gap.\n\nWhat does your current setup handle well, and where does it still feel manual or scattered?\n\n -  ${senderName}`,
+    not_interested: `Hi ${name},\n\nNo problem at all  -  I appreciate you taking the time to reply.\n\nI won't reach out again. All the best with ${biz.name}.\n\n -  ${senderName}`,
+    question: `Hi ${name},\n\n${STAGE_MESSAGES.stage7.engaged}\n\nHappy to answer any specific questions too  -  what would be most useful to know?\n\n -  ${senderName}`,
+    pain_confirmed: `Hi ${name},\n\n${STAGE_MESSAGES.stage4.engaged}\n\n${STAGE_MESSAGES.stage5.curious}\n\n -  ${senderName}`,
+    default: `Hi ${name},\n\n${STAGE_MESSAGES['stage' + Math.min(stageIdx + 1, 10)]?.default || STAGE_MESSAGES.stage3.default}\n\n -  ${senderName}`,
   };
 
   return responses[classification] || responses.default;
@@ -1303,9 +1303,9 @@ function detectIndustry(bizName, profileLink) {
   return 'general';
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // DATA STORE
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 let businesses = JSON.parse(localStorage.getItem('sv13_businesses') || '[]');
 let settings = JSON.parse(localStorage.getItem('sv13_settings') || '{}');
 // Set defaults for new users
@@ -1318,7 +1318,7 @@ let tlFilter = 'today';
 let pendingUploadData = [];
 let autoScoutStats = { done: 0, found: 0 };
 let isPaused = false;
-let batchApprovals = {}; // id → {approved, skipped, message}
+let batchApprovals = {}; // id -> {approved, skipped, message}
 
 function save() { localStorage.setItem('sv13_businesses', JSON.stringify(businesses)); }
 function saveSetting(k, v) { settings[k] = v; localStorage.setItem('sv13_settings', JSON.stringify(settings)); }
@@ -1334,9 +1334,9 @@ function updateBiz(id, changes) {
   save();
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // EXTENSION BRIDGE
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 let extAvailable = false;
 
 function sendToExt(data) {
@@ -1384,11 +1384,11 @@ window.addEventListener('ElevateScout', (e) => {
     autoScoutStats.done++;
     if (hasEmail) {
       autoScoutStats.found++;
-      addLog('ok', `${biz.name} — found ${email}`);
+      addLog('ok', `${biz.name}  -  found ${email}`);
       // Auto-generate message
       generateMessage(msg.id);
     } else {
-      addLog('warn', `${biz.name} — no email found`);
+      addLog('warn', `${biz.name}  -  no email found`);
     }
 
     updateAutoScoutUI(msg.index + 1, msg.total);
@@ -1398,7 +1398,7 @@ window.addEventListener('ElevateScout', (e) => {
   }
 
   if (msg.type === 'SCOUT_COMPLETE') {
-    addLog('ok', `Auto-Scout complete — ${msg.total} processed, ${autoScoutStats.found} emails found`);
+    addLog('ok', `Auto-Scout complete  -  ${msg.total} processed, ${autoScoutStats.found} emails found`);
     document.getElementById('scout-status-bar').classList.remove('active');
     document.getElementById('as-start-btn').style.display = '';
     document.getElementById('as-pause-btn').style.display = 'none';
@@ -1435,13 +1435,13 @@ function updateExtStatus(connected) {
     el.innerHTML = '<div class="ext-dot"></div> Elevate Scout extension connected ✓';
   } else {
     el.className = 'ext-status ext-disconnected';
-    el.innerHTML = '<div class="ext-dot"></div> Extension not detected — install from chrome://extensions or auto-scout will use backend server only';
+    el.innerHTML = '<div class="ext-dot"></div> Extension not detected  -  install from chrome://extensions or auto-scout will use backend server only';
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // AI MESSAGE GENERATION
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 async function generateMessage(bizId, stageIdx = 0) {
   const biz = getBiz(bizId);
   if (!biz) return null;
@@ -1450,10 +1450,10 @@ async function generateMessage(bizId, stageIdx = 0) {
   const playbook = PLAYBOOK[industry] || PLAYBOOK.general;
   const senderName = settings.senderName || 'Damodola';
 
-  // Stage 1 (opener) — use playbook template first
+  // Stage 1 (opener)  -  use playbook template first
   if (stageIdx === 0) {
     const template = playbook.opener(biz);
-    const msg = template + `\n\n— ${senderName}`;
+    const msg = template + `\n\n -  ${senderName}`;
 
     // If Claude key available, enhance it
     const claudeKey = settings.claudeKey;
@@ -1475,7 +1475,7 @@ async function generateMessage(bizId, stageIdx = 0) {
     return msg;
   }
 
-  // Stage 2+ — generate with Claude if available
+  // Stage 2+  -  generate with Claude if available
   const claudeKey = settings.claudeKey;
   if (!claudeKey) {
     const fallback = buildStageFallback(biz, stageIdx, playbook, senderName);
@@ -1521,7 +1521,7 @@ function buildEnhancePrompt(biz, template, industry, playbook, senderName) {
   const painCtx = buildPainContext(biz);
   const painSection = painCtx ? `\nINTELLIGENCE FROM THEIR REVIEWS:${painCtx}` : '';
   const taskLine = painCtx
-    ? '- Weave in ONE specific pain signal naturally — do NOT say "I saw your reviews" or "I noticed your rating"'
+    ? '- Weave in ONE specific pain signal naturally  -  do NOT say "I saw your reviews" or "I noticed your rating"'
     : '- Reference their likely situation based on their industry and rating';
   return `You are helping personalize a cold outreach message for a business called "${biz.name}".
 
@@ -1566,7 +1566,7 @@ Sender name: ${senderName}
 
 Previous context: The prospect is in a ${playbook.label} business. The goal is to guide them from cold unfamiliarity to self-discovered pain, then to Airtable as the solution.
 
-Write a natural, professional, specific message for stage ${stageIdx + 1}. Do not be generic. Reference the industry specifically. End with "— ${senderName}".
+Write a natural, professional, specific message for stage ${stageIdx + 1}. Do not be generic. Reference the industry specifically. End with " -  ${senderName}".
 
 Return ONLY the message text. No explanation.`;
 }
@@ -1577,14 +1577,14 @@ function buildStageFallback(biz, stageIdx, playbook, senderName) {
     playbook.stage2 ? playbook.stage2(biz) : `That makes sense. Could you tell me more about how that typically plays out in a normal week?`,
     `If I followed one client or job from first inquiry to final follow-up at ${biz.name}, where would I see the most checking, chasing, or switching between tools?`,
     `How often does that happen in a normal week? Does it mainly cost time, create confusion, or delay revenue?`,
-    `If this ran the way you wanted it to, what would you be able to see instantly — without asking anyone for an update?`,
+    `If this ran the way you wanted it to, what would you be able to see instantly  -  without asking anyone for an update?`,
     `The pattern I'm hearing is that ${biz.name} already has the right people and information. The issue is that it's spread across different places instead of one connected view.`,
-    `This is where I'd usually suggest Airtable — not as another tool, but as the ${playbook.airtable_angle}. The value is visibility, accountability, and fewer things falling through the cracks.`,
-    `Would it be useful if I mapped a simple first version for ${biz.name} — showing the tables, views, and automations I'd build around your highest-friction workflow?`,
-    `If we built this properly, who would need access — owner, manager, operations lead, admin? And what three things would make it obviously worth it after 30 days?`,
+    `This is where I'd usually suggest Airtable  -  not as another tool, but as the ${playbook.airtable_angle}. The value is visibility, accountability, and fewer things falling through the cracks.`,
+    `Would it be useful if I mapped a simple first version for ${biz.name}  -  showing the tables, views, and automations I'd build around your highest-friction workflow?`,
+    `If we built this properly, who would need access  -  owner, manager, operations lead, admin? And what three things would make it obviously worth it after 30 days?`,
     `Based on what we've discussed, I'd start with the highest-friction workflow, build the core base, add the dashboard and automations, then document the handoff. Would you like me to put that into a clear proposal?`,
   ];
-  return (fallbacks[stageIdx] || fallbacks[0]) + `\n\n— ${senderName}`;
+  return (fallbacks[stageIdx] || fallbacks[0]) + `\n\n -  ${senderName}`;
 }
 
 async function callClaude(apiKey, prompt) {
@@ -1633,12 +1633,12 @@ function scoreMessage(msg, biz) {
   return { score: Math.min(100, score), checks };
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // QUEUE
-// ═══════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
+// ---------------------------------------------------------------
 // REVIEW READING + PAIN SCORING
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 
 function scoreBusiness(biz, reviews) {
   const signals = [];
@@ -1646,16 +1646,16 @@ function scoreBusiness(biz, reviews) {
 
   // Rating signals
   const rating = parseFloat(biz.rating) || 0;
-  if (rating > 0 && rating < 3) { score += 3; signals.push('Very low rating — major pain'); }
+  if (rating > 0 && rating < 3) { score += 3; signals.push('Very low rating  -  major pain'); }
   else if (rating >= 3 && rating < 4) { score += 2; signals.push('Below average rating'); }
   else if (rating >= 4) { score -= 1; signals.push('Good rating'); }
 
-  // Review count — more reviews = more established = better prospect
+  // Review count  -  more reviews = more established = better prospect
   const reviewCount = parseInt(biz.reviews) || 0;
-  if (reviewCount > 200) { score += 1; signals.push('High review volume — established business'); }
+  if (reviewCount > 200) { score += 1; signals.push('High review volume  -  established business'); }
   if (reviewCount > 50 && reviewCount <= 200) { score += 0.5; }
 
-  // Review text analysis — look for operational pain signals
+  // Review text analysis  -  look for operational pain signals
   const PAIN_PATTERNS = [
     { pattern: /wait(ing)?|slow|took (too )?long|forever|delayed|late/gi, signal: 'Wait time complaints', points: 2 },
     { pattern: /disorganiz|chaotic|confus|mess|unprofessional/gi, signal: 'Organisation issues', points: 2 },
@@ -1725,7 +1725,7 @@ function renderFollowUpBanner() {
   }
   if (due.length > 0) {
     banner.style.display = 'flex';
-    banner.innerHTML = `<span style="font-size:16px">⏰</span><div style="flex:1"><div style="font-size:12px;font-weight:700;color:var(--amber)">Follow-up Due: ${due.length} business${due.length > 1 ? 'es' : ''}</div><div style="font-size:11px;color:var(--muted)">No reply after 24h — click to view</div></div><span style="font-size:11px;color:var(--amber)">View →</span>`;
+    banner.innerHTML = `<span style="font-size:16px">⏰</span><div style="flex:1"><div style="font-size:12px;font-weight:700;color:var(--amber)">Follow-up Due: ${due.length} business${due.length > 1 ? 'es' : ''}</div><div style="font-size:11px;color:var(--muted)">No reply after 24h  -  click to view</div></div><span style="font-size:11px;color:var(--amber)">View -></span>`;
   } else {
     banner.style.display = 'none';
   }
@@ -1807,9 +1807,9 @@ function selectBiz(id) {
   renderDetail();
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // BUSINESS DETAIL
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 function cleanBizName(name) {
   if (!name) return '';
   // Remove common Google Maps title patterns: "Name | Category in City | Category in City"
@@ -1878,7 +1878,7 @@ function renderDetail() {
           </div>
           ${biz.emails?.length > 1 ? `<div style="font-size:11px;color:var(--muted)">Also: ${biz.emails.slice(1).map(e=>esc(e)).join(', ')}</div>` : ''}
           ${biz.phones?.length ? `<div style="font-size:11px;color:var(--muted)">📞 ${biz.phones.join(' · ')}</div>` : ''}
-        ` : `<div style="font-size:12px;color:var(--muted)">No email found yet${biz.status === 'no_email' ? '' : ' — run Auto-Scout or find manually'}</div>`}
+        ` : `<div style="font-size:12px;color:var(--muted)">No email found yet${biz.status === 'no_email' ? '' : '  -  run Auto-Scout or find manually'}</div>`}
         <div class="email-find-row" style="margin-top:4px">
           <input type="text" class="website-input" id="website-input-${biz.id}" placeholder="Website URL…" value="${esc(biz.website || '')}">
           <button class="topbar-btn primary" onclick="findEmailManual('${biz.id}')">🔍 Find Email</button>
@@ -1928,7 +1928,7 @@ function renderDetail() {
         ${getCustomTemplates().length === 0
           ? `<div style="text-align:center;padding:16px;color:var(--muted);font-size:12px">
                No custom messages yet.<br>
-               <button class="topbar-btn" onclick="showContentTab('settings-content',document.getElementById('tab-settings'));setTimeout(()=>document.getElementById('custom-msg-section')?.scrollIntoView({behavior:'smooth'}),300)" style="margin-top:8px">Go to Settings → Add Messages</button>
+               <button class="topbar-btn" onclick="showContentTab('settings-content',document.getElementById('tab-settings'));setTimeout(()=>document.getElementById('custom-msg-section')?.scrollIntoView({behavior:'smooth'}),300)" style="margin-top:8px">Go to Settings -> Add Messages</button>
              </div>`
           : `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">
                Shortcodes: <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{name}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{rating}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{reviews}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{location}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{industry}</code>
@@ -2132,7 +2132,7 @@ function deleteNoEmail() {
 function saveReply(bizId, text) {
   updateBiz(bizId, { theirReply: text, status: text ? 'replied' : 'contacted', repliedAt: text ? now() : null });
   renderDetail(bizId); renderQueue();
-  if (text) toast('Reply saved — click Suggest Next Response for AI suggestion', 'ok');
+  if (text) toast('Reply saved  -  click Suggest Next Response for AI suggestion', 'ok');
   updateDailyReportStats();
 }
 
@@ -2173,7 +2173,7 @@ Reply with ONLY the message text.`;
       response = suggestResponseNoAI(biz, biz.theirReply);
     }
   } else {
-    // No Claude API — use rule-based classifier
+    // No Claude API  -  use rule-based classifier
     response = suggestResponseNoAI(biz, biz.theirReply);
   }
 
@@ -2181,7 +2181,7 @@ Reply with ONLY the message text.`;
   updateBiz(bizId, { suggestedResponse: response, replyClassification: classification });
   renderDetail(bizId);
   if (btn) { btn.textContent = '🤖 Suggest Next Response'; btn.disabled = false; }
-  toast(`Reply classified as: ${classification} — response suggested`, 'ok');
+  toast(`Reply classified as: ${classification}  -  response suggested`, 'ok');
 }
 
 function useAsFollowUp(bizId) {
@@ -2228,9 +2228,9 @@ function markClosed(bizId) {
   toast('Closed', 'ok');
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // UPLOAD
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 function handleDrop(e) {
   e.preventDefault();
   document.getElementById('upload-zone').classList.remove('drag');
@@ -2341,7 +2341,7 @@ async function confirmUpload() {
     // Block if already scouted by anyone (backend dedup)
     if (placeId && scoutedIds[placeId]?.contacted) {
       alreadyScouted++;
-      return; // hard block — never enters queue
+      return; // hard block  -  never enters queue
     }
 
     const existing = businesses.find(b =>
@@ -2390,14 +2390,14 @@ async function confirmUpload() {
   renderQueue();
   updateAsStats();
   updateBatchBtn();
-  const msg = `Imported: ${added} added${updated ? ', ' + updated + ' updated' : ''}${skipped ? ', ' + skipped + ' skipped' : ''}${alreadyScouted ? ` — ⚠️ ${alreadyScouted} blocked (already scouted by your team)` : ''}`;
+  const msg = `Imported: ${added} added${updated ? ', ' + updated + ' updated' : ''}${skipped ? ', ' + skipped + ' skipped' : ''}${alreadyScouted ? `  -  ⚠️ ${alreadyScouted} blocked (already scouted by your team)` : ''}`;
   toast(msg, alreadyScouted ? 'warn' : 'ok');
   showContentTab('detail', document.getElementById('tab-detail'));
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // AUTO-SCOUT
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 async function startAutoScout() {
   const pending = businesses.filter(b => b.status === 'pending' || b.status === 'no_email');
   if (!pending.length) { toast('No pending businesses to scout', 'err'); return; }
@@ -2422,11 +2422,11 @@ async function startAutoScout() {
 
   if (extAvailable) {
     // Use extension
-    addLog('info', `Starting auto-scout via extension — ${queue.length} businesses`);
+    addLog('info', `Starting auto-scout via extension  -  ${queue.length} businesses`);
     await sendToExt({ type: 'START_AUTO_SCOUT', businesses: queue });
   } else if (settings.backendUrl) {
     // Use backend directly from page
-    addLog('info', `Starting auto-scout via backend server — ${queue.length} businesses`);
+    addLog('info', `Starting auto-scout via backend server  -  ${queue.length} businesses`);
     runAutoScoutViaBackend(queue);
   } else {
     toast('No extension or backend server available. Set up one first.', 'err');
@@ -2476,12 +2476,12 @@ async function enrichAllFromMaps() {
             update.emails = r.emails;
             update.status = 'found';
             emailsFound++;
-            addLog('ok', `${r.business_name} — ${r.emails[0]}`);
+            addLog('ok', `${r.business_name}  -  ${r.emails[0]}`);
             generateMessage(r.id);
           } else if (r.website) {
-            addLog('info', `${r.business_name} — website found: ${r.website}`);
+            addLog('info', `${r.business_name}  -  website found: ${r.website}`);
           } else if (r.error) {
-            addLog('warn', `${r.business_name} — ${r.error}`);
+            addLog('warn', `${r.business_name}  -  ${r.error}`);
           }
           if (Object.keys(update).length) updateBiz(r.id, update);
           enriched++;
@@ -2496,14 +2496,14 @@ async function enrichAllFromMaps() {
     await new Promise(r => setTimeout(r, 600));
   }
 
-  toast(`Enrichment complete — ${emailsFound} emails found from ${enriched} businesses`, 'ok');
+  toast(`Enrichment complete  -  ${emailsFound} emails found from ${enriched} businesses`, 'ok');
   addLog('ok', `Maps enrichment done: ${emailsFound} emails, ${enriched} businesses processed`);
   renderQueue();
 }
 
 function extractDomainFromProfile(profileLink) {
   // Can't extract a website from a Google Maps link automatically
-  // Return null — the backend will handle what it can
+  // Return null  -  the backend will handle what it can
   return null;
 }
 
@@ -2531,7 +2531,7 @@ async function runAutoScoutViaBackend(queue) {
               reviewSample: reviewData.reviews.slice(0, 5),
               reviewCount: reviewData.reviews.length,
             });
-            addLog('info', `${biz.name} — ${reviewData.reviews.length} reviews read, score: ${score.score}/10`);
+            addLog('info', `${biz.name}  -  ${reviewData.reviews.length} reviews read, score: ${score.score}/10`);
           }
         } catch(e) { /* extension not available for review reading */ }
       }
@@ -2576,20 +2576,20 @@ async function runAutoScoutViaBackend(queue) {
         autoScoutStats.done++;
         if (email) {
           autoScoutStats.found++;
-          addLog('ok', `${biz.name} — ${email}${biz.painSignals?.length ? ` · ${biz.painSignals.length} pain signals` : ''}`);
+          addLog('ok', `${biz.name}  -  ${email}${biz.painSignals?.length ? ` · ${biz.painSignals.length} pain signals` : ''}`);
           await generateMessage(biz.id);
         } else {
-          addLog('warn', `${biz.name} — no email found`);
+          addLog('warn', `${biz.name}  -  no email found`);
         }
       } else {
         updateBiz(biz.id, { status: 'no_email' });
-        addLog('warn', `${biz.name} — no website or place_id to use`);
+        addLog('warn', `${biz.name}  -  no website or place_id to use`);
         autoScoutStats.done++;
       }
     } catch {
       updateBiz(biz.id, { status: 'no_email' });
       autoScoutStats.done++;
-      addLog('err', `${biz.name} — error`);
+      addLog('err', `${biz.name}  -  error`);
     }
 
     updateAsStats();
@@ -2601,7 +2601,7 @@ async function runAutoScoutViaBackend(queue) {
   document.getElementById('as-start-btn').style.display = '';
   document.getElementById('as-pause-btn').style.display = 'none';
   document.getElementById('as-stop-btn').style.display = 'none';
-  toast(`Auto-Scout complete — ${autoScoutStats.found} emails found`, 'ok');
+  toast(`Auto-Scout complete  -  ${autoScoutStats.found} emails found`, 'ok');
   updateBatchBtn();
   renderQueue();
 }
@@ -2659,9 +2659,9 @@ function addLog(type, msg) {
   while (log.children.length > 100) log.removeChild(log.firstChild);
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // BATCH APPROVE
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 function addToBatch(bizId) {
   const biz = getBiz(bizId);
   if (!biz || !biz.generatedMessage) { toast('Generate a message first', 'err'); return; }
@@ -2726,7 +2726,7 @@ function renderBatch() {
           ${entry.skipped ? 'Unskip' : 'Skip'}
         </button>
         ${biz.email ? `<button class="batch-open-btn" onclick="openGmailFromBatch('${bizId}')">📧 Preview Gmail</button>` : ''}
-        <button class="batch-open-btn" onclick="selectBiz('${bizId}')">Open →</button>
+        <button class="batch-open-btn" onclick="selectBiz('${bizId}')">Open -></button>
         <button class="batch-open-btn" style="color:var(--red)" onclick="removeBatch('${bizId}')">✕</button>
       </div>
     </div>`;
@@ -2791,7 +2791,7 @@ let sendQueueRunning = false;
 
 async function sendApproved() {
   const approved = Object.entries(batchApprovals).filter(([,v]) => v.approved && !v.skipped);
-  if (!approved.length) { toast('No approved messages — tick the checkboxes first', 'err'); return; }
+  if (!approved.length) { toast('No approved messages  -  tick the checkboxes first', 'err'); return; }
   // Note: if a source filter is active, batch approve only shows filtered results
   // so sendApproved naturally only sends to that filtered set
 
@@ -2820,7 +2820,7 @@ function showSendProgress() {
   const el = document.getElementById('send-progress-bar');
   if (el) {
     el.style.display = 'flex';
-    document.getElementById('send-progress-text').textContent = `Sending ${sendQueueIndex} / ${sendQueue.length} — ${remaining} remaining`;
+    document.getElementById('send-progress-text').textContent = `Sending ${sendQueueIndex} / ${sendQueue.length}  -  ${remaining} remaining`;
     document.getElementById('send-progress-fill').style.width = `${(sendQueueIndex / sendQueue.length) * 100}%`;
   }
 }
@@ -2848,7 +2848,7 @@ async function processNextSend() {
         delete batchApprovals[bizId];
         sendQueueIndex++;
         showSendProgress(); renderQueue();
-        toast('⚠️ ' + cleanBizName(biz.name) + ' already contacted by team — skipped', 'warn');
+        toast('⚠️ ' + cleanBizName(biz.name) + ' already contacted by team  -  skipped', 'warn');
         setTimeout(() => processNextSend(), 400);
         return;
       }
@@ -2857,13 +2857,13 @@ async function processNextSend() {
   // Build mailto URL
   const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(biz.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
-  // Open in SAME window (avoids popup blocker) — user sends manually
+  // Open in SAME window (avoids popup blocker)  -  user sends manually
   // OR open in new tab if first one
-  // Always open in a new tab — user must allow popups once for this site
+  // Always open in a new tab  -  user must allow popups once for this site
   // After first open, subsequent opens reuse the Gmail tab if still open
   const win = window.open(url, '_blank');
   if (!win) {
-    // Popup blocked — fallback: create a link and auto-click it
+    // Popup blocked  -  fallback: create a link and auto-click it
     const a = document.createElement('a');
     a.href = url; a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -2882,12 +2882,12 @@ async function processNextSend() {
   showSendProgress();
   renderQueue();
 
-  // Show "Next" button in progress bar — user controls the pace
+  // Show "Next" button in progress bar  -  user controls the pace
   const nextBtn = document.getElementById('send-next-btn');
   if (nextBtn) {
     nextBtn.style.display = '';
     nextBtn.textContent = sendQueueIndex < sendQueue.length
-      ? `Next: ${sendQueue[sendQueueIndex]?.biz?.name || ''} →`
+      ? `Next: ${sendQueue[sendQueueIndex]?.biz?.name || ''} ->`
       : '✓ All Done';
   }
 
@@ -2909,7 +2909,7 @@ function finishSendQueue() {
   const sent = sendQueueIndex;
   const el = document.getElementById('send-progress-bar');
   if (el) {
-    document.getElementById('send-progress-text').textContent = `✓ Done — ${sent} emails opened`;
+    document.getElementById('send-progress-text').textContent = `✓ Done  -  ${sent} emails opened`;
     document.getElementById('send-progress-fill').style.width = '100%';
     const nextBtn = document.getElementById('send-next-btn');
     if (nextBtn) nextBtn.style.display = 'none';
@@ -2928,9 +2928,9 @@ function stopSendQueue() {
   toast('Send queue stopped', 'warn');
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // TIMELINE
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 function setTlFilter(f, el) {
   tlFilter = f;
   document.querySelectorAll('.tl-chip').forEach(e => e.classList.remove('active'));
@@ -3011,9 +3011,9 @@ function handleJsonImport(e) {
   reader.readAsText(file);
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // SETTINGS
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 function saveClaudeKey() {
   const key = document.getElementById('claude-key-input').value.trim();
   saveSetting('claudeKey', key);
@@ -3054,7 +3054,7 @@ function saveGmailAccounts() {
   saveSetting('gmailAccounts', val);
   const accounts = val.split('\n').map(a => a.trim()).filter(Boolean);
   const statusEl = document.getElementById('gmail-rotation-status');
-  if (statusEl) statusEl.textContent = `✓ ${accounts.length} account${accounts.length !== 1 ? 's' : ''} saved — rotation active`;
+  if (statusEl) statusEl.textContent = `✓ ${accounts.length} account${accounts.length !== 1 ? 's' : ''} saved  -  rotation active`;
   toast(`${accounts.length} Gmail accounts saved`, 'ok');
   showGmailRotationStatus();
 }
@@ -3097,7 +3097,7 @@ function updateDailyReportStats() {
       <span style="color:var(--muted)">Emails sent:</span><strong>${contacted.length}</strong>
       <span style="color:var(--muted)">Replies today:</span><strong>${replied.length}</strong>
       <span style="color:var(--muted)">Follow-ups sent:</span><strong>${followUps.length}</strong>
-      <span style="color:var(--muted)">Industries:</span><strong>${industries.join(', ') || '—'}</strong>
+      <span style="color:var(--muted)">Industries:</span><strong>${industries.join(', ') || ' - '}</strong>
     </div>
     <div style="margin-top:6px;font-size:11px;color:var(--muted)">Date: ${today}</div>
   `;
@@ -3190,9 +3190,9 @@ function clearAll() {
   toast('All data cleared');
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // TAB NAVIGATION
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 function showContentTab(id, el) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
@@ -3210,9 +3210,9 @@ function showTab(name) {
   showContentTab(map[name] || name, document.getElementById(tabElMap[name]));
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // MODAL & TOAST
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 function showModal(html) {
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal-overlay').classList.add('open');
@@ -3236,9 +3236,9 @@ function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // HASH IMPORT (from Chrome Extension v2 compatibility)
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 function handleHashImport() {
   const hash = window.location.hash.slice(1);
   if (!hash) return;
@@ -3250,7 +3250,7 @@ function handleHashImport() {
         pendingUploadData = data;
         showTab('upload');
         showUploadPreview(data);
-        toast(`${data.length} businesses from extension — review and import`, 'ok');
+        toast(`${data.length} businesses from extension  -  review and import`, 'ok');
       }
     } catch { /* ignore */ }
   }
@@ -3288,9 +3288,9 @@ function handleHashImport() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // INIT
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 function init() {
   // Load settings into forms
   if (settings.claudeKey) document.getElementById('claude-key-input').value = settings.claudeKey;
@@ -3307,7 +3307,7 @@ function init() {
   updateDailyReportStats();
   if (settings.backendUrl) document.getElementById('backend-url-input').value = settings.backendUrl;
 
-  // ── DORKING LEAD RECEIVER ────────────────────────────────────────────────────
+  // -- DORKING LEAD RECEIVER ----------------------------------------------------
 // Receives leads pushed from the Elevate Scout extension dorking engine
 
 window.addEventListener('ElevateScoutDorkLead', (e) => {
@@ -3400,9 +3400,9 @@ window.addEventListener('ElevateScoutDorkLead', (e) => {
 }
 
 init();
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // EMAIL SCOUT
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 
 let esContacts = [];      // [{name, email, website, phone}]
 let esTemplates = [];     // [{id, message}]
@@ -3410,7 +3410,7 @@ let esCurrentIndex = 0;
 let esRunning = false;
 let esRotationIndex = 0;
 
-// ── PARSE CSV/XLSX ───────────────────────────────────────────────
+// -- PARSE CSV/XLSX -----------------------------------------------
 
 function handleEsFile(file) {
   if (!file) return;
@@ -3422,13 +3422,13 @@ function handleEsFile(file) {
       if (isCsv) {
         rows = parseCSV(e.target.result);
       } else {
-        // xlsx/xls — use SheetJS if available, fallback to text parse
+        // xlsx/xls  -  use SheetJS if available, fallback to text parse
         if (typeof XLSX !== 'undefined') {
           const wb = XLSX.read(e.target.result, { type: 'binary' });
           const ws = wb.Sheets[wb.SheetNames[0]];
           rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
         } else {
-          // Fallback — try as CSV (will work if saved as CSV with xlsx extension)
+          // Fallback  -  try as CSV (will work if saved as CSV with xlsx extension)
           rows = parseCSV(typeof e.target.result === 'string' ? e.target.result : '');
         }
       }
@@ -3451,7 +3451,7 @@ function handleEsFile(file) {
       }).filter(r => r.name && r.email);
 
       const statusEl = document.getElementById('es-upload-status');
-      if (statusEl) statusEl.textContent = `✓ ${esContacts.length} contacts loaded (${rows.length - esContacts.length} skipped — no email)`;
+      if (statusEl) statusEl.textContent = `✓ ${esContacts.length} contacts loaded (${rows.length - esContacts.length} skipped  -  no email)`;
       updateEsSendStats();
       renderEsPreview();
     } catch(err) {
@@ -3482,7 +3482,7 @@ function renderEsPreview() {
   `;
 }
 
-// ── TEMPLATE MANAGEMENT ──────────────────────────────────────────
+// -- TEMPLATE MANAGEMENT ------------------------------------------
 
 function addEsTemplate(text) {
   if (esTemplates.length >= 20) { toast('Maximum 20 templates', 'err'); return; }
@@ -3499,7 +3499,7 @@ function renderEsTemplates() {
   const el = document.getElementById('es-templates-list');
   if (!el) return;
   if (!esTemplates.length) {
-    el.innerHTML = `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">No templates yet — click "+ Add Message" to add one.</div>`;
+    el.innerHTML = `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">No templates yet  -  click "+ Add Message" to add one.</div>`;
     return;
   }
   el.innerHTML = esTemplates.map((t, i) => `
@@ -3539,7 +3539,7 @@ function getEsMessage(contact) {
   return personaliseEsMsg(tpl.message, contact);
 }
 
-// ── SEND FLOW ────────────────────────────────────────────────────
+// -- SEND FLOW ----------------------------------------------------
 
 function updateEsSendStats() {
   const el = document.getElementById('es-send-stats');
@@ -3591,10 +3591,10 @@ function sendNextEs() {
   const nextBtn = document.getElementById('es-next-btn');
 
   if (delay === 0) {
-    // Manual mode — show Next button
+    // Manual mode  -  show Next button
     if (nextBtn) nextBtn.style.display = esCurrentIndex < esContacts.length ? '' : 'none';
   } else {
-    // Auto mode — schedule next
+    // Auto mode  -  schedule next
     if (nextBtn) nextBtn.style.display = 'none';
     if (esCurrentIndex < esContacts.length) {
       setTimeout(() => { if (esRunning) sendNextEs(); }, delay);
@@ -3615,8 +3615,8 @@ function stopEsSend(completed) {
   document.getElementById('es-stop-btn').style.display = 'none';
   document.getElementById('es-next-btn').style.display = 'none';
   if (completed) {
-    esLog('✓ All done — ' + esCurrentIndex + ' emails opened');
-    toast('Email Scout complete — ' + esCurrentIndex + ' emails sent', 'ok');
+    esLog('✓ All done  -  ' + esCurrentIndex + ' emails opened');
+    toast('Email Scout complete  -  ' + esCurrentIndex + ' emails sent', 'ok');
   } else {
     esLog('Stopped at ' + esCurrentIndex + ' / ' + esContacts.length);
     toast('Send stopped', 'warn');
@@ -3628,7 +3628,7 @@ function esLog(msg) {
   if (!el) return;
   const line = document.createElement('div');
   line.style.cssText = 'padding:2px 0;border-bottom:1px solid rgba(255,255,255,.04)';
-  line.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  line.textContent = new Date().toLocaleTimeString() + '  -  ' + msg;
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
 }
@@ -3638,9 +3638,9 @@ if (!esTemplates.length) {
   esTemplates.push({ id: genId(), message: 'Hi {name},\n\nI came across your business and noticed something that caught my attention.\n\nI work with local businesses to help them streamline their operations and follow-ups using simple systems. Many of our clients have seen a significant improvement in how they manage customer relationships after working with us.\n\nWould you be open to a quick 10-minute call this week to explore if this could help you too?\n\nLooking forward to hearing from you.' });
 }
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // CUSTOM MESSAGE TEMPLATES
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 
 let customTemplates = JSON.parse(localStorage.getItem('scout_custom_templates') || '[]');
 
@@ -3681,7 +3681,7 @@ function renderCustomTemplates() {
       </div>
       <textarea
         style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:12px;line-height:1.6;resize:vertical;min-height:90px;font-family:inherit"
-        placeholder="Hi {name}, I was looking at your business listing — {rating}★ across {reviews} reviews…"
+        placeholder="Hi {name}, I was looking at your business listing  -  {rating}★ across {reviews} reviews…"
         onchange="customTemplates[${i}].message = this.value"
       >${esc(t.message)}</textarea>
     </div>
@@ -3761,7 +3761,7 @@ async function sendCustomMsg(bizId) {
     fetch(settings.backendUrl + '/mark-contacted', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ place_ids: [biz.place_id] }) }).catch(()=>{});
   }
   renderDetail(bizId); renderQueue();
-  toast('Gmail opened — message sent', 'ok');
+  toast('Gmail opened  -  message sent', 'ok');
   updateDailyReportStats();
 }
 
@@ -3790,7 +3790,7 @@ function copyCustomMsg(bizId) {
 // Load custom templates on startup
 renderCustomTemplates();
 
-// ── BACKGROUND DEDUP POLL ────────────────────────────────────────────────────
+// -- BACKGROUND DEDUP POLL ----------------------------------------------------
 // Every 5 minutes, check all pending/found businesses against backend
 // This catches cases where another scout contacts a business while this
 // scout has it sitting in their queue
@@ -3827,7 +3827,7 @@ async function backgroundDedupCheck() {
 
     if (blocked > 0) {
       renderQueue();
-      toast(`⚠️ ${blocked} business${blocked > 1 ? 'es' : ''} in your queue already contacted by your team — marked`, 'warn');
+      toast(`⚠️ ${blocked} business${blocked > 1 ? 'es' : ''} in your queue already contacted by your team  -  marked`, 'warn');
     }
   } catch(e) {}
 }
@@ -3836,16 +3836,16 @@ async function backgroundDedupCheck() {
 setTimeout(backgroundDedupCheck, 3000);
 setInterval(backgroundDedupCheck, 5 * 60 * 1000);
 
-// ═══════════════════════════════════════════════════════════════
-// DORKING SETTINGS — syncs to extension automatically
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
+// DORKING SETTINGS  -  syncs to extension automatically
+// ---------------------------------------------------------------
 
 function updateDorkSignalCount() {
   const ta = document.getElementById('dork-signals-input');
   const countEl = document.getElementById('dork-signal-count');
   if (!ta || !countEl) return;
   const count = ta.value.split('\n').map(l => l.trim()).filter(Boolean).length;
-  countEl.textContent = ` — ${count} signal${count !== 1 ? 's' : ''}`;
+  countEl.textContent = `  -  ${count} signal${count !== 1 ? 's' : ''}`;
 }
 
 function loadDorkSettingsUI() {
@@ -3878,12 +3878,12 @@ async function saveDorkSettings() {
 
   const statusEl = document.getElementById('dork-save-status');
   if (statusEl) {
-    statusEl.textContent = `✓ Saved ${signals.length} signals for "${industry}" in "${location}" — synced to extension`;
+    statusEl.textContent = `✓ Saved ${signals.length} signals for "${industry}" in "${location}"  -  synced to extension`;
     statusEl.style.color = 'var(--green)';
     setTimeout(() => { statusEl.textContent = ''; }, 4000);
   }
   updateDorkSignalCount();
-  toast(`Dorking settings saved — ${signals.length} signals synced to extension`, 'ok');
+  toast(`Dorking settings saved  -  ${signals.length} signals synced to extension`, 'ok');
 }
 
 function importDorkSignals(file) {
@@ -3919,9 +3919,9 @@ function exportDorkSignals() {
 // Load dorking settings when settings tab opens
 const origShowContentTab = window.showContentTab || function(){};
 
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 // GMAIL OAUTH + REPLY TRACKING
-// ═══════════════════════════════════════════════════════════════
+// ---------------------------------------------------------------
 
 // Gmail OAuth state
 let gmailTokens = JSON.parse(localStorage.getItem('scout_gmail_tokens') || '{}');
@@ -3971,7 +3971,7 @@ function connectGmailAccount() {
   window.location.href = authUrl;
 }
 
-// Handle OAuth redirect — called on page load if code param present
+// Handle OAuth redirect  -  called on page load if code param present
 async function handleOAuthCallback() {
   const url = new URL(window.location.href);
   const code = url.searchParams.get('code');
@@ -3990,20 +3990,20 @@ async function handleOAuthCallback() {
 
   const pending = JSON.parse(localStorage.getItem('oauth_pending') || '{}');
   if (!pending.state || pending.state !== state) {
-    toast('OAuth state mismatch — please try again', 'err');
+    toast('OAuth state mismatch  -  please try again', 'err');
     return;
   }
   localStorage.removeItem('oauth_pending');
 
   const clientId = settings.oauthClientId;
-  if (!clientId) { toast('Client ID not found — please re-enter it in Settings', 'err'); return; }
+  if (!clientId) { toast('Client ID not found  -  please re-enter it in Settings', 'err'); return; }
 
   // Exchange code for tokens via Google's token endpoint
   // Note: This requires a client_secret which cannot be in frontend JS securely
   // We use the implicit flow workaround: the access token is in the URL fragment for implicit flow
   // OR we use PKCE flow (no secret needed)
   // For now we store the code and show instructions
-  toast('Gmail account connected successfully — checking for replies shortly', 'ok');
+  toast('Gmail account connected successfully  -  checking for replies shortly', 'ok');
 
   // Use the token endpoint via our backend to exchange code
   const backendUrl = settings.backendUrl;
@@ -4034,7 +4034,7 @@ async function handleOAuthCallback() {
     };
     localStorage.setItem('scout_gmail_tokens', JSON.stringify(gmailTokens));
     renderGmailOAuthAccounts();
-    toast('✓ ' + email + ' connected — reply tracking active', 'ok');
+    toast('✓ ' + email + ' connected  -  reply tracking active', 'ok');
 
     // Start polling immediately
     pollGmailReplies();
@@ -4064,14 +4064,14 @@ function renderGmailOAuthAccounts() {
       <span style="font-size:14px">📧</span>
       <div style="flex:1">
         <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(acc.email)}</div>
-        <div style="font-size:10px;color:var(--green)">✓ Connected — reply tracking active</div>
+        <div style="font-size:10px;color:var(--green)">✓ Connected  -  reply tracking active</div>
       </div>
       <button onclick="disconnectGmailAccount('${esc(acc.email)}')" style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 6px">Disconnect</button>
     </div>
   `).join('');
 }
 
-// ── GMAIL REPLY POLLING ──────────────────────────────────────────────────────
+// -- GMAIL REPLY POLLING ------------------------------------------------------
 
 let replyPollRunning = false;
 
@@ -4182,7 +4182,7 @@ async function pollGmailReplies() {
   if (repliesFound > 0) {
     save();
     renderQueue();
-    toast(`📬 ${repliesFound} new repl${repliesFound > 1 ? 'ies' : 'y'} received — check Replied filter`, 'ok');
+    toast(`📬 ${repliesFound} new repl${repliesFound > 1 ? 'ies' : 'y'} received  -  check Replied filter`, 'ok');
   }
 
   replyPollRunning = false;
@@ -4215,7 +4215,7 @@ function extractGmailBody(msgData) {
 
   const text = findText(payload);
   if (text) {
-    // Clean up quoted text — just keep the new reply
+    // Clean up quoted text  -  just keep the new reply
     const lines = text.split('\n');
     const replyLines = [];
     for (const line of lines) {
@@ -4261,7 +4261,7 @@ async function getValidToken(tokenData) {
   } catch { return null; }
 }
 
-// ── STARTUP + POLLING SCHEDULE ───────────────────────────────────────────────
+// -- STARTUP + POLLING SCHEDULE -----------------------------------------------
 
 // Handle OAuth callback on page load
 window.addEventListener('load', () => {
