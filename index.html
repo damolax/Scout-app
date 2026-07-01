@@ -2,14 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Elevate Scout v13</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Elevate Scout">
+<meta name="theme-color" content="#0d0f14">
+<link rel="manifest" href="manifest.json">
+<title>Elevate Scout</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#0d0f14;--surface:#141720;--card:#1c2030;--card2:#222843;--border:#2a3050;
   --accent:#5b6ef5;--accent2:#7c3aed;--green:#10c980;--amber:#f59e0b;--red:#ef4444;
-  --blue:#3b82f6;--text:#e8ecf5;--muted:#8892b0;--faint:#4a5580;
+  --blue:#3b82f6;--text:#f0f3ff;--muted:#9ba8c4;--faint:#4a5580;
   --pending:#4a5580;--scanning:#f59e0b;--found:#10c980;--contacted:#5b6ef5;
   --replied:#7c3aed;--closed:#374151;
 }
@@ -49,16 +55,16 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .qp-stat-dot{width:7px;height:7px;border-radius:50%}
 .qp-stat-count{font-weight:700;color:var(--text)}
 .qp-stat-label{color:var(--muted)}
-#queue-list{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
+#queue-list{flex:1;overflow-y:auto;padding:6px 8px;display:flex;flex-direction:column;gap:4px}
 #queue-empty{text-align:center;color:var(--muted);padding:40px 20px}
 #queue-empty .icon{font-size:32px;margin-bottom:8px}
 #queue-empty p{font-size:12px;line-height:1.6}
 
 /* ── QUEUE ITEM ── */
-.qi{border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;transition:.12s;background:var(--card);position:relative}
+.qi{border:1px solid var(--border);border-radius:8px;padding:9px 10px 7px;cursor:pointer;transition:.12s;background:var(--card);position:relative}
 .qi:hover{border-color:var(--faint)}
 .qi.active{border-color:var(--accent);background:var(--card2)}
-.qi-name{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px}
+.qi-name{font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px;padding-right:20px;color:var(--text)}
 .qi-meta{font-size:11px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .qi-status{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:.3px}
 .s-pending{background:rgba(74,85,128,.2);color:#8892b0}
@@ -68,6 +74,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .s-replied{background:rgba(124,58,237,.15);color:#c4b5fd}
 .s-closed{background:rgba(55,65,81,.3);color:#6b7280}
 .s-no_email{background:rgba(239,68,68,.1);color:#fca5a5}
+.s-ready{background:rgba(16,201,128,.2);color:#059669;border:1px solid rgba(16,201,128,.4)}
 .qi-email{font-size:11px;color:var(--green);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qi-scanning-pulse{width:7px;height:7px;border-radius:50%;background:var(--amber);animation:pulse 1s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
@@ -87,14 +94,17 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .tab-panel.active{display:flex}
 
 /* ── BUSINESS DETAIL ── */
-#detail-panel{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+#detail-panel{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
 #detail-empty{display:flex;flex:1;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--muted)}
 #detail-empty .icon{font-size:40px;opacity:.4}
 #detail-empty p{font-size:13px;text-align:center}
 
-.detail-header{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
+.detail-header{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;overflow:hidden}
+.detail-biz-name{font-size:15px;font-weight:800;margin-bottom:6px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.detail-actions{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.detail-btn{flex-shrink:0}
 .detail-biz-name{font-size:18px;font-weight:800;margin-bottom:6px;line-height:1.3}
-.detail-meta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.detail-meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center}
 .detail-meta-item{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px}
 .rating-star{color:var(--amber)}
 .detail-actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -109,7 +119,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .detail-section{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
 .detail-section-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .detail-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
-.detail-section-body{padding:16px}
+.detail-section-body{padding:12px 14px}
 
 /* Email section */
 .email-found{display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(16,201,128,.08);border:1px solid rgba(16,201,128,.2);border-radius:8px;font-size:13px;font-weight:600;color:var(--green)}
@@ -119,10 +129,12 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .website-input:focus{outline:none;border-color:var(--accent)}
 
 /* Message section */
-.msg-stage-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.msg-tab-btn{background:transparent;border:1px solid var(--border);border-radius:8px;padding:4px 12px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;transition:.12s}
+.msg-tab-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.msg-stage-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .msg-stage-pill{padding:4px 12px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;transition:.12s}
 .msg-stage-pill.active{background:var(--accent);border-color:var(--accent);color:#fff}
-.msg-textarea{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;color:var(--text);font-size:13px;line-height:1.65;resize:vertical;min-height:160px;font-family:inherit}
+.msg-textarea{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;line-height:1.65;resize:vertical;min-height:100px;font-family:inherit}
 .msg-textarea:focus{outline:none;border-color:var(--accent)}
 .msg-actions-row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
 .msg-quality{font-size:11px;margin-top:8px}
@@ -261,9 +273,92 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:var(--faint)}
+
+/* ── MOBILE RESPONSIVE ── */
+@media(max-width:768px){
+  #topbar{padding:8px 12px;gap:6px;flex-wrap:wrap}
+  #topbar-left{font-size:13px}
+  .topbar-btn{font-size:11px;padding:4px 8px}
+  #main{flex-direction:column}
+  #queue-panel{width:100%;max-width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--border);max-height:40vh;overflow-y:auto}
+  #detail-panel{min-width:0;padding:10px}
+  .detail-header{padding:12px}
+  .nav-tabs{overflow-x:auto;flex-nowrap:nowrap;padding-bottom:2px}
+  .nav-tab{white-space:nowrap;font-size:11px;padding:6px 10px}
+  .tab-panel{padding:10px}
+  .as-grid{grid-template-columns:1fr 1fr}
+  .as-card{padding:12px}
+  .settings-card{padding:12px}
+  .msg-stage-pills{flex-wrap:wrap;gap:4px}
+  .msg-stage-pill{padding:4px 8px;font-size:11px}
+  .detail-actions{flex-wrap:wrap;gap:6px}
+  .detail-btn{font-size:11px;padding:6px 10px}
+  #qp-search{font-size:12px}
+  .qi-name{font-size:12px}
+  .qi-meta{font-size:10px}
+  .batch-card{padding:10px}
+  .tl-export-bar{flex-wrap:wrap;gap:8px}
+  /* Mobile bottom nav */
+  #mobile-nav{display:flex}
+  /* Hide sidebar nav on mobile */
+  .nav-tabs{display:none}
+  #topbar-tabs{display:flex}
+}
+@media(min-width:769px){
+  #mobile-nav{display:none}
+  #topbar-tabs{display:none}
+}
+
+/* Mobile bottom navigation */
+#mobile-nav{
+  position:fixed;bottom:0;left:0;right:0;
+  background:var(--card);border-top:1px solid var(--border);
+  padding:8px 0 max(8px, env(safe-area-inset-bottom));
+  z-index:100;gap:0;justify-content:space-around;align-items:center;
+}
+.mob-nav-btn{
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  background:transparent;border:none;color:var(--muted);cursor:pointer;
+  padding:4px 12px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;
+  transition:.12s;flex:1;
+}
+.mob-nav-btn.active{color:var(--accent)}
+.mob-nav-btn span{font-size:20px}
+
+/* Top tabs bar for mobile */
+#topbar-tabs{
+  width:100%;overflow-x:auto;gap:0;padding:0;
+  border-bottom:1px solid var(--border);background:var(--surface);
+  scrollbar-width:none;-webkit-overflow-scrolling:touch;
+}
+#topbar-tabs::-webkit-scrollbar{display:none}
+.tt-btn{
+  background:transparent;border:none;border-bottom:2px solid transparent;
+  color:var(--muted);padding:8px 14px;font-size:11px;font-weight:600;
+  white-space:nowrap;cursor:pointer;transition:.12s;
+}
+.tt-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* Safe area padding for notched phones */
+#main{padding-bottom:env(safe-area-inset-bottom)}
+@media(max-width:768px){
+  body{padding-bottom:60px}
+}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
+
+<!-- MOBILE TOP TABS -->
+<div id="topbar-tabs">
+  <button class="tt-btn active" onclick="showTabMobile('detail',this)">🏠 Queue</button>
+  <button class="tt-btn" onclick="showTabMobile('upload',this)">📁 Upload</button>
+  <button class="tt-btn" onclick="showTabMobile('email-scout-content',this)">📧 Email Scout</button>
+  <button class="tt-btn" onclick="showTabMobile('batch',this)">✅ Approve</button>
+  <button class="tt-btn" onclick="showTabMobile('autoscout',this)">🤖 Scout</button>
+  <button class="tt-btn" onclick="showTabMobile('timeline',this)">📅 Timeline</button>
+  <button class="tt-btn" onclick="showTabMobile('settings',this)">⚙ Settings</button>
+</div>
 
 <!-- TOP BAR -->
 <div id="topbar">
@@ -274,6 +369,16 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
   <button class="topbar-btn" id="batch-btn" onclick="showTab('batch')" style="display:none">✅ Batch Approve (<span id="batch-count">0</span>)</button>
   <button class="topbar-btn primary" onclick="showTab('timeline')">📅 Timeline</button>
   <button class="topbar-btn" onclick="showTab('settings')">⚙ Settings</button>
+</div>
+
+<!-- SEND PROGRESS BAR -->
+<div id="send-progress-bar" style="display:none;align-items:center;gap:10px;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:90">
+  <div style="flex:1;background:var(--bg);border-radius:4px;height:6px;overflow:hidden">
+    <div id="send-progress-fill" style="height:100%;background:var(--green);transition:.3s;width:0%"></div>
+  </div>
+  <span id="send-progress-text" style="font-size:12px;color:var(--text);white-space:nowrap">Sending…</span>
+  <button id="send-next-btn" class="topbar-btn primary" onclick="nextSend()" style="display:none;font-size:12px">Next →</button>
+  <button class="topbar-btn danger" onclick="stopSendQueue()" style="font-size:11px">Stop</button>
 </div>
 
 <!-- SCOUT PROGRESS BAR -->
@@ -292,12 +397,18 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
   <div id="queue-panel">
     <div id="qp-head">
       <input type="text" id="qp-search" placeholder="Search businesses…" oninput="renderQueue()">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <button class="qp-action danger" onclick="deleteNoEmail()" style="font-size:10px;padding:3px 8px;color:var(--red);border-color:var(--red);background:rgba(239,68,68,.08)">🗑 Delete No Email</button>
+      </div>
       <div id="qp-actions">
         <button class="qp-action active" onclick="setFilter('all',this)">All</button>
         <button class="qp-action" onclick="setFilter('pending',this)">Pending</button>
         <button class="qp-action" onclick="setFilter('found',this)">Email Found</button>
+        <button class="qp-action" onclick="setFilter('no_email',this)">No Email</button>
         <button class="qp-action" onclick="setFilter('contacted',this)">Contacted</button>
         <button class="qp-action" onclick="setFilter('replied',this)">Replied</button>
+        <button class="qp-action" onclick="setFilter('followup',this)">⏰ Follow-up Due</button>
+        <button class="qp-action" onclick="setFilter('blocked',this)">🚫 Team Scouted</button>
       </div>
     </div>
     <div id="qp-stats"></div>
@@ -309,6 +420,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
     <div id="nav-tabs">
       <div class="nav-tab active" onclick="showContentTab('detail',this)" id="tab-detail">Business</div>
       <div class="nav-tab" onclick="showContentTab('upload-content',this)" id="tab-upload">Upload</div>
+      <div class="nav-tab" onclick="showContentTab('email-scout-content',this)" id="tab-emailscout">📧 Email Scout</div>
       <div class="nav-tab" onclick="showContentTab('batch-content',this)" id="tab-batch">Batch Approve</div>
       <div class="nav-tab" onclick="showContentTab('autoscout-content',this)" id="tab-autoscout">Auto-Scout</div>
       <div class="nav-tab" onclick="showContentTab('timeline-content',this)" id="tab-timeline">Timeline</div>
@@ -368,6 +480,93 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
       <div id="batch-panel"></div>
     </div>
 
+    <!-- EMAIL SCOUT -->
+    <div class="tab-panel" id="email-scout-content" style="overflow-y:auto">
+      <div style="padding:16px;max-width:860px;margin:0 auto">
+
+        <div style="margin-bottom:20px">
+          <h2 style="font-size:16px;font-weight:800;margin-bottom:4px">📧 Email Scout</h2>
+          <p style="font-size:12px;color:var(--muted)">Upload a list of businesses with emails, write up to 20 personalised message templates using <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{name}</code> as a placeholder, and send them one by one.</p>
+        </div>
+
+        <!-- Upload section -->
+        <div class="as-card" style="margin-bottom:14px">
+          <h3>1. Upload Business List</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">CSV or Excel file. Required columns: <strong>Business</strong>, <strong>Email</strong>. Optional: Website, Phone.</p>
+          <div id="es-dropzone" style="border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;transition:.12s" onclick="document.getElementById('es-file-input').click()" ondragover="event.preventDefault();this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor='var(--border)'" ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleEsFile(event.dataTransfer.files[0])">
+            <div style="font-size:24px;margin-bottom:6px">📂</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text)">Click or drag file here</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px">.csv or .xlsx</div>
+          </div>
+          <input type="file" id="es-file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleEsFile(this.files[0])">
+          <div id="es-upload-status" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
+          <div id="es-preview" style="margin-top:12px;display:none">
+            <div style="font-size:12px;font-weight:700;margin-bottom:6px;color:var(--text)">Preview (<span id="es-count">0</span> contacts):</div>
+            <div style="overflow-x:auto;max-height:160px;overflow-y:auto">
+              <table style="width:100%;font-size:11px;border-collapse:collapse" id="es-preview-table"></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Message templates -->
+        <div class="as-card" style="margin-bottom:14px">
+          <h3>2. Message Templates</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Write up to 20 messages. Use <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{name}</code> to insert the business name, <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{email}</code> for their email. One message is picked per send (rotates or you select).</p>
+          
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <button class="topbar-btn" onclick="addEsTemplate()">+ Add Message</button>
+            <select id="es-rotation-mode" style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;color:var(--text);font-size:12px">
+              <option value="rotate">Rotate (cycle through messages)</option>
+              <option value="random">Random</option>
+              <option value="first">Always use first</option>
+            </select>
+          </div>
+          
+          <div id="es-templates-list"></div>
+        </div>
+
+        <!-- Send settings -->
+        <div class="as-card" style="margin-bottom:14px">
+          <h3>3. Send Settings</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div>
+              <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Subject line</label>
+              <input type="text" id="es-subject" class="as-input" value="Quick question for {name}" placeholder="Subject with {name}">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Delay between sends</label>
+              <select id="es-delay" style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text);font-size:12px;width:100%">
+                <option value="0">Manual (click Next each time)</option>
+                <option value="5000">5 seconds</option>
+                <option value="10000" selected>10 seconds</option>
+                <option value="30000">30 seconds</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Signature</label>
+            <textarea id="es-signature" class="as-input" rows="3" style="width:100%;resize:vertical"></textarea>
+          </div>
+        </div>
+
+        <!-- Send control -->
+        <div class="as-card">
+          <h3>4. Send</h3>
+          <div id="es-send-stats" style="font-size:12px;color:var(--muted);margin-bottom:10px">No contacts loaded yet.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="as-big-btn as-start" onclick="startEsSend()" id="es-start-btn">📧 Start Sending</button>
+            <button class="topbar-btn" onclick="nextEsSend()" id="es-next-btn" style="display:none">Next →</button>
+            <button class="topbar-btn danger" onclick="stopEsSend()" id="es-stop-btn" style="display:none">⏹ Stop</button>
+          </div>
+          <div style="margin-top:10px;background:var(--bg);border-radius:6px;height:6px;overflow:hidden">
+            <div id="es-progress-fill" style="height:100%;background:var(--green);transition:.4s;width:0%"></div>
+          </div>
+          <div id="es-progress-text" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+          <div id="es-log" style="margin-top:10px;max-height:160px;overflow-y:auto;font-size:11px;font-family:monospace;color:var(--muted);background:var(--bg);border-radius:6px;padding:8px;display:none"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- AUTO-SCOUT -->
     <div class="tab-panel" id="autoscout-content">
       <div id="autoscout-panel">
@@ -379,6 +578,9 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         <div class="as-card">
           <h3>Auto-Scout Control</h3>
           <p>Processes each business in your queue: finds their website email, generates a personalized message using your industry playbook, then queues for batch approval.</p>
+          <div style="margin:8px 0 0 0;padding:8px 12px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:8px;font-size:12px;color:var(--muted)">
+            💡 <strong>No website?</strong> Use <button class="topbar-btn" style="padding:2px 8px;font-size:11px" onclick="enrichAllFromMaps()">⚡ Enrich from Google Maps</button> to fetch websites &amp; emails via Place IDs (requires backend + Google Maps API key).
+          </div>
           <div class="as-stats-grid" id="as-stats">
             <div class="as-stat"><div class="as-stat-num" id="as-total">0</div><div class="as-stat-label">In Queue</div></div>
             <div class="as-stat"><div class="as-stat-num" id="as-done">0</div><div class="as-stat-label">Processed</div></div>
@@ -465,13 +667,65 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         </div>
 
         <div class="settings-card">
-          <h3>Your Name</h3>
-          <p>Used to sign outreach messages. Appears at the end of every message as "— [Your Name]".</p>
+          <h3>Your Name &amp; Signature</h3>
+          <p>Used to personalise outreach messages and your daily report. Your signature is appended to every email.</p>
           <div class="settings-field">
-            <label>Your name / sign-off</label>
-            <input type="text" class="settings-input" id="sender-name-input" placeholder="Damodola">
+            <label>Your name (sign-off)</label>
+            <input type="text" class="settings-input" id="sender-name-input" placeholder="John Smith">
           </div>
-          <button class="settings-btn" onclick="saveSenderName()">Save</button>
+          <div class="settings-field" style="margin-top:10px">
+            <label>Email signature (appended to every message)</label>
+            <textarea class="settings-input" id="signature-input" rows="4" placeholder="Best regards,
+John Smith
+Elevate Business Solutions
++44 7700 000000" style="resize:vertical;min-height:80px"></textarea>
+          </div>
+          <div class="settings-field" style="margin-top:10px">
+            <label>Email subject line</label>
+            <input type="text" class="settings-input" id="subject-input" placeholder="Quick question for [Business]">
+            <div style="font-size:11px;color:var(--muted);margin-top:4px">[Business] is replaced with the business name automatically</div>
+          </div>
+          <button class="settings-btn" onclick="saveSenderSettings()">Save Settings</button>
+        </div>
+
+        <div class="settings-card">
+          <h3>Gmail Accounts</h3>
+          <p>Add your Gmail addresses (one per line). The app tracks how many emails each account has sent today and rotates automatically to spread load evenly.</p>
+          <div class="settings-field">
+            <label>Gmail accounts (one per line)</label>
+            <textarea class="settings-input" id="gmail-accounts-input" rows="5" placeholder="john@gmail.com&#10;scout2@gmail.com&#10;scout3@gmail.com" style="resize:vertical;min-height:100px"></textarea>
+          </div>
+          <button class="settings-btn" onclick="saveGmailAccounts()">Save Accounts</button>
+          <div id="gmail-rotation-status" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Scout Identity</h3>
+          <p>Your name used in the daily summary report. Set this once — it identifies your submissions in the admin dashboard.</p>
+          <div class="settings-field">
+            <label>Scout name (for reports)</label>
+            <input type="text" class="settings-input" id="scout-name-input" placeholder="e.g. John">
+          </div>
+          <button class="settings-btn" onclick="saveScoutName()">Save</button>
+        </div>
+
+        <div class="settings-card">
+          <h3>Daily Report</h3>
+          <p>Export today's scouting summary and upload it to Elevate Office Tracker. Only today's date is accepted — you cannot submit yesterday's report today.</p>
+          <div id="daily-report-stats" style="background:var(--card2);border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;line-height:1.8">Loading stats…</div>
+          <button class="settings-btn" onclick="exportDailyReport()">📊 Export &amp; Submit Today's Report</button>
+          <div id="daily-report-status" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+        </div>
+
+        <div class="settings-card" id="custom-msg-section">
+          <h3>Your Custom Messages</h3>
+          <p>Write up to 20 outreach messages of your own. Use shortcodes: <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{name}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{rating}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{reviews}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{location}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{industry}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{website}</code>. These are available in the Business tab under "Your Messages".</p>
+          <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+            <button class="settings-btn" onclick="addCustomTemplate()" style="margin:0">+ Add Message</button>
+            <span style="font-size:11px;color:var(--muted)" id="custom-msg-count">0 / 20 messages</span>
+          </div>
+          <div id="custom-templates-list"></div>
+          <button class="settings-btn" onclick="saveCustomTemplates()" style="margin-top:10px">Save All Messages</button>
         </div>
 
         <div class="settings-card">
@@ -499,6 +753,25 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
 <!-- TOAST -->
 <div id="toast"></div>
+
+<!-- MOBILE BOTTOM NAV -->
+<div id="mobile-nav">
+  <button class="mob-nav-btn active" onclick="showTabMobile('detail',this)" id="mob-queue">
+    <span>🏠</span>Queue
+  </button>
+  <button class="mob-nav-btn" onclick="showTabMobile('batch',this)" id="mob-batch">
+    <span>✅</span>Approve
+  </button>
+  <button class="mob-nav-btn" onclick="showTabMobile('autoscout',this)" id="mob-scout">
+    <span>🤖</span>Scout
+  </button>
+  <button class="mob-nav-btn" onclick="showTabMobile('upload',this)" id="mob-upload">
+    <span>📁</span>Upload
+  </button>
+  <button class="mob-nav-btn" onclick="showTabMobile('settings',this)" id="mob-settings">
+    <span>⚙</span>More
+  </button>
+</div>
 
 <input type="file" id="json-import-input" accept=".json" style="display:none" onchange="handleJsonImport(event)">
 
@@ -731,6 +1004,10 @@ function detectIndustry(bizName, profileLink) {
 // ═══════════════════════════════════════════════════════════════
 let businesses = JSON.parse(localStorage.getItem('sv13_businesses') || '[]');
 let settings = JSON.parse(localStorage.getItem('sv13_settings') || '{}');
+// Set defaults for new users
+if (!settings.senderName) settings.senderName = 'Olalekan Oyekunle';
+if (!settings.signature) settings.signature = 'Best regards,\nOlalekan Oyekunle\nElevate Business Solutions';
+if (!settings.emailSubject) settings.emailSubject = 'Quick question for {name}';
 let activeId = null;
 let queueFilter = 'all';
 let tlFilter = 'today';
@@ -920,22 +1197,46 @@ async function generateMessage(bizId, stageIdx = 0) {
   return fallback;
 }
 
+function buildPainContext(biz) {
+  const signals = biz.painSignals || [];
+  const reviews = biz.reviewSample || [];
+  const score = biz.painScore || null;
+  if (!signals.length && !reviews.length) return '';
+  let ctx = '';
+  if (score) ctx += `\nPain Score: ${score}/10`;
+  if (signals.length) ctx += `\nKey pain signals found in their reviews:\n${signals.map(s => '- ' + s).join('\n')}`;
+  if (reviews.length) {
+    const lowReviews = reviews.filter(r => r.rating <= 3).slice(0, 3);
+    if (lowReviews.length) ctx += `\n\nActual customer complaints (use these to make the message specific):\n${lowReviews.map(r => `"${r.text.slice(0,200)}"`).join('\n')}`;
+  }
+  return ctx;
+}
+
+
 function buildEnhancePrompt(biz, template, industry, playbook, senderName) {
+  const painCtx = buildPainContext(biz);
+  const painSection = painCtx ? `\nINTELLIGENCE FROM THEIR REVIEWS:${painCtx}` : '';
+  const taskLine = painCtx
+    ? '- Weave in ONE specific pain signal naturally — do NOT say "I saw your reviews" or "I noticed your rating"'
+    : '- Reference their likely situation based on their industry and rating';
   return `You are helping personalize a cold outreach message for a business called "${biz.name}".
 
 Industry: ${playbook.label}
-Rating: ${biz.rating || 'unknown'}★
-Reviews: ${biz.reviews || 'unknown'}
-Profile: ${biz.profileLink || ''}
+Rating: ${biz.rating || 'unknown'}\u2605 (${biz.reviews || 'unknown'} reviews)${painSection}
 
-Here is a template message:
+Template:
 ---
 ${template}
 ---
 
-Your task: Keep the exact same structure and intent, but make it sound more specific and human. Use the business name naturally. If the rating/review count reveals something meaningful (e.g. high volume = busy operation, low rating = service issues, very high rating = well-run but maybe scaling issues), weave that naturally into the message. Do not mention Airtable yet. Do not be salesy. End with "— ${senderName}".
+Task: Rewrite this message so it feels like you genuinely looked at this specific business.
+${taskLine}
+- Keep under 120 words
+- Sound human and direct, not corporate or salesy
+- Never quote reviews directly or say you read them
+- End with "\u2014 ${senderName}"
 
-Return ONLY the improved message. No explanation. No quotation marks around the whole thing.`;
+Return ONLY the message text. No explanation. No subject line.`;
 }
 
 function buildStagePrompt(biz, stageIdx, playbook, senderName) {
@@ -1031,9 +1332,107 @@ function scoreMessage(msg, biz) {
 // ═══════════════════════════════════════════════════════════════
 // QUEUE
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// REVIEW READING + PAIN SCORING
+// ═══════════════════════════════════════════════════════════════
+
+function scoreBusiness(biz, reviews) {
+  const signals = [];
+  let score = 5; // base score
+
+  // Rating signals
+  const rating = parseFloat(biz.rating) || 0;
+  if (rating > 0 && rating < 3) { score += 3; signals.push('Very low rating — major pain'); }
+  else if (rating >= 3 && rating < 4) { score += 2; signals.push('Below average rating'); }
+  else if (rating >= 4) { score -= 1; signals.push('Good rating'); }
+
+  // Review count — more reviews = more established = better prospect
+  const reviewCount = parseInt(biz.reviews) || 0;
+  if (reviewCount > 200) { score += 1; signals.push('High review volume — established business'); }
+  if (reviewCount > 50 && reviewCount <= 200) { score += 0.5; }
+
+  // Review text analysis — look for operational pain signals
+  const PAIN_PATTERNS = [
+    { pattern: /wait(ing)?|slow|took (too )?long|forever|delayed|late/gi, signal: 'Wait time complaints', points: 2 },
+    { pattern: /disorganiz|chaotic|confus|mess|unprofessional/gi, signal: 'Organisation issues', points: 2 },
+    { pattern: /never call(ed)?|no (follow[- ]up|response|call back)|didn'?t (hear|contact|call)/gi, signal: 'Follow-up failures', points: 3 },
+    { pattern: /communicat|inform|updat|notify|told|kept (me )?in the loop/gi, signal: 'Communication gaps', points: 2 },
+    { pattern: /lost|misplace|couldn'?t find|no record|system|paper|manual/gi, signal: 'Record keeping issues', points: 3 },
+    { pattern: /staff|employee|team|rude|attitude|unprofessional|untrained/gi, signal: 'Staff management issues', points: 2 },
+    { pattern: /appoint(ment)?|schedul|book(ing)?|cancel|rescheduled|no[- ]show/gi, signal: 'Scheduling problems', points: 2 },
+    { pattern: /price|expensive|overprice|charge|fee|cost|bill|invoice/gi, signal: 'Pricing complaints', points: 1 },
+    { pattern: /dirty|clean|hygiene|unhygienic|filthy/gi, signal: 'Cleanliness issues', points: 1 },
+  ];
+
+  const lowReviews = reviews.filter(r => r.rating <= 3);
+  const reviewText = lowReviews.map(r => r.text || '').join(' ');
+
+  PAIN_PATTERNS.forEach(p => {
+    const matches = (reviewText.match(p.pattern) || []).length;
+    if (matches >= 2) { score += p.points; signals.push(p.signal + ` (${matches}x)`); }
+    else if (matches === 1) { score += p.points * 0.5; signals.push(p.signal); }
+  });
+
+  return {
+    score: Math.min(10, Math.max(1, Math.round(score * 10) / 10)),
+    signals: signals.slice(0, 5),
+    lowReviewCount: lowReviews.length,
+    reviewText: reviewText.slice(0, 500),
+  };
+}
+
+// Send message to extension and wait for response
+function sendToExtAndWait(msg, timeout = 10000) {
+  return new Promise((resolve, reject) => {
+    const id = Math.random().toString(36).slice(2);
+    const handler = (event) => {
+      if (event.data?.type === 'EXT_RESPONSE' && event.data?.id === id) {
+        window.removeEventListener('message', handler);
+        resolve(event.data.payload);
+      }
+    };
+    window.addEventListener('message', handler);
+    window.dispatchEvent(new CustomEvent('ElevateScoutMsg', { detail: { ...msg, id } }));
+    setTimeout(() => { window.removeEventListener('message', handler); reject(new Error('timeout')); }, timeout);
+  });
+}
+
+function getFollowUpsDue() {
+  const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+  return businesses.filter(b =>
+    b.status === 'contacted' &&
+    b.contactedAt &&
+    new Date(b.contactedAt).getTime() < oneDayAgo &&
+    !b.theirReply
+  );
+}
+
+function renderFollowUpBanner() {
+  const due = getFollowUpsDue();
+  let banner = document.getElementById('followup-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'followup-banner';
+    banner.style.cssText = 'background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;cursor:pointer;';
+    banner.onclick = () => { queueFilter = 'followup'; renderQueue(); };
+    const qp = document.getElementById('queue-panel');
+    const qpHead = qp?.querySelector('#qp-head') || qp;
+    if (qpHead) qpHead.appendChild(banner);
+  }
+  if (due.length > 0) {
+    banner.style.display = 'flex';
+    banner.innerHTML = `<span style="font-size:16px">⏰</span><div style="flex:1"><div style="font-size:12px;font-weight:700;color:var(--amber)">Follow-up Due: ${due.length} business${due.length > 1 ? 'es' : ''}</div><div style="font-size:11px;color:var(--muted)">No reply after 24h — click to view</div></div><span style="font-size:11px;color:var(--amber)">View →</span>`;
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
 function renderQueue() {
+  renderFollowUpBanner();
   const search = document.getElementById('qp-search')?.value.toLowerCase() || '';
   let list = businesses.filter(b => {
+    if (queueFilter === 'followup') return getFollowUpsDue().some(d => d.id === b.id);
+    if (queueFilter === 'blocked') return !!b.blockedByDedup;
     if (queueFilter !== 'all' && b.status !== queueFilter) return false;
     if (search && !b.name.toLowerCase().includes(search) && !(b.email || '').toLowerCase().includes(search)) return false;
     return true;
@@ -1064,10 +1463,10 @@ function renderQueue() {
   container.innerHTML = list.map(b => {
     const sc = b.status;
     const statusClass = `s-${sc}`;
-    const statusLabel = { pending: 'Pending', scanning: 'Scanning…', found: 'Email Found', contacted: 'Contacted', replied: 'Replied', closed: 'Closed', no_email: 'No Email' }[sc] || sc;
+    const statusLabel = { pending: 'Pending', scanning: 'Scanning…', found: 'Email Found', ready: '✓ Ready to Send', contacted: 'Contacted', replied: 'Replied', closed: 'Closed', no_email: 'No Email' }[sc] || sc;
     const isScanning = sc === 'scanning';
     return `<div class="qi${b.id === activeId ? ' active' : ''}" onclick="selectBiz('${b.id}')">
-      <div class="qi-name">${esc(b.name)}</div>
+      <div class="qi-name">${esc(cleanBizName(b.name))}</div>
       <div class="qi-meta">
         ${isScanning ? '<span class="qi-scanning-pulse"></span>' : ''}
         <span class="qi-status ${statusClass}">${statusLabel}</span>
@@ -1075,6 +1474,11 @@ function renderQueue() {
         ${b.reviews ? `<span>${b.reviews} reviews</span>` : ''}
       </div>
       ${b.email ? `<div class="qi-email">✉ ${esc(b.email)}</div>` : ''}
+      ${b.painScore ? `<div style="font-size:10px;margin-top:3px;color:${b.painScore >= 7 ? 'var(--red)' : b.painScore >= 5 ? 'var(--amber)' : 'var(--muted)'}">${'●'.repeat(Math.min(5,Math.round(b.painScore/2)))} Pain: ${b.painScore}/10</div>` : ''}
+      ${b.status === 'contacted' && !b.theirReply && b.contactedAt && (Date.now()-new Date(b.contactedAt).getTime())>86400000 ? `<div style="font-size:10px;margin-top:2px;color:var(--amber)">⏰ Follow-up due</div>` : ''}
+      ${b.theirReply && b.status === 'replied' ? `<div style="font-size:10px;margin-top:2px;color:var(--accent)">💬 Replied</div>` : ''}
+    ${b.blockedByDedup ? `<div style="font-size:10px;margin-top:2px;color:var(--amber)">🚫 Already scouted by team</div>` : ''}
+    <button onclick="event.stopPropagation();deleteBiz('${b.id}')" style="position:absolute;top:6px;right:6px;background:transparent;border:none;color:var(--faint);font-size:13px;cursor:pointer;padding:2px 5px;border-radius:4px;line-height:1" title="Delete">✕</button>
       ${b.profileLink ? `<div class="qi-profile-link">🗺 Google Maps</div>` : ''}
     </div>`;
   }).join('');
@@ -1097,6 +1501,16 @@ function selectBiz(id) {
 // ═══════════════════════════════════════════════════════════════
 // BUSINESS DETAIL
 // ═══════════════════════════════════════════════════════════════
+function cleanBizName(name) {
+  if (!name) return '';
+  // Remove common Google Maps title patterns: "Name | Category in City | Category in City"
+  // Keep only the part before the first " | " or " - "
+  let n = name.split(' | ')[0].split(' - ')[0].trim();
+  // Also remove trailing location info like "in Lagos", "in Ikorodu"
+  n = n.replace(/\s+in\s+[A-Z][a-zA-Z\s,]+$/, '').trim();
+  return n || name;
+}
+
 function renderDetail() {
   const empty = document.getElementById('detail-empty');
   const panel = document.getElementById('detail-panel');
@@ -1114,18 +1528,21 @@ function renderDetail() {
   const { score, checks } = msg ? scoreMessage(msg, biz) : { score: 0, checks: [] };
   const scoreColor = score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--amber)' : 'var(--red)';
   const statusClass = `s-${biz.status}`;
-  const statusLabel = { pending: 'Pending', scanning: 'Scanning…', found: 'Email Found', contacted: 'Contacted', replied: 'Replied', closed: 'Closed', no_email: 'No Email' }[biz.status] || biz.status;
+  const statusLabel = { pending: 'Pending', scanning: 'Scanning…', found: 'Email Found', ready: '✓ Ready to Send', contacted: 'Contacted', replied: 'Replied', closed: 'Closed', no_email: 'No Email' }[biz.status] || biz.status;
 
   panel.innerHTML = `
     <!-- Header -->
     <div class="detail-header">
-      <div class="detail-biz-name">${esc(biz.name)}</div>
-      <div class="detail-meta">
+      <div class="detail-biz-name">${esc(cleanBizName(biz.name))}</div>
+      ${biz.blockedByDedup ? `<div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:12px;color:var(--amber)">🚫 This business has already been contacted by someone on your team. Sending has been blocked to prevent duplicate outreach.</div>` : ''}
+            <div class="detail-meta">
         <span class="qi-status ${statusClass}">${statusLabel}</span>
         ${biz.rating ? `<span class="detail-meta-item"><span class="rating-star">★</span> ${biz.rating}</span>` : ''}
         ${biz.reviews ? `<span class="detail-meta-item">📝 ${biz.reviews} reviews</span>` : ''}
         ${biz.band ? `<span class="detail-meta-item">📊 ${biz.band}</span>` : ''}
         <span class="industry-badge">🏷 ${playbook.label}</span>
+        ${biz.painScore ? `<span class="industry-badge" style="background:${biz.painScore>=7?'rgba(239,68,68,.15)':biz.painScore>=5?'rgba(245,158,11,.15)':'rgba(99,102,241,.1)'};color:${biz.painScore>=7?'var(--red)':biz.painScore>=5?'var(--amber)':'var(--muted)'}">Pain: ${biz.painScore}/10</span>` : ''}
+        ${biz.painSignals?.length ? biz.painSignals.map(s=>`<span style="font-size:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:2px 8px;color:var(--red);margin-right:4px">${s}</span>`).join('') : ''}
       </div>
       <div class="detail-actions">
         ${biz.profileLink ? `<a href="${esc(biz.profileLink)}" target="_blank" class="detail-btn">🗺 View Google Maps Profile</a>` : ''}
@@ -1137,21 +1554,24 @@ function renderDetail() {
       </div>
     </div>
 
-    <!-- Email Section -->
+    <!-- Email + Website Section (merged) -->
     <div class="detail-section">
       <div class="detail-section-head">
-        <span class="detail-section-title">Contact Email</span>
+        <span class="detail-section-title">Contact</span>
         ${biz.status === 'scanning' ? '<span style="font-size:11px;color:var(--amber)">🔍 Searching…</span>' : ''}
       </div>
-      <div class="detail-section-body">
-        ${biz.email
-          ? `<div class="email-found">✉ ${esc(biz.email)}</div>
-             ${biz.emails?.length > 1 ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">Also found: ${biz.emails.slice(1).map(e => esc(e)).join(', ')}</div>` : ''}
-             ${biz.phones?.length ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">📞 ${biz.phones.join(' · ')}</div>` : ''}`
-          : `<div class="email-not-found">No email found yet${biz.status === 'no_email' ? ' — try adding the website URL below' : ''}</div>`
-        }
-        <div class="email-find-row">
-          <input type="text" class="website-input" id="website-input-${biz.id}" placeholder="Enter business website URL…" value="${esc(biz.website || '')}">
+      <div class="detail-section-body" style="display:flex;flex-direction:column;gap:8px;padding:12px 16px">
+        ${biz.email ? `
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="color:var(--green);font-size:13px">✉</span>
+            <span style="color:var(--green);font-weight:700;font-size:13px;flex:1">${esc(biz.email)}</span>
+            <button class="topbar-btn" onclick="navigator.clipboard.writeText('${biz.email}').then(()=>toast('Copied ✓'))" style="font-size:10px;padding:3px 8px">Copy</button>
+          </div>
+          ${biz.emails?.length > 1 ? `<div style="font-size:11px;color:var(--muted)">Also: ${biz.emails.slice(1).map(e=>esc(e)).join(', ')}</div>` : ''}
+          ${biz.phones?.length ? `<div style="font-size:11px;color:var(--muted)">📞 ${biz.phones.join(' · ')}</div>` : ''}
+        ` : `<div style="font-size:12px;color:var(--muted)">No email found yet${biz.status === 'no_email' ? '' : ' — run Auto-Scout or find manually'}</div>`}
+        <div class="email-find-row" style="margin-top:4px">
+          <input type="text" class="website-input" id="website-input-${biz.id}" placeholder="Website URL…" value="${esc(biz.website || '')}">
           <button class="topbar-btn primary" onclick="findEmailManual('${biz.id}')">🔍 Find Email</button>
         </div>
         <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
@@ -1161,32 +1581,93 @@ function renderDetail() {
       </div>
     </div>
 
+
     <!-- Message Section -->
     <div class="detail-section">
-      <div class="detail-section-head">
-        <span class="detail-section-title">Outreach Message</span>
+      <div class="detail-section-head" style="padding:10px 14px;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:4px">
+          <button class="msg-tab-btn active" id="msgtab-ai-${biz.id}" onclick="switchMsgTab('${biz.id}','ai')">🤖 Scout AI</button>
+          <button class="msg-tab-btn" id="msgtab-custom-${biz.id}" onclick="switchMsgTab('${biz.id}','custom')">✍ Your Messages</button>
+        </div>
         ${msg ? `<span style="font-size:11px;color:${scoreColor}">Quality: ${score}/100</span>` : ''}
       </div>
-      <div class="detail-section-body">
+
+      <!-- AI Panel -->
+      <div class="detail-section-body" id="msgpanel-ai-${biz.id}" style="padding:12px 14px">
         <div class="msg-stage-pills">
           ${STAGE_LABELS.map((l, i) => `<button class="msg-stage-pill${stageIdx === i ? ' active' : ''}" onclick="switchStage('${biz.id}', ${i})">${i + 1}</button>`).join('')}
+          <button class="msg-stage-pill" onclick="showLibPicker('${biz.id}')" style="margin-left:auto;border-color:var(--accent);color:var(--accent)">📚 Library</button>
         </div>
         ${msg
-          ? `<textarea class="msg-textarea" id="msg-ta-${biz.id}" rows="10" onchange="updateMsg('${biz.id}',this.value)">${esc(msg)}</textarea>
+          ? `<textarea class="msg-textarea" id="msg-ta-${biz.id}" rows="7" onchange="updateMsg('${biz.id}',this.value)">${esc(msg)}</textarea>
              <div class="msg-quality">
                <div class="msg-quality-bar"><div class="msg-quality-fill" style="width:${score}%;background:${scoreColor}"></div></div>
                <div class="quality-checks">${checks.map(c => `<span class="quality-check ${c.pass ? 'pass' : 'fail'}">${c.pass ? '✓' : '✗'} ${c.label}</span>`).join('')}</div>
              </div>`
-          : `<div class="ai-loading"><div class="ai-dot"></div><div class="ai-dot"></div><div class="ai-dot"></div> Generating personalized message…</div>`
+          : `<div class="ai-loading"><div class="ai-dot"></div><div class="ai-dot"></div><div class="ai-dot"></div> Generating…</div>`
         }
         <div class="msg-actions-row">
           <button class="topbar-btn primary" onclick="regenMessage('${biz.id}')">✨ Regenerate</button>
           ${msg ? `<button class="topbar-btn" onclick="copyMsg('${biz.id}')">📋 Copy</button>` : ''}
-          ${biz.email && msg ? `<button class="topbar-btn" onclick="openGmail('${biz.id}')">📧 Open Gmail</button>` : ''}
-          <button class="topbar-btn" onclick="addToBatch('${biz.id}')">+ Add to Batch</button>
+          ${biz.email && msg ? `<button class="topbar-btn" onclick="openGmail('${biz.id}')">📧 Gmail</button>` : ''}
+          <button class="topbar-btn" onclick="addToBatch('${biz.id}')">+ Batch</button>
         </div>
       </div>
+
+      <!-- Custom Messages Panel -->
+      <div class="detail-section-body" id="msgpanel-custom-${biz.id}" style="display:none;padding:12px 14px">
+        ${getCustomTemplates().length === 0
+          ? `<div style="text-align:center;padding:16px;color:var(--muted);font-size:12px">
+               No custom messages yet.<br>
+               <button class="topbar-btn" onclick="showContentTab('settings-content',document.getElementById('tab-settings'));setTimeout(()=>document.getElementById('custom-msg-section')?.scrollIntoView({behavior:'smooth'}),300)" style="margin-top:8px">Go to Settings → Add Messages</button>
+             </div>`
+          : `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+               Shortcodes: <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{name}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{rating}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{reviews}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{location}</code> <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{industry}</code>
+             </div>
+             <div style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto">
+               ${getCustomTemplates().map((t, idx) => `
+                 <div style="border:1px solid ${biz.customMsgIdx === idx ? 'var(--accent)' : 'var(--border)'};border-radius:8px;padding:8px 10px;cursor:pointer;background:${biz.customMsgIdx === idx ? 'rgba(91,110,245,.08)' : 'var(--bg)'};transition:.12s" onclick="selectCustomMsg('${biz.id}', ${idx})">
+                   <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                     <span style="font-size:10px;font-weight:700;color:var(--accent);background:rgba(91,110,245,.15);padding:1px 6px;border-radius:4px">MSG ${idx+1}</span>
+                     ${biz.messageSentIdx === idx ? '<span style="font-size:10px;color:var(--green);font-weight:600">✓ Previously sent</span>' : ''}
+                     ${biz.customMsgIdx === idx ? '<span style="font-size:10px;color:var(--accent);margin-left:auto">● Selected</span>' : ''}
+                   </div>
+                   <div style="font-size:11px;line-height:1.5;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(personaliseCustomMsg(t.message, biz).slice(0,100))}</div>
+                 </div>`).join('')}
+             </div>
+             ${biz.customMsgIdx !== undefined && biz.customMsgIdx !== null && getCustomTemplates()[biz.customMsgIdx]
+               ? `<div style="margin-top:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">
+                    <div style="font-size:10px;color:var(--muted);margin-bottom:6px;font-weight:700;text-transform:uppercase;letter-spacing:.5px">Full Preview</div>
+                    <div style="font-size:12px;line-height:1.6;white-space:pre-wrap;color:var(--text)">${esc(personaliseCustomMsg(getCustomTemplates()[biz.customMsgIdx].message, biz))}</div>
+                  </div>
+                  <div class="msg-actions-row" style="margin-top:8px">
+                    ${biz.email ? `<button class="topbar-btn primary" onclick="sendCustomMsg('${biz.id}')">📧 Gmail</button>` : ''}
+                    <button class="topbar-btn" onclick="addCustomToBatch('${biz.id}')">+ Batch</button>
+                    <button class="topbar-btn" onclick="copyCustomMsg('${biz.id}')">📋 Copy</button>
+                  </div>`
+               : ''
+             }`
+        }
+      </div>
     </div>
+
+    <!-- Reply & AI Suggestion Section -->
+    ${(biz.status === 'contacted' || biz.status === 'replied') ? `
+    <div class="detail-section">
+      <div class="detail-section-head"><span class="detail-section-title">Their Reply</span></div>
+      <div class="detail-section-body">
+        <textarea class="msg-textarea" rows="3" placeholder="Paste their reply here…" onchange="saveReply('${biz.id}', this.value)">${biz.theirReply ? esc(biz.theirReply) : ''}</textarea>
+        ${biz.theirReply ? `<button class="topbar-btn primary" onclick="suggestNextResponse('${biz.id}')" style="margin-top:8px;width:100%;justify-content:center">🤖 Suggest Next Response</button>` : ''}
+        ${biz.suggestedResponse ? `<div style="margin-top:10px;background:var(--bg);border-radius:8px;padding:12px;border:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Suggested Response</div>
+          <div style="font-size:13px;line-height:1.65;white-space:pre-wrap;color:var(--text)">${esc(biz.suggestedResponse)}</div>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button class="topbar-btn primary" onclick="useAsFollowUp('${biz.id}')" style="font-size:11px">Use this</button>
+            <button class="topbar-btn" onclick="updateBiz('${biz.id}',{suggestedResponse:null});renderDetail('${biz.id}')" style="font-size:11px">Dismiss</button>
+          </div>
+        </div>` : ''}
+      </div>
+    </div>` : ''}
 
     <!-- Notes Section -->
     <div class="detail-section">
@@ -1282,9 +1763,26 @@ function copyMsg(bizId) {
   navigator.clipboard.writeText(ta.value).then(() => toast('Copied!', 'ok'));
 }
 
-function openGmail(bizId) {
+async function openGmail(bizId) {
   const biz = getBiz(bizId);
   if (!biz) return;
+  // Real-time dedup check
+  const _bu = settings.backendUrl;
+  if (_bu && biz.place_id) {
+    try {
+      const _r = await fetch(_bu + '/check-contacted', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ place_ids: [biz.place_id] }),
+      });
+      const _d = await _r.json();
+      if (_d.results?.[biz.place_id]?.contacted) {
+        updateBiz(bizId, { status: 'contacted', blockedByDedup: true });
+        renderDetail(bizId); renderQueue();
+        toast('⚠️ ' + cleanBizName(biz.name) + ' already contacted by team', 'err');
+        return;
+      }
+    } catch(e) {}
+  }
   const msg = biz.generatedMessage || '';
   const subject = `Quick question for ${biz.name}`;
   const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(biz.email || '')}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(msg)}`;
@@ -1292,10 +1790,106 @@ function openGmail(bizId) {
   markContacted(bizId);
 }
 
+function deleteBiz(bizId) {
+  if (!confirm('Delete this business from the queue?')) return;
+  businesses = businesses.filter(b => b.id !== bizId);
+  delete batchApprovals[bizId];
+  save();
+  renderQueue();
+  updateBatchBtn();
+  updateDailyReportStats();
+  toast('Business removed', 'ok');
+}
+
+function deleteNoEmail() {
+  const count = businesses.filter(b => b.status === 'no_email').length;
+  if (!count) { toast('No businesses with "No Email" status', 'err'); return; }
+  if (!confirm(`Delete ${count} businesses with no email found?`)) return;
+  const toRemove = businesses.filter(b => b.status === 'no_email').map(b => b.id);
+  businesses = businesses.filter(b => b.status !== 'no_email');
+  toRemove.forEach(id => delete batchApprovals[id]);
+  save();
+  renderQueue();
+  updateBatchBtn();
+  toast(`Deleted ${count} businesses with no email`, 'ok');
+}
+
+function saveReply(bizId, text) {
+  updateBiz(bizId, { theirReply: text, status: text ? 'replied' : 'contacted', repliedAt: text ? now() : null });
+  renderDetail(bizId); renderQueue();
+  if (text) toast('Reply saved — click Suggest Next Response for AI suggestion', 'ok');
+  updateDailyReportStats();
+}
+
+async function suggestNextResponse(bizId) {
+  const biz = getBiz(bizId);
+  if (!biz || !biz.theirReply) return;
+  const claudeKey = settings.claudeKey;
+  if (!claudeKey) { toast('Add Claude API key in Settings to use AI suggestions', 'err'); return; }
+
+  const btn = document.querySelector(`button[onclick="suggestNextResponse('${bizId}')"]`);
+  if (btn) { btn.textContent = '⏳ Thinking…'; btn.disabled = true; }
+
+  const prompt = `You are an expert sales coach. A business has replied to our outreach message.
+
+Business: ${biz.name}
+Industry: ${biz.industry || 'Unknown'}
+Our original message: ${biz.messageSent || biz.generatedMessage || '(not recorded)'}
+Their reply: ${biz.theirReply}
+
+Write a concise, professional follow-up response (2-4 sentences max). 
+- Acknowledge their reply naturally
+- Move the conversation forward toward a call or meeting
+- Do NOT be pushy
+- Sound human and genuine
+- Sign off with just the sender's first name
+
+Sender name: ${settings.senderName || 'the sender'}
+
+Reply with ONLY the message text, no subject line, no explanation.`;
+
+  try {
+    const res = await callClaude(claudeKey, prompt);
+    updateBiz(bizId, { suggestedResponse: res.trim() });
+    renderDetail(bizId);
+    if (btn) { btn.textContent = '🤖 Suggest Next Response'; btn.disabled = false; }
+    toast('Response suggested — review before sending', 'ok');
+  } catch (err) {
+    toast('AI error: ' + err.message, 'err');
+    if (btn) { btn.textContent = '🤖 Suggest Next Response'; btn.disabled = false; }
+  }
+}
+
+function useAsFollowUp(bizId) {
+  const biz = getBiz(bizId);
+  if (!biz || !biz.suggestedResponse) return;
+  const signature = settings.signature ? '\n\n' + settings.signature : '';
+  const body = biz.suggestedResponse + signature;
+  const subjectTemplate = settings.emailSubject || 'Quick question for [Business]';
+  const subject = 'Re: ' + subjectTemplate.replace('[Business]', biz.name);
+  const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(biz.email || '')}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.open(url, '_blank');
+  updateBiz(bizId, { followUpSent: now(), suggestedResponse: null });
+  renderDetail(bizId);
+  toast('Follow-up opened in Gmail', 'ok');
+  updateDailyReportStats();
+}
+
 function markContacted(bizId) {
+  const biz = getBiz(bizId);
   updateBiz(bizId, { status: 'contacted', contactedAt: now() });
+  // Mark on backend for cross-browser dedup
+  const backendUrl = settings.backendUrl;
+  if (backendUrl && biz?.place_id) {
+    fetch(`${backendUrl}/mark-contacted`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ place_ids: [biz.place_id] }),
+    }).catch(() => {});
+  }
   renderDetail(); renderQueue();
   toast('Marked as contacted', 'ok');
+  updateDailyReportStats();
 }
 
 function markReplied(bizId) {
@@ -1388,15 +1982,43 @@ function showUploadPreview(data) {
   `;
 }
 
-function confirmUpload() {
+async function confirmUpload() {
   if (!pendingUploadData.length) return;
   const dupMode = document.getElementById('dup-mode').value;
-  let added = 0, skipped = 0, updated = 0;
+  let added = 0, skipped = 0, updated = 0, alreadyScouted = 0;
 
+  // Step 1: Check backend for already-scouted businesses (dedup)
+  const backendUrl = settings.backendUrl;
+  let scoutedIds = {};
+  if (backendUrl) {
+    const placeIds = pendingUploadData
+      .map(row => row['place id'] || row['place_id'] || null)
+      .filter(Boolean);
+    if (placeIds.length) {
+      try {
+        const res = await fetch(`${backendUrl}/check-contacted`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ place_ids: placeIds }),
+        });
+        const data = await res.json();
+        scoutedIds = data.results || {};
+      } catch (e) { console.warn('Dedup check failed:', e); }
+    }
+  }
+
+  // Step 2: Import rows, blocking already-scouted ones
   pendingUploadData.forEach(row => {
     const name = row.business || row['business name'] || '';
     const profileLink = row['profile link'] || row.profile_link || row.url || '';
+    const placeId = row['place id'] || row['place_id'] || null;
     if (!name) return;
+
+    // Block if already scouted by anyone (backend dedup)
+    if (placeId && scoutedIds[placeId]?.contacted) {
+      alreadyScouted++;
+      return; // hard block — never enters queue
+    }
 
     const existing = businesses.find(b =>
       profileLink ? b.profileLink === profileLink : b.name.toLowerCase() === name.toLowerCase()
@@ -1412,7 +2034,6 @@ function confirmUpload() {
         });
         updated++; return;
       }
-      // 'add' falls through
     }
 
     const newBiz = {
@@ -1422,6 +2043,7 @@ function confirmUpload() {
       reviews: row.reviews || null,
       band: row.band || null,
       profileLink,
+      place_id: placeId,
       website: row.website || null,
       email: row.email || null,
       emails: row.email ? [row.email] : [],
@@ -1444,7 +2066,8 @@ function confirmUpload() {
   renderQueue();
   updateAsStats();
   updateBatchBtn();
-  toast(`Imported: ${added} added${updated ? ', ' + updated + ' updated' : ''}${skipped ? ', ' + skipped + ' skipped' : ''}`, 'ok');
+  const msg = `Imported: ${added} added${updated ? ', ' + updated + ' updated' : ''}${skipped ? ', ' + skipped + ' skipped' : ''}${alreadyScouted ? ` — ⚠️ ${alreadyScouted} blocked (already scouted by your team)` : ''}`;
+  toast(msg, alreadyScouted ? 'warn' : 'ok');
   showContentTab('detail', document.getElementById('tab-detail'));
 }
 
@@ -1463,6 +2086,7 @@ async function startAutoScout() {
     name: b.name,
     website: b.website || extractDomainFromProfile(b.profileLink) || '',
     profileLink: b.profileLink || '',
+    place_id: b.place_id || null,
   }));
 
   // Show progress bar
@@ -1489,6 +2113,70 @@ async function startAutoScout() {
   }
 }
 
+async function enrichAllFromMaps() {
+  const backendUrl = settings.backendUrl;
+  if (!backendUrl) { toast('Set your backend URL in settings first', 'err'); return; }
+
+  const needEnrich = businesses.filter(b => !b.website && (b.place_id || b.profileLink));
+  if (!needEnrich.length) { toast('All businesses already have websites', 'err'); return; }
+
+  toast(`Enriching ${needEnrich.length} businesses from Google Maps API…`);
+  addLog('info', `Starting Maps enrichment for ${needEnrich.length} businesses`);
+
+  let enriched = 0, emailsFound = 0;
+  const batchSize = 10;
+
+  for (let i = 0; i < needEnrich.length; i += batchSize) {
+    const batch = needEnrich.slice(i, i + batchSize).map(b => ({
+      id: b.id,
+      place_id: b.place_id || null,
+      maps_url: b.profileLink || '',
+      business_name: b.name,
+    }));
+
+    try {
+      const res = await fetch(`${backendUrl}/batch-enrich`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ businesses: batch }),
+      });
+      const data = await res.json();
+      if (data.results) {
+        data.results.forEach(r => {
+          const update = {};
+          if (r.website) update.website = r.website;
+          if (r.phone) update.phone = r.phone;
+          if (r.address) update.address = r.address;
+          if (r.emails?.length) {
+            update.email = r.emails[0];
+            update.emails = r.emails;
+            update.status = 'found';
+            emailsFound++;
+            addLog('ok', `${r.business_name} — ${r.emails[0]}`);
+            generateMessage(r.id);
+          } else if (r.website) {
+            addLog('info', `${r.business_name} — website found: ${r.website}`);
+          } else if (r.error) {
+            addLog('warn', `${r.business_name} — ${r.error}`);
+          }
+          if (Object.keys(update).length) updateBiz(r.id, update);
+          enriched++;
+        });
+        renderQueue();
+        toast(`Progress: ${Math.min(i + batchSize, needEnrich.length)}/${needEnrich.length} processed, ${emailsFound} emails found`);
+      }
+    } catch (err) {
+      addLog('err', `Batch ${i / batchSize + 1} failed: ${err.message}`);
+    }
+
+    await new Promise(r => setTimeout(r, 600));
+  }
+
+  toast(`Enrichment complete — ${emailsFound} emails found from ${enriched} businesses`, 'ok');
+  addLog('ok', `Maps enrichment done: ${emailsFound} emails, ${enriched} businesses processed`);
+  renderQueue();
+}
+
 function extractDomainFromProfile(profileLink) {
   // Can't extract a website from a Google Maps link automatically
   // Return null — the backend will handle what it can
@@ -1506,29 +2194,72 @@ async function runAutoScoutViaBackend(queue) {
     addLog('info', `Scanning ${biz.name}…`);
 
     try {
-      if (biz.website) {
-        const res = await fetch(`${backendUrl}/find-email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ website: biz.website, business_name: biz.name }),
-        });
-        const data = await res.json();
+      // Step 0: Read reviews from Maps profile for pain scoring
+      let reviewData = null;
+      if (extAvailable && biz.profileLink) {
+        try {
+          reviewData = await sendToExtAndWait({ type: 'READ_REVIEWS', url: biz.profileLink, maxReviews: 150 }, 15000);
+          if (reviewData?.reviews?.length) {
+            const score = scoreBusiness(biz, reviewData.reviews);
+            updateBiz(biz.id, {
+              painScore: score.score,
+              painSignals: score.signals,
+              reviewSample: reviewData.reviews.slice(0, 5),
+              reviewCount: reviewData.reviews.length,
+            });
+            addLog('info', `${biz.name} — ${reviewData.reviews.length} reviews read, score: ${score.score}/10`);
+          }
+        } catch(e) { /* extension not available for review reading */ }
+      }
+
+      let data = null;
+      // Strategy 1: use /enrich-place if we have a place_id (gets website AND email)
+      if (biz.place_id) {
+        try {
+          const r = await fetch(`${backendUrl}/enrich-place`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ place_id: biz.place_id, maps_url: biz.profileLink, business_name: biz.name }),
+          });
+          const d = await r.json();
+          if (d.success) {
+            data = d;
+            // Also store website if we got one
+            if (d.website && !biz.website) updateBiz(biz.id, { website: d.website });
+          }
+        } catch {}
+      }
+      // Strategy 2: use /find-email if website known
+      if (!data?.emails?.length && biz.website) {
+        try {
+          const r = await fetch(`${backendUrl}/find-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ website: biz.website, business_name: biz.name }),
+          });
+          data = await r.json();
+        } catch {}
+      }
+
+      if (data) {
         const email = data.emails?.[0] || null;
         updateBiz(biz.id, {
           status: email ? 'found' : 'no_email',
           email, emails: data.emails || [], phones: data.phones || [],
+          ...(data.website ? { website: data.website } : {}),
+          ...(data.phone ? { phone: data.phone } : {}),
         });
         autoScoutStats.done++;
         if (email) {
           autoScoutStats.found++;
-          addLog('ok', `${biz.name} — ${email}`);
-          generateMessage(biz.id);
+          addLog('ok', `${biz.name} — ${email}${biz.painSignals?.length ? ` · ${biz.painSignals.length} pain signals` : ''}`);
+          await generateMessage(biz.id);
         } else {
-          addLog('warn', `${biz.name} — no email`);
+          addLog('warn', `${biz.name} — no email found`);
         }
       } else {
         updateBiz(biz.id, { status: 'no_email' });
-        addLog('warn', `${biz.name} — no website to crawl`);
+        addLog('warn', `${biz.name} — no website or place_id to use`);
         autoScoutStats.done++;
       }
     } catch {
@@ -1611,15 +2342,18 @@ function addToBatch(bizId) {
   const biz = getBiz(bizId);
   if (!biz || !biz.generatedMessage) { toast('Generate a message first', 'err'); return; }
   batchApprovals[bizId] = { approved: false, skipped: false, message: biz.generatedMessage };
+  updateBiz(bizId, { status: 'ready' });
   updateBatchBtn();
-  toast('Added to batch', 'ok');
+  toast('Added to Ready to Send queue', 'ok');
+  renderQueue();
 }
 
 function updateBatchBtn() {
-  // Add all with messages to batch automatically
+  // Add all with emails + messages to batch automatically
   businesses.forEach(b => {
-    if (b.generatedMessage && !batchApprovals[b.id]) {
+    if (b.generatedMessage && b.email && !batchApprovals[b.id]) {
       batchApprovals[b.id] = { approved: false, skipped: false, message: b.generatedMessage };
+      if (b.status === 'found') updateBiz(b.id, { status: 'ready' });
     }
   });
 
@@ -1699,7 +2433,9 @@ function openGmailFromBatch(bizId) {
   const biz = getBiz(bizId);
   const entry = batchApprovals[bizId];
   if (!biz || !entry) return;
-  const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(biz.email || '')}&su=${encodeURIComponent('Quick question for ' + biz.name)}&body=${encodeURIComponent(entry.message)}`;
+  const subj = (settings.emailSubject || 'Quick question for {name}').replace(/\{name\}/gi, biz.name).replace(/\[Business\]/gi, biz.name);
+  const sig = settings.signature ? '\n\n' + settings.signature : '';
+  const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(biz.email || '')}&su=${encodeURIComponent(subj)}&body=${encodeURIComponent(entry.message + sig)}`;
   window.open(url, '_blank');
 }
 
@@ -1711,29 +2447,159 @@ function approveAll() {
   renderBatch();
 }
 
-function sendApproved() {
+function getNextGmailAccount() {
+  const accounts = (settings.gmailAccounts || '').split('\n').map(a => a.trim()).filter(Boolean);
+  if (!accounts.length) return null;
+  const usedCounts = {};
+  businesses.forEach(b => { if (b.gmailUsed) usedCounts[b.gmailUsed] = (usedCounts[b.gmailUsed] || 0) + 1; });
+  // Pick the account with fewest sends today
+  const today = dateStr(new Date());
+  const todayCounts = {};
+  businesses.filter(b => b.contactedAt && dateStr(new Date(b.contactedAt)) === today)
+    .forEach(b => { if (b.gmailUsed) todayCounts[b.gmailUsed] = (todayCounts[b.gmailUsed] || 0) + 1; });
+  return accounts.reduce((best, acc) => (todayCounts[acc] || 0) < (todayCounts[best] || 0) ? acc : best, accounts[0]);
+}
+
+// Send queue state
+let sendQueue = [];
+let sendQueueIndex = 0;
+let sendQueueRunning = false;
+
+async function sendApproved() {
   const approved = Object.entries(batchApprovals).filter(([,v]) => v.approved && !v.skipped);
-  if (!approved.length) { toast('No approved messages', 'err'); return; }
+  if (!approved.length) { toast('No approved messages — tick the checkboxes first', 'err'); return; }
 
-  let delay = 0;
-  approved.forEach(([bizId, entry]) => {
+  const toSend = approved.slice(0, 100);
+  if (approved.length > 100) toast(`Capped at 100 per session. ${approved.length - 100} remain.`, 'warn');
+
+  // Build send queue
+  sendQueue = toSend.map(([bizId, entry]) => {
     const biz = getBiz(bizId);
-    if (!biz) return;
-    setTimeout(() => {
-      const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(biz.email || '')}&su=${encodeURIComponent('Quick question for ' + biz.name)}&body=${encodeURIComponent(entry.message)}`;
-      window.open(url, '_blank');
-      updateBiz(bizId, { status: 'contacted', contactedAt: now() });
-    }, delay);
-    delay += 600; // stagger Gmail tab opens
-  });
+    if (!biz || !biz.email) return null;
+    const signature = settings.signature ? '\n\n' + settings.signature : '';
+    const subjectTemplate = settings.emailSubject || 'Quick question for {name}';
+    const subject = subjectTemplate.replace(/\{name\}/gi, biz.name).replace(/\[Business\]/gi, biz.name);
+    const body = entry.message + signature;
+    return { bizId, biz, body, subject, entry };
+  }).filter(Boolean);
 
-  toast(`Opening ${approved.length} Gmail compose tabs…`, 'ok');
-  setTimeout(() => {
-    approved.forEach(([bizId]) => { delete batchApprovals[bizId]; });
-    renderQueue();
-    renderBatch();
-    updateBatchBtn();
-  }, delay + 1000);
+  sendQueueIndex = 0;
+  sendQueueRunning = true;
+  showSendProgress();
+  processNextSend();
+}
+
+function showSendProgress() {
+  const remaining = sendQueue.length - sendQueueIndex;
+  const el = document.getElementById('send-progress-bar');
+  if (el) {
+    el.style.display = 'flex';
+    document.getElementById('send-progress-text').textContent = `Sending ${sendQueueIndex} / ${sendQueue.length} — ${remaining} remaining`;
+    document.getElementById('send-progress-fill').style.width = `${(sendQueueIndex / sendQueue.length) * 100}%`;
+  }
+}
+
+async function processNextSend() {
+  if (!sendQueueRunning || sendQueueIndex >= sendQueue.length) {
+    finishSendQueue();
+    return;
+  }
+
+  const item = sendQueue[sendQueueIndex];
+  const { bizId, biz, body, subject } = item;
+
+  // Real-time dedup check before sending
+  const _backendUrl = settings.backendUrl;
+  if (_backendUrl && biz.place_id) {
+    try {
+      const _dr = await fetch(_backendUrl + '/check-contacted', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ place_ids: [biz.place_id] }),
+      });
+      const _dd = await _dr.json();
+      if (_dd.results?.[biz.place_id]?.contacted) {
+        updateBiz(bizId, { status: 'contacted', blockedByDedup: true });
+        delete batchApprovals[bizId];
+        sendQueueIndex++;
+        showSendProgress(); renderQueue();
+        toast('⚠️ ' + cleanBizName(biz.name) + ' already contacted by team — skipped', 'warn');
+        setTimeout(() => processNextSend(), 400);
+        return;
+      }
+    } catch(e) {}
+  }
+  // Build mailto URL
+  const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(biz.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+  // Open in SAME window (avoids popup blocker) — user sends manually
+  // OR open in new tab if first one
+  // Always open in a new tab — user must allow popups once for this site
+  // After first open, subsequent opens reuse the Gmail tab if still open
+  const win = window.open(url, '_blank');
+  if (!win) {
+    // Popup blocked — fallback: create a link and auto-click it
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
+  // Mark as contacted immediately
+  const gmailAcc = getNextGmailAccount();
+  updateBiz(bizId, { status: 'contacted', contactedAt: now(), messageSent: item.entry.message, gmailUsed: gmailAcc || 'default' });
+  if (biz.place_id) {
+    const backendUrl = settings.backendUrl;
+    if (backendUrl) fetch(`${backendUrl}/mark-contacted`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ place_ids: [biz.place_id] }) }).catch(()=>{});
+  }
+  delete batchApprovals[bizId];
+
+  sendQueueIndex++;
+  showSendProgress();
+  renderQueue();
+
+  // Show "Next" button in progress bar — user controls the pace
+  const nextBtn = document.getElementById('send-next-btn');
+  if (nextBtn) {
+    nextBtn.style.display = '';
+    nextBtn.textContent = sendQueueIndex < sendQueue.length
+      ? `Next: ${sendQueue[sendQueueIndex]?.biz?.name || ''} →`
+      : '✓ All Done';
+  }
+
+  if (sendQueueIndex >= sendQueue.length) {
+    finishSendQueue();
+  }
+}
+
+function nextSend() {
+  if (sendQueueIndex < sendQueue.length) {
+    processNextSend();
+  } else {
+    finishSendQueue();
+  }
+}
+
+function finishSendQueue() {
+  sendQueueRunning = false;
+  const sent = sendQueueIndex;
+  const el = document.getElementById('send-progress-bar');
+  if (el) {
+    document.getElementById('send-progress-text').textContent = `✓ Done — ${sent} emails opened`;
+    document.getElementById('send-progress-fill').style.width = '100%';
+    const nextBtn = document.getElementById('send-next-btn');
+    if (nextBtn) nextBtn.style.display = 'none';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+  }
+  renderBatch();
+  updateBatchBtn();
+  updateDailyReportStats();
+  toast(`✓ ${sent} emails opened and marked as contacted`, 'ok');
+}
+
+function stopSendQueue() {
+  sendQueueRunning = false;
+  const el = document.getElementById('send-progress-bar');
+  if (el) el.style.display = 'none';
+  toast('Send queue stopped', 'warn');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1847,6 +2713,120 @@ function saveScoutUrl() {
   toast('Scout URL saved and synced to extension', 'ok');
 }
 
+function saveSenderSettings() {
+  const name = document.getElementById('sender-name-input').value.trim();
+  const signature = document.getElementById('signature-input').value;
+  const subject = document.getElementById('subject-input').value.trim();
+  if (name) saveSetting('senderName', name);
+  saveSetting('signature', signature);
+  saveSetting('emailSubject', subject || 'Quick question for [Business]');
+  toast('Settings saved', 'ok');
+}
+
+function saveGmailAccounts() {
+  const val = document.getElementById('gmail-accounts-input').value;
+  saveSetting('gmailAccounts', val);
+  const accounts = val.split('\n').map(a => a.trim()).filter(Boolean);
+  const statusEl = document.getElementById('gmail-rotation-status');
+  if (statusEl) statusEl.textContent = `✓ ${accounts.length} account${accounts.length !== 1 ? 's' : ''} saved — rotation active`;
+  toast(`${accounts.length} Gmail accounts saved`, 'ok');
+  showGmailRotationStatus();
+}
+
+function showGmailRotationStatus() {
+  const statusEl = document.getElementById('gmail-rotation-status');
+  if (!statusEl) return;
+  const accounts = (settings.gmailAccounts || '').split('\n').map(a => a.trim()).filter(Boolean);
+  if (!accounts.length) { statusEl.textContent = 'No accounts added yet.'; return; }
+  const today = dateStr(new Date());
+  const todayCounts = {};
+  businesses.filter(b => b.contactedAt && dateStr(new Date(b.contactedAt)) === today)
+    .forEach(b => { if (b.gmailUsed) todayCounts[b.gmailUsed] = (todayCounts[b.gmailUsed] || 0) + 1; });
+  const lines = accounts.map(a => `${a}: ${todayCounts[a] || 0} sent today`);
+  statusEl.innerHTML = lines.join('<br>');
+}
+
+function saveScoutName() {
+  const name = document.getElementById('scout-name-input').value.trim();
+  if (!name) { toast('Enter your scout name first', 'err'); return; }
+  saveSetting('scoutName', name);
+  toast('Scout name saved: ' + name, 'ok');
+}
+
+function updateDailyReportStats() {
+  const el = document.getElementById('daily-report-stats');
+  if (!el) return;
+  const today = dateStr(new Date());
+  const contacted = businesses.filter(b => b.contactedAt && dateStr(new Date(b.contactedAt)) === today);
+  const replied = businesses.filter(b => b.status === 'replied' && b.repliedAt && dateStr(new Date(b.repliedAt)) === today);
+  const followUps = businesses.filter(b => b.followUpSent && dateStr(new Date(b.followUpSent)) === today);
+  const cities = [...new Set(contacted.map(b => {
+    try { return new URL(b.profileLink || '').searchParams.get('near') || ''; } catch { return ''; }
+  }).filter(Boolean))];
+  const industries = [...new Set(contacted.map(b => b.industry).filter(Boolean))];
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <span style="color:var(--muted)">Businesses contacted:</span><strong>${contacted.length}</strong>
+      <span style="color:var(--muted)">Emails sent:</span><strong>${contacted.length}</strong>
+      <span style="color:var(--muted)">Replies today:</span><strong>${replied.length}</strong>
+      <span style="color:var(--muted)">Follow-ups sent:</span><strong>${followUps.length}</strong>
+      <span style="color:var(--muted)">Industries:</span><strong>${industries.join(', ') || '—'}</strong>
+    </div>
+    <div style="margin-top:6px;font-size:11px;color:var(--muted)">Date: ${today}</div>
+  `;
+}
+
+async function exportDailyReport() {
+  const scoutName = settings.scoutName || settings.senderName || '';
+  if (!scoutName) {
+    toast('Set your Scout name in settings first', 'err');
+    document.getElementById('scout-name-input').focus();
+    return;
+  }
+  const backendUrl = settings.backendUrl;
+  if (!backendUrl) { toast('Set your backend URL in Auto-Scout settings first', 'err'); return; }
+
+  const today = dateStr(new Date());
+  const contacted = businesses.filter(b => b.contactedAt && dateStr(new Date(b.contactedAt)) === today);
+  const replied = businesses.filter(b => b.repliedAt && dateStr(new Date(b.repliedAt)) === today);
+  const followUps = businesses.filter(b => b.followUpSent && dateStr(new Date(b.followUpSent)) === today);
+  const industries = [...new Set(contacted.map(b => b.industry).filter(Boolean))];
+
+  const statusEl = document.getElementById('daily-report-status');
+  if (statusEl) statusEl.textContent = 'Submitting…';
+
+  try {
+    const res = await fetch(`${backendUrl}/daily-summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scout_name: scoutName,
+        date: today,
+        stats: {
+          contacted: contacted.length,
+          emails_sent: contacted.length,
+          replies_received: replied.length,
+          follow_ups_sent: followUps.length,
+          cities: [],
+          categories: industries,
+        }
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (statusEl) statusEl.textContent = '✗ ' + (data.error || 'Failed');
+      toast(data.error || 'Submission failed', 'err');
+      return;
+    }
+    if (statusEl) statusEl.textContent = `✓ Submitted for ${today}`;
+    toast('Daily report submitted to Elevate Office Tracker ✓', 'ok');
+  } catch (err) {
+    if (statusEl) statusEl.textContent = '✗ Network error';
+    toast('Network error: ' + err.message, 'err');
+  }
+}
+
 function saveSenderName() {
   const name = document.getElementById('sender-name-input').value.trim();
   saveSetting('senderName', name);
@@ -1958,6 +2938,7 @@ function handleHashImport() {
           name: biz,
           email: p.get('email') || null,
           website: p.get('website') || null,
+          place_id: p.get('place_id') || null,
           rating: p.get('rating') ? parseFloat(p.get('rating')) : null,
           reviews: p.get('reviews') || null,
           band: p.get('band') || null,
@@ -1990,7 +2971,36 @@ function init() {
   if (settings.scoutUrl) document.getElementById('scout-url-input').value = settings.scoutUrl;
   else document.getElementById('scout-url-input').value = window.location.href.split('?')[0].split('#')[0];
   if (settings.senderName) document.getElementById('sender-name-input').value = settings.senderName;
+  if (settings.signature && document.getElementById('signature-input')) document.getElementById('signature-input').value = settings.signature;
+  if (settings.emailSubject && document.getElementById('subject-input')) document.getElementById('subject-input').value = settings.emailSubject;
+  if (settings.scoutName && document.getElementById('scout-name-input')) document.getElementById('scout-name-input').value = settings.scoutName;
+  if (settings.gmailAccounts && document.getElementById('gmail-accounts-input')) document.getElementById('gmail-accounts-input').value = settings.gmailAccounts;
+  if (document.getElementById('es-signature')) document.getElementById('es-signature').value = settings.signature || 'Best regards,\nOlalekan Oyekunle\nElevate Business Solutions';
+  showGmailRotationStatus();
+  updateDailyReportStats();
   if (settings.backendUrl) document.getElementById('backend-url-input').value = settings.backendUrl;
+
+  // Register PWA service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
+  // Mobile tab switching
+  function showTabMobile(tabId, el) {
+    // Switch main content
+    const map = { upload: 'upload-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
+    const contentId = map[tabId] || 'detail';
+    document.querySelectorAll('.tab-panel, #detail').forEach(p => p.style.display = 'none');
+    const panel = document.getElementById(contentId);
+    if (panel) panel.style.display = '';
+    // Update mobile nav active state
+    document.querySelectorAll('.mob-nav-btn, .tt-btn').forEach(b => b.classList.remove('active'));
+    if (el) el.classList.add('active');
+    // Sync desktop nav tabs
+    const navTab = document.getElementById('tab-' + tabId);
+    if (navTab) { document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active')); navTab.classList.add('active'); }
+  }
+  window.showTabMobile = showTabMobile;
 
   // Set export date defaults
   const today = new Date();
@@ -2012,6 +3022,442 @@ function init() {
 }
 
 init();
+// ═══════════════════════════════════════════════════════════════
+// EMAIL SCOUT
+// ═══════════════════════════════════════════════════════════════
+
+let esContacts = [];      // [{name, email, website, phone}]
+let esTemplates = [];     // [{id, message}]
+let esCurrentIndex = 0;
+let esRunning = false;
+let esRotationIndex = 0;
+
+// ── PARSE CSV/XLSX ───────────────────────────────────────────────
+
+function handleEsFile(file) {
+  if (!file) return;
+  const isCsv = file.name.toLowerCase().endsWith('.csv');
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      let rows = [];
+      if (isCsv) {
+        rows = parseCSV(e.target.result);
+      } else {
+        // xlsx/xls — use SheetJS if available, fallback to text parse
+        if (typeof XLSX !== 'undefined') {
+          const wb = XLSX.read(e.target.result, { type: 'binary' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        } else {
+          // Fallback — try as CSV (will work if saved as CSV with xlsx extension)
+          rows = parseCSV(typeof e.target.result === 'string' ? e.target.result : '');
+        }
+      }
+      // Normalize headers
+      esContacts = rows.map(r => {
+        const keys = Object.keys(r);
+        const get = (...names) => {
+          for (const n of names) {
+            const k = keys.find(k => k.toLowerCase().replace(/[^a-z]/g,'') === n.replace(/[^a-z]/g,''));
+            if (k && r[k]) return String(r[k]).trim();
+          }
+          return '';
+        };
+        return {
+          name: get('business','businessname','company','name') || '',
+          email: get('email','emailaddress','mail') || '',
+          website: get('website','url','site') || '',
+          phone: get('phone','tel','mobile','number') || '',
+        };
+      }).filter(r => r.name && r.email);
+
+      const statusEl = document.getElementById('es-upload-status');
+      if (statusEl) statusEl.textContent = `✓ ${esContacts.length} contacts loaded (${rows.length - esContacts.length} skipped — no email)`;
+      updateEsSendStats();
+      renderEsPreview();
+    } catch(err) {
+      const statusEl = document.getElementById('es-upload-status');
+      if (statusEl) statusEl.textContent = '✗ Could not read file: ' + err.message;
+    }
+  };
+  if (isCsv) reader.readAsText(file);
+  else reader.readAsBinaryString(file);
+}
+
+function renderEsPreview() {
+  const el = document.getElementById('es-preview');
+  const table = document.getElementById('es-preview-table');
+  const count = document.getElementById('es-count');
+  if (!el || !table) return;
+  el.style.display = esContacts.length ? '' : 'none';
+  if (count) count.textContent = esContacts.length;
+  const preview = esContacts.slice(0, 8);
+  table.innerHTML = `
+    <tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600">Business</th>
+      <th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600">Email</th>
+      <th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600">Website</th>
+    </tr>
+    ${preview.map(r => `<tr><td style="padding:4px 8px;color:var(--text)">${esc(r.name)}</td><td style="padding:4px 8px;color:var(--green)">${esc(r.email)}</td><td style="padding:4px 8px;color:var(--muted)">${esc(r.website)}</td></tr>`).join('')}
+    ${esContacts.length > 8 ? `<tr><td colspan="3" style="padding:4px 8px;color:var(--muted)">… and ${esContacts.length - 8} more</td></tr>` : ''}
+  `;
+}
+
+// ── TEMPLATE MANAGEMENT ──────────────────────────────────────────
+
+function addEsTemplate(text) {
+  if (esTemplates.length >= 20) { toast('Maximum 20 templates', 'err'); return; }
+  esTemplates.push({ id: genId(), message: text || '' });
+  renderEsTemplates();
+}
+
+function removeEsTemplate(id) {
+  esTemplates = esTemplates.filter(t => t.id !== id);
+  renderEsTemplates();
+}
+
+function renderEsTemplates() {
+  const el = document.getElementById('es-templates-list');
+  if (!el) return;
+  if (!esTemplates.length) {
+    el.innerHTML = `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">No templates yet — click "+ Add Message" to add one.</div>`;
+    return;
+  }
+  el.innerHTML = esTemplates.map((t, i) => `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;position:relative">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:11px;font-weight:700;color:var(--accent);background:rgba(91,110,245,.15);padding:2px 8px;border-radius:6px">Message ${i + 1}</span>
+        <span style="font-size:10px;color:var(--muted)">Use {name} for business name, {email} for their email</span>
+        <button onclick="removeEsTemplate('${t.id}')" style="margin-left:auto;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px">✕</button>
+      </div>
+      <textarea
+        style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:12px;line-height:1.65;resize:vertical;min-height:120px;font-family:inherit"
+        placeholder="Hi {name},&#10;&#10;I came across your business and noticed…&#10;&#10;Would you be open to a quick chat?"
+        onchange="esTemplates[${i}].message = this.value"
+      >${esc(t.message)}</textarea>
+      <div style="margin-top:6px;font-size:11px;color:var(--muted)">
+        Preview: <em style="color:var(--text)">${esContacts[0] ? personaliseEsMsg(t.message, esContacts[0]).slice(0,80) + '…' : '(load contacts to preview)'}</em>
+      </div>
+    </div>
+  `).join('');
+}
+
+function personaliseEsMsg(template, contact) {
+  return (template || '')
+    .replace(/\{name\}/gi, contact.name || '')
+    .replace(/\{email\}/gi, contact.email || '')
+    .replace(/\{website\}/gi, contact.website || '')
+    .replace(/\{phone\}/gi, contact.phone || '');
+}
+
+function getEsMessage(contact) {
+  if (!esTemplates.length) return '';
+  const mode = document.getElementById('es-rotation-mode')?.value || 'rotate';
+  let tpl;
+  if (mode === 'first') tpl = esTemplates[0];
+  else if (mode === 'random') tpl = esTemplates[Math.floor(Math.random() * esTemplates.length)];
+  else { tpl = esTemplates[esRotationIndex % esTemplates.length]; esRotationIndex++; }
+  return personaliseEsMsg(tpl.message, contact);
+}
+
+// ── SEND FLOW ────────────────────────────────────────────────────
+
+function updateEsSendStats() {
+  const el = document.getElementById('es-send-stats');
+  if (!el) return;
+  el.textContent = `${esContacts.length} contacts loaded, ${esTemplates.length} template${esTemplates.length !== 1 ? 's' : ''} ready.`;
+}
+
+function startEsSend() {
+  if (!esContacts.length) { toast('Upload a contact list first', 'err'); return; }
+  if (!esTemplates.length) { toast('Add at least one message template first', 'err'); return; }
+  esCurrentIndex = 0;
+  esRotationIndex = 0;
+  esRunning = true;
+  document.getElementById('es-start-btn').style.display = 'none';
+  document.getElementById('es-stop-btn').style.display = '';
+  document.getElementById('es-log').style.display = '';
+  esLog('Starting send for ' + esContacts.length + ' contacts…');
+  sendNextEs();
+}
+
+function sendNextEs() {
+  if (!esRunning || esCurrentIndex >= esContacts.length) {
+    stopEsSend(true);
+    return;
+  }
+
+  const contact = esContacts[esCurrentIndex];
+  const message = getEsMessage(contact);
+  const signature = document.getElementById('es-signature')?.value || settings.signature || '';
+  const subjectTpl = document.getElementById('es-subject')?.value || 'Quick question for {name}';
+  const subject = personaliseEsMsg(subjectTpl, contact);
+  const body = message + (signature ? '\n\n' + signature : '');
+
+  const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contact.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.open(url, '_blank');
+
+  esLog(`✓ Opened Gmail for ${contact.name} (${contact.email})`);
+  esCurrentIndex++;
+
+  // Update progress
+  const pct = (esCurrentIndex / esContacts.length) * 100;
+  const fillEl = document.getElementById('es-progress-fill');
+  const textEl = document.getElementById('es-progress-text');
+  if (fillEl) fillEl.style.width = pct + '%';
+  if (textEl) textEl.textContent = `${esCurrentIndex} / ${esContacts.length} sent`;
+
+  // Next button or auto-delay
+  const delay = parseInt(document.getElementById('es-delay')?.value || '0');
+  const nextBtn = document.getElementById('es-next-btn');
+
+  if (delay === 0) {
+    // Manual mode — show Next button
+    if (nextBtn) nextBtn.style.display = esCurrentIndex < esContacts.length ? '' : 'none';
+  } else {
+    // Auto mode — schedule next
+    if (nextBtn) nextBtn.style.display = 'none';
+    if (esCurrentIndex < esContacts.length) {
+      setTimeout(() => { if (esRunning) sendNextEs(); }, delay);
+    } else {
+      stopEsSend(true);
+    }
+  }
+}
+
+function nextEsSend() {
+  if (esRunning && esCurrentIndex < esContacts.length) sendNextEs();
+  else stopEsSend(true);
+}
+
+function stopEsSend(completed) {
+  esRunning = false;
+  document.getElementById('es-start-btn').style.display = '';
+  document.getElementById('es-stop-btn').style.display = 'none';
+  document.getElementById('es-next-btn').style.display = 'none';
+  if (completed) {
+    esLog('✓ All done — ' + esCurrentIndex + ' emails opened');
+    toast('Email Scout complete — ' + esCurrentIndex + ' emails sent', 'ok');
+  } else {
+    esLog('Stopped at ' + esCurrentIndex + ' / ' + esContacts.length);
+    toast('Send stopped', 'warn');
+  }
+}
+
+function esLog(msg) {
+  const el = document.getElementById('es-log');
+  if (!el) return;
+  const line = document.createElement('div');
+  line.style.cssText = 'padding:2px 0;border-bottom:1px solid rgba(255,255,255,.04)';
+  line.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+// Init Email Scout with one default template
+if (!esTemplates.length) {
+  esTemplates.push({ id: genId(), message: 'Hi {name},\n\nI came across your business and noticed something that caught my attention.\n\nI work with local businesses to help them streamline their operations and follow-ups using simple systems. Many of our clients have seen a significant improvement in how they manage customer relationships after working with us.\n\nWould you be open to a quick 10-minute call this week to explore if this could help you too?\n\nLooking forward to hearing from you.' });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CUSTOM MESSAGE TEMPLATES
+// ═══════════════════════════════════════════════════════════════
+
+let customTemplates = JSON.parse(localStorage.getItem('scout_custom_templates') || '[]');
+
+function getCustomTemplates() { return customTemplates; }
+
+function saveCustomTemplates() {
+  localStorage.setItem('scout_custom_templates', JSON.stringify(customTemplates));
+  toast('Custom messages saved', 'ok');
+  renderCustomTemplates();
+}
+
+function addCustomTemplate() {
+  if (customTemplates.length >= 20) { toast('Maximum 20 messages', 'err'); return; }
+  customTemplates.push({ id: genId(), message: '' });
+  renderCustomTemplates();
+}
+
+function removeCustomTemplate(id) {
+  customTemplates = customTemplates.filter(t => t.id !== id);
+  renderCustomTemplates();
+  saveCustomTemplates();
+}
+
+function renderCustomTemplates() {
+  const el = document.getElementById('custom-templates-list');
+  const countEl = document.getElementById('custom-msg-count');
+  if (countEl) countEl.textContent = customTemplates.length + ' / 20 messages';
+  if (!el) return;
+  if (!customTemplates.length) {
+    el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:12px">No messages yet. Click "+ Add Message" to start.</div>';
+    return;
+  }
+  el.innerHTML = customTemplates.map((t, i) => `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-size:11px;font-weight:700;color:var(--accent);background:rgba(91,110,245,.15);padding:2px 8px;border-radius:6px">MSG ${i+1}</span>
+        <button onclick="removeCustomTemplate('${t.id}')" style="margin-left:auto;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 6px">✕</button>
+      </div>
+      <textarea
+        style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:12px;line-height:1.6;resize:vertical;min-height:90px;font-family:inherit"
+        placeholder="Hi {name}, I was looking at your business listing — {rating}★ across {reviews} reviews…"
+        onchange="customTemplates[${i}].message = this.value"
+      >${esc(t.message)}</textarea>
+    </div>
+  `).join('');
+}
+
+function personaliseCustomMsg(template, biz) {
+  const name = cleanBizName(biz.name) || biz.name || '';
+  const firstName = name.split(/[\s&|]/)[0] || name;
+  return (template || '')
+    .replace(/\{name\}/gi, firstName)
+    .replace(/\{fullname\}/gi, name)
+    .replace(/\{rating\}/gi, biz.rating || '')
+    .replace(/\{reviews\}/gi, biz.reviews || '')
+    .replace(/\{location\}/gi, biz.country || biz.city || '')
+    .replace(/\{industry\}/gi, biz.industry || '')
+    .replace(/\{website\}/gi, biz.website || '')
+    .replace(/\{email\}/gi, biz.email || '');
+}
+
+function switchMsgTab(bizId, tab) {
+  const aiPanel = document.getElementById('msgpanel-ai-' + bizId);
+  const customPanel = document.getElementById('msgpanel-custom-' + bizId);
+  const aiBtn = document.getElementById('msgtab-ai-' + bizId);
+  const customBtn = document.getElementById('msgtab-custom-' + bizId);
+  if (!aiPanel || !customPanel) return;
+  if (tab === 'ai') {
+    aiPanel.style.display = '';
+    customPanel.style.display = 'none';
+    if (aiBtn) { aiBtn.classList.add('active'); }
+    if (customBtn) { customBtn.classList.remove('active'); }
+  } else {
+    aiPanel.style.display = 'none';
+    customPanel.style.display = '';
+    if (customBtn) { customBtn.classList.add('active'); }
+    if (aiBtn) { aiBtn.classList.remove('active'); }
+  }
+}
+
+function selectCustomMsg(bizId, idx) {
+  updateBiz(bizId, { customMsgIdx: idx });
+  renderDetail(bizId);
+  // Stay on custom tab
+  setTimeout(() => switchMsgTab(bizId, 'custom'), 0);
+}
+
+async function sendCustomMsg(bizId) {
+  const biz = getBiz(bizId);
+  const tpl = getCustomTemplates()[biz?.customMsgIdx];
+  if (!biz || !tpl) return;
+
+  // Real-time dedup check
+  const backendUrl = settings.backendUrl;
+  if (backendUrl && biz.place_id) {
+    try {
+      const res = await fetch(`${backendUrl}/check-contacted`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ place_ids: [biz.place_id] }),
+      });
+      const data = await res.json();
+      if (data.results?.[biz.place_id]?.contacted) {
+        updateBiz(bizId, { status: 'contacted', blockedByDedup: true });
+        renderDetail(bizId); renderQueue();
+        toast('⚠️ ' + cleanBizName(biz.name) + ' has already been contacted by your team', 'err');
+        return;
+      }
+    } catch(e) {}
+  }
+
+  const body = personaliseCustomMsg(tpl.message, biz) + (settings.signature ? '\n\n' + settings.signature : '');
+  const subj = (settings.emailSubject || 'Quick question for {name}').replace(/\{name\}/gi, cleanBizName(biz.name));
+  const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(biz.email || '')}&su=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
+  window.open(url, '_blank');
+  updateBiz(bizId, { status: 'contacted', contactedAt: now(), messageSent: body, messageSentIdx: biz.customMsgIdx, messageSentType: 'custom' });
+  if (biz.place_id && settings.backendUrl) {
+    fetch(settings.backendUrl + '/mark-contacted', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ place_ids: [biz.place_id] }) }).catch(()=>{});
+  }
+  renderDetail(bizId); renderQueue();
+  toast('Gmail opened — message sent', 'ok');
+  updateDailyReportStats();
+}
+
+function addCustomToBatch(bizId) {
+  const biz = getBiz(bizId);
+  const tpl = getCustomTemplates()[biz?.customMsgIdx];
+  if (!biz || !tpl || !biz.email) { toast('Select a message and make sure email is found first', 'err'); return; }
+  const msg = personaliseCustomMsg(tpl.message, biz);
+  if (!batchApprovals[bizId]) batchApprovals[bizId] = {};
+  batchApprovals[bizId].message = msg;
+  batchApprovals[bizId].approved = true;
+  batchApprovals[bizId].skipped = false;
+  batchApprovals[bizId].msgType = 'custom';
+  batchApprovals[bizId].msgIdx = biz.customMsgIdx;
+  updateBatchBtn();
+  toast(cleanBizName(biz.name) + ' added to batch with custom message', 'ok');
+}
+
+function copyCustomMsg(bizId) {
+  const biz = getBiz(bizId);
+  const tpl = getCustomTemplates()[biz?.customMsgIdx];
+  if (!biz || !tpl) return;
+  navigator.clipboard.writeText(personaliseCustomMsg(tpl.message, biz)).then(() => toast('Copied ✓'));
+}
+
+// Load custom templates on startup
+renderCustomTemplates();
+
+// ── BACKGROUND DEDUP POLL ────────────────────────────────────────────────────
+// Every 5 minutes, check all pending/found businesses against backend
+// This catches cases where another scout contacts a business while this
+// scout has it sitting in their queue
+
+async function backgroundDedupCheck() {
+  const backendUrl = settings.backendUrl;
+  if (!backendUrl) return;
+
+  const checkable = businesses.filter(b =>
+    b.place_id &&
+    !b.blockedByDedup &&
+    (b.status === 'pending' || b.status === 'found' || b.status === 'no_email')
+  );
+
+  if (!checkable.length) return;
+
+  const placeIds = checkable.map(b => b.place_id);
+  try {
+    const res = await fetch(`${backendUrl}/check-contacted`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ place_ids: placeIds }),
+    });
+    const data = await res.json();
+    if (!data.results) return;
+
+    let blocked = 0;
+    checkable.forEach(b => {
+      if (data.results[b.place_id]?.contacted) {
+        updateBiz(b.id, { blockedByDedup: true, status: 'contacted' });
+        blocked++;
+      }
+    });
+
+    if (blocked > 0) {
+      renderQueue();
+      toast(`⚠️ ${blocked} business${blocked > 1 ? 'es' : ''} in your queue already contacted by your team — marked`, 'warn');
+    }
+  } catch(e) {}
+}
+
+// Run on load and every 5 minutes
+setTimeout(backgroundDedupCheck, 3000);
+setInterval(backgroundDedupCheck, 5 * 60 * 1000);
+
 </script>
 </body>
 </html>
