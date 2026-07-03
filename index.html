@@ -354,6 +354,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
   <button class="tt-btn active" onclick="showTabMobile('detail',this)">🏠 Queue</button>
   <button class="tt-btn" onclick="showTabMobile('upload',this)">📁 Upload</button>
   <button class="tt-btn" onclick="showTabMobile('email-scout-content',this)">📧 Email Scout</button>
+  <button class="tt-btn" onclick="showTabMobile('dorking',this)">🌐 Dorking</button>
   <button class="tt-btn" onclick="showTabMobile('verify-send',this)">🧪 Verify</button>
   <button class="tt-btn" onclick="showTabMobile('batch',this)">✅ Approve</button>
   <button class="tt-btn" onclick="showTabMobile('autoscout',this)">🤖 Scout</button>
@@ -426,6 +427,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
       <div class="nav-tab active" onclick="showContentTab('detail',this)" id="tab-detail">Business</div>
       <div class="nav-tab" onclick="showContentTab('upload-content',this)" id="tab-upload">Upload</div>
       <div class="nav-tab" onclick="showContentTab('email-scout-content',this)" id="tab-emailscout">📧 Email Scout</div>
+      <div class="nav-tab" onclick="showContentTab('dorking-content',this)" id="tab-dorking">🌐 Dorking</div>
       <div class="nav-tab" onclick="showContentTab('verify-send-content',this)" id="tab-verify">🧪 Verify & Send</div>
       <div class="nav-tab" onclick="showContentTab('batch-content',this)" id="tab-batch">Batch Approve</div>
       <div class="nav-tab" onclick="showContentTab('autoscout-content',this)" id="tab-autoscout">Auto-Scout</div>
@@ -573,6 +575,76 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
       </div>
     </div>
 
+
+
+    <!-- DORKING -->
+    <div class="tab-panel" id="dorking-content" style="overflow-y:auto">
+      <div id="dorking-panel" style="padding:16px;max-width:1040px;margin:0 auto">
+        <div style="margin-bottom:20px">
+          <h2 style="font-size:16px;font-weight:800;margin-bottom:4px">🌐 Bing Dorking</h2>
+          <p style="font-size:12px;color:var(--muted)">This is still Scout App. Use Bing signal queries to find web leads, then send them into the same queue, Verify &amp; Send tab, and Email Scout tab.</p>
+        </div>
+
+        <div class="as-card" style="margin-bottom:14px">
+          <h3>1. Dorking Settings</h3>
+          <p>Set industry, location, and Bing signal queries. These sync to the Chrome extension and can also be posted to the backend cloud runner.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 140px;gap:10px;margin-bottom:10px">
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Industry</label><input id="sv37-dork-industry" class="as-input" placeholder="cleaning companies"></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Location</label><input id="sv37-dork-location" class="as-input" placeholder="New York"></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Results/signal</label><input id="sv37-dork-results" class="as-input" type="number" min="10" max="100" value="30"></div>
+          </div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Bing signal queries — one per line</label>
+          <textarea id="sv37-dork-signals" class="as-input" rows="10" style="width:100%;resize:vertical;font-family:monospace;font-size:11px" placeholder='"{industry}" "{location}" "contact us" "email"'></textarea>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            <button class="settings-btn" onclick="sv37SaveDorkingSettings()" style="margin:0">Save &amp; Sync to Extension</button>
+            <button class="topbar-btn" onclick="sv37LoadDorkingSettings()">Reload Saved</button>
+            <button class="topbar-btn" onclick="sv37ExportDorkSignals()">⬇ Export Signals</button>
+            <button class="topbar-btn" onclick="document.getElementById('sv37-dork-file').click()">📂 Import Signals</button>
+            <input type="file" id="sv37-dork-file" accept=".txt,.csv" style="display:none" onchange="sv37ImportDorkSignals(this.files[0])">
+          </div>
+          <div id="sv37-dork-save-status" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+        </div>
+
+        <div class="as-card" style="margin-bottom:14px">
+          <h3>2. Browser Extension Dorking</h3>
+          <p>Use this when your PC and Chrome are open. The extension runs Bing dorking in the browser and pushes found web leads into Scout App.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="topbar-btn primary" onclick="sv37StartExtensionDorking()">Start Extension Dorking</button>
+            <button class="topbar-btn" onclick="sv37StopExtensionDorking()">Stop Extension Dorking</button>
+            <button class="topbar-btn" onclick="sv37SyncExtensionDorking()">Sync Extension</button>
+          </div>
+          <div id="sv37-ext-dork-status" style="margin-top:8px;font-size:12px;color:var(--muted)">Extension dorking uses the current saved settings.</div>
+        </div>
+
+        <div class="as-card" style="margin-bottom:14px">
+          <h3>3. Cloud Bing Dorking</h3>
+          <p>Optional backend runner. It uses the same Bing signals and backend endpoints. Search engines can still block cloud scraping, so browser extension mode remains the most reliable no-API dorking mode.</p>
+          <div style="display:grid;grid-template-columns:1fr 140px 140px;gap:10px;margin-bottom:10px">
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Backend URL</label><input id="sv37-dork-backend" class="as-input" placeholder="https://your-backend.onrender.com"></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Target emails</label><input id="sv37-dork-target" class="as-input" type="number" min="1" max="50000" value="50"></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Max pages</label><input id="sv37-dork-max-pages" class="as-input" type="number" min="1" max="50000" value="300"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="topbar-btn primary" onclick="sv37StartCloudDorking()">Start Cloud Bing Campaign</button>
+            <button class="topbar-btn" onclick="sv37RefreshCloudDorking()">Refresh Campaign</button>
+            <button class="topbar-btn danger" onclick="sv37StopCloudDorking()">Stop Campaign</button>
+            <button class="topbar-btn" onclick="sv37PullDorkLeadsToQueue()">Pull Web Leads into Queue</button>
+          </div>
+          <div id="sv37-cloud-dork-status" style="margin-top:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px;color:var(--muted);line-height:1.6">No cloud campaign running.</div>
+        </div>
+
+        <div class="as-card">
+          <h3>4. Web Leads</h3>
+          <p>After dorking, web leads appear in the left queue under the <strong>Web Leads</strong> filter. Then run Verify &amp; Send to move ready contacts into Email Scout.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <button class="topbar-btn" onclick="setFilter('dorking', document.querySelector('#qp-actions .qp-action[onclick*=\'dorking\']'))">Show Web Leads in Queue</button>
+            <button class="topbar-btn" onclick="showContentTab('verify-send-content', document.getElementById('tab-verify'))">Open Verify &amp; Send</button>
+            <button class="topbar-btn" onclick="showContentTab('email-scout-content', document.getElementById('tab-emailscout'))">Open Email Scout</button>
+          </div>
+          <div id="sv37-dork-local-stats" style="font-size:12px;color:var(--muted)"></div>
+        </div>
+      </div>
+    </div>
 
     <!-- VERIFY & SEND -->
     <div class="tab-panel" id="verify-send-content" style="overflow-y:auto">
@@ -874,6 +946,9 @@ Elevate Business Solutions
   </button>
   <button class="mob-nav-btn" onclick="showTabMobile('batch',this)" id="mob-batch">
     <span>✅</span>Approve
+  </button>
+  <button class="mob-nav-btn" onclick="showTabMobile('dorking',this)" id="mob-dorking">
+    <span>🌐</span>Dork
   </button>
   <button class="mob-nav-btn" onclick="showTabMobile('autoscout',this)" id="mob-scout">
     <span>🤖</span>Scout
@@ -3251,11 +3326,12 @@ function showContentTab(id, el) {
   if (id === 'timeline-content') renderTimeline();
   if (id === 'batch-content') { renderBatch(); updateBatchBtn(); }
   if (id === 'verify-send-content' && typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab();
+  if (id === 'dorking-content' && typeof sv37RenderDorkingTab === 'function') sv37RenderDorkingTab();
 }
 
 function showTab(name) {
-  const map = { upload: 'upload-content', verify: 'verify-send-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
-  const tabElMap = { upload: 'tab-upload', verify: 'tab-verify', autoscout: 'tab-autoscout', batch: 'tab-batch', timeline: 'tab-timeline', settings: 'tab-settings', detail: 'tab-detail' };
+  const map = { upload: 'upload-content', dorking: 'dorking-content', verify: 'verify-send-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
+  const tabElMap = { upload: 'tab-upload', dorking: 'tab-dorking', verify: 'tab-verify', autoscout: 'tab-autoscout', batch: 'tab-batch', timeline: 'tab-timeline', settings: 'tab-settings', detail: 'tab-detail' };
   showContentTab(map[name] || name, document.getElementById(tabElMap[name]));
 }
 
@@ -3415,11 +3491,13 @@ window.addEventListener('ElevateScoutDorkLead', (e) => {
   // Mobile tab switching
   function showTabMobile(tabId, el) {
     // Switch main content
-    const map = { upload: 'upload-content', verify: 'verify-send-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
+    const map = { upload: 'upload-content', dorking: 'dorking-content', verify: 'verify-send-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
     const contentId = map[tabId] || 'detail';
     document.querySelectorAll('.tab-panel, #detail').forEach(p => p.style.display = 'none');
     const panel = document.getElementById(contentId);
     if (panel) panel.style.display = '';
+    if (contentId === 'dorking-content' && typeof sv37RenderDorkingTab === 'function') sv37RenderDorkingTab();
+    if (contentId === 'verify-send-content' && typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab();
     // Update mobile nav active state
     document.querySelectorAll('.mob-nav-btn, .tt-btn').forEach(b => b.classList.remove('active'));
     if (el) el.classList.add('active');
