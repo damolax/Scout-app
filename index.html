@@ -4954,5 +4954,318 @@ function manualPollReplies() {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 </script>
+
+<!-- Scout Email Scout Verify Ready Queue v34 -->
+<style id="scout-email-scout-verify-ready-v34-style">
+  #scoutEmailScoutPanel { margin: 18px auto; max-width: 1180px; padding: 16px; border: 1px solid rgba(148,163,184,.25); border-radius: 18px; background: linear-gradient(180deg, rgba(15,23,42,.96), rgba(2,6,23,.96)); color: #e5e7eb; box-shadow: 0 20px 48px rgba(0,0,0,.28); font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+  #scoutEmailScoutPanel * { box-sizing: border-box; }
+  #scoutEmailScoutPanel h2 { margin: 0 0 6px; font-size: 20px; }
+  #scoutEmailScoutPanel p { color:#94a3b8; margin: 5px 0 12px; line-height:1.45; }
+  #scoutEmailScoutPanel .es-grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:10px; }
+  #scoutEmailScoutPanel .es-card { border:1px solid rgba(148,163,184,.22); border-radius:14px; background:rgba(255,255,255,.06); padding:12px; }
+  #scoutEmailScoutPanel .es-label { font-size:11px; text-transform:uppercase; color:#94a3b8; letter-spacing:.06em; }
+  #scoutEmailScoutPanel .es-value { font-size:24px; font-weight:900; margin-top:3px; }
+  #scoutEmailScoutPanel .es-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin: 12px 0; }
+  #scoutEmailScoutPanel button { border:0; border-radius:12px; padding:10px 12px; font-weight:800; cursor:pointer; background:linear-gradient(135deg,#38bdf8,#22c55e); color:#03101c; }
+  #scoutEmailScoutPanel button.es-secondary { background:rgba(255,255,255,.10); color:#e5e7eb; border:1px solid rgba(148,163,184,.25); }
+  #scoutEmailScoutPanel input, #scoutEmailScoutPanel select { background:rgba(2,6,23,.7); color:#e5e7eb; border:1px solid rgba(148,163,184,.28); border-radius:12px; padding:10px; min-width:120px; }
+  #scoutEmailScoutPanel label { color:#cbd5e1; font-size:12px; display:flex; gap:6px; align-items:center; }
+  #scoutEmailScoutPanel .es-status { color:#bae6fd; min-height:22px; font-size:13px; }
+  #scoutEmailScoutPanel .es-warn { color:#fde68a; font-size:12px; }
+  #scoutEmailScoutPanel table { width:100%; border-collapse:collapse; margin-top:10px; min-width:920px; }
+  #scoutEmailScoutPanel th, #scoutEmailScoutPanel td { border-bottom:1px solid rgba(148,163,184,.18); padding:9px; text-align:left; font-size:12px; vertical-align:top; }
+  #scoutEmailScoutPanel th { color:#bae6fd; text-transform:uppercase; font-size:11px; letter-spacing:.05em; position:sticky; top:0; background:#0f172a; }
+  #scoutEmailScoutPanel .es-table-wrap { overflow:auto; max-height:420px; border:1px solid rgba(148,163,184,.18); border-radius:14px; }
+  @media(max-width:850px){ #scoutEmailScoutPanel .es-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+</style>
+<script id="scout-email-scout-verify-ready-v34">
+(function(){
+  if (window.__SCOUT_EMAIL_SCOUT_VERIFY_READY_V34__) return;
+  window.__SCOUT_EMAIL_SCOUT_VERIFY_READY_V34__ = true;
+
+  function getBackend(){
+    return (localStorage.getItem('scoutBackendUrl') || localStorage.getItem('backendUrl') || localStorage.getItem('SCOUT_BACKEND_URL') || '').replace(/\/$/, '');
+  }
+  function setBackend(v){
+    if (v) { localStorage.setItem('scoutBackendUrl', v.replace(/\/$/, '')); localStorage.setItem('backendUrl', v.replace(/\/$/, '')); }
+  }
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>\"]/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]); }); }
+  async function api(path, opts){
+    var backend = getBackend();
+    if (!backend) throw new Error('Save Backend URL first.');
+    var r = await fetch(backend + path, Object.assign({ headers: { 'Content-Type':'application/json' } }, opts || {}));
+    var text = await r.text();
+    var j = {}; try { j = JSON.parse(text); } catch(e) { j = { raw:text }; }
+    if (!r.ok) throw new Error(j.error || j.message || text || ('HTTP ' + r.status));
+    return j;
+  }
+  function downloadUrl(path){
+    var backend = getBackend();
+    if (!backend) return alert('Save Backend URL first.');
+    window.open(backend + path, '_blank');
+  }
+  function clickEmailScoutTab(){
+    var candidates = Array.from(document.querySelectorAll('button,a,[role="tab"],.tab'));
+    var found = candidates.find(function(el){ return /email\s*scout|ready\s*emails|email\s*send/i.test(el.textContent || ''); });
+    if (found) { try { found.click(); return true; } catch(e){} }
+    var panel = document.getElementById('scoutEmailScoutPanel');
+    if (panel) panel.scrollIntoView({ behavior:'smooth', block:'start' });
+    return false;
+  }
+  function ensurePanel(){
+    if (document.getElementById('scoutEmailScoutPanel')) return document.getElementById('scoutEmailScoutPanel');
+    var panel = document.createElement('section');
+    panel.id = 'scoutEmailScoutPanel';
+    panel.innerHTML = ''+
+      '<h2>📧 Email Scout Verify → Ready Queue</h2>'+
+      '<p>Verify found emails, build safe Airtable messages, and move only complete messages to the Email Scout ready queue. This panel prepares and exports; it does not automatically send emails.</p>'+
+      '<div class="es-row">'+
+        '<input id="esBackendUrl" placeholder="Backend URL" style="min-width:300px" />'+
+        '<button id="esSaveBackend" class="es-secondary">Save Backend</button>'+
+        '<input id="esLimit" type="number" min="1" value="500" title="Limit" />'+
+        '<input id="esMinScore" type="number" min="0" max="100" value="50" title="Minimum lead score" />'+
+        '<label><input id="esAllowRisky" type="checkbox" /> allow risky/catch-all</label>'+
+        '<label><input id="esAllowNeedsProvider" type="checkbox" /> allow basic/MX-only</label>'+
+      '</div>'+
+      '<div class="es-row">'+
+        '<button id="esVerifyPrepare">Verify & Build Ready Queue</button>'+
+        '<button id="esRefresh" class="es-secondary">Refresh Ready Queue</button>'+
+        '<button id="esOpenTab" class="es-secondary">Open Email Scout Tab</button>'+
+        '<button id="esExport" class="es-secondary">Export Ready CSV</button>'+
+      '</div>'+
+      '<div class="es-warn">Automatic browser/Gmail sending is not enabled here. Use the ready queue/export for review, then send through your approved Email Scout sending flow.</div>'+
+      '<div id="esStatus" class="es-status"></div>'+
+      '<div class="es-grid" id="esSummary"></div>'+
+      '<div class="es-table-wrap"><table><thead><tr><th>Email</th><th>Subject</th><th>Name</th><th>Industry</th><th>Location</th><th>Status</th><th>Score</th></tr></thead><tbody id="esRows"></tbody></table></div>';
+    var target = document.getElementById('scoutUnifiedPanel') || document.querySelector('main') || document.body;
+    if (target === document.body) document.body.appendChild(panel); else target.parentNode.insertBefore(panel, target.nextSibling);
+    bindPanel(panel);
+    return panel;
+  }
+  function status(msg){ var el=document.getElementById('esStatus'); if(el) el.textContent=msg || ''; }
+  function bindPanel(panel){
+    var backendInput = document.getElementById('esBackendUrl');
+    if (backendInput) backendInput.value = getBackend();
+    document.getElementById('esSaveBackend').onclick = function(){ setBackend(backendInput.value); status('Backend URL saved.'); };
+    document.getElementById('esVerifyPrepare').onclick = verifyPrepare;
+    document.getElementById('esRefresh').onclick = refreshReady;
+    document.getElementById('esOpenTab').onclick = function(){ if(!clickEmailScoutTab()) status('No existing Email Scout tab found, so use this Email Scout ready panel.'); };
+    document.getElementById('esExport').onclick = function(){ downloadUrl('/email-scout/ready?format=csv'); };
+    refreshSummary().catch(function(){});
+    refreshReady().catch(function(){});
+  }
+  async function refreshSummary(){
+    var j = await api('/email-scout/summary');
+    var data = [
+      ['Total leads', j.total || 0], ['With email', j.withEmail || 0], ['Verified', j.verified || 0], ['Needs verification', j.needsVerification || 0],
+      ['Invalid', j.invalid || 0], ['Ready queue', j.ready || 0], ['Blocked codes', j.blockedMissingCodes || 0], ['Sent marked', j.sent || 0]
+    ];
+    var grid = document.getElementById('esSummary');
+    if (grid) grid.innerHTML = data.map(function(x){ return '<div class="es-card"><div class="es-label">'+esc(x[0])+'</div><div class="es-value">'+Number(x[1]||0).toLocaleString()+'</div></div>'; }).join('');
+  }
+  async function verifyPrepare(){
+    try {
+      status('Verifying and preparing safe Email Scout messages…');
+      var limit = Number(document.getElementById('esLimit').value || 500);
+      var minLeadScore = Number(document.getElementById('esMinScore').value || 50);
+      var allowRisky = !!document.getElementById('esAllowRisky').checked;
+      var allowNeedsProvider = !!document.getElementById('esAllowNeedsProvider').checked;
+      var j = await api('/email-scout/verify-and-prepare', { method:'POST', body: JSON.stringify({ limit:limit, verifyLimit:limit, minLeadScore:minLeadScore, allowRisky:allowRisky, allowNeedsProvider:allowNeedsProvider }) });
+      status('Done. Checked '+(j.checked||0)+' · prepared '+(j.prepared||0)+' · blocked '+(j.blocked||0)+' · ready '+(j.ready||0)+'.');
+      await refreshSummary(); await refreshReady();
+      try { window.dispatchEvent(new CustomEvent('ScoutEmailScoutReadyUpdated', { detail:j })); } catch(e){}
+    } catch(e) { status('Failed: ' + (e.message || e)); }
+  }
+  async function refreshReady(){
+    try {
+      var j = await api('/email-scout/ready?limit=300');
+      localStorage.setItem('emailScoutReadyLeads', JSON.stringify(j.leads || []));
+      var rows = document.getElementById('esRows');
+      if (rows) rows.innerHTML = (j.leads || []).map(function(l){ return '<tr>'+
+        '<td>'+esc(l.email)+'</td><td>'+esc(l.subject)+'</td><td>'+esc(l.name || l.businessName)+'</td><td>'+esc(l.industry)+'</td><td>'+esc(l.location)+'</td><td>'+esc(l.verificationStatus || l.contactStatus)+'</td><td>'+esc(l.leadScore)+'</td>'+
+        '</tr>'; }).join('') || '<tr><td colspan="7">No ready emails yet.</td></tr>';
+      status('Ready queue loaded: '+(j.total || 0)+' email(s).');
+      await refreshSummary();
+      try { window.dispatchEvent(new CustomEvent('ScoutEmailScoutReadyLeadsLoaded', { detail:j })); } catch(e){}
+    } catch(e) { status('Ready refresh failed: ' + (e.message || e)); }
+  }
+  document.addEventListener('DOMContentLoaded', ensurePanel);
+  setTimeout(ensurePanel, 1200);
+  window.addEventListener('ScoutUnifiedLeadsRefreshRequested', function(){ setTimeout(function(){ refreshSummary().catch(function(){}); refreshReady().catch(function(){}); }, 800); });
+})();
+</script>
+
+
+<!-- Scout Email Scout Gmail Batch Sender v35 -->
+<style id="scout-email-scout-gmail-sender-v35-style">
+  #scoutGmailSenderPanel { margin: 18px auto; max-width: 1180px; padding: 16px; border: 1px solid rgba(34,197,94,.28); border-radius: 18px; background: linear-gradient(180deg, rgba(6,78,59,.96), rgba(2,6,23,.96)); color: #e5e7eb; box-shadow: 0 20px 48px rgba(0,0,0,.28); font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+  #scoutGmailSenderPanel * { box-sizing: border-box; }
+  #scoutGmailSenderPanel h2 { margin: 0 0 6px; font-size: 20px; }
+  #scoutGmailSenderPanel p { color:#bbf7d0; margin: 5px 0 12px; line-height:1.45; }
+  #scoutGmailSenderPanel .gs-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin: 12px 0; }
+  #scoutGmailSenderPanel .gs-card { border:1px solid rgba(148,163,184,.22); border-radius:14px; background:rgba(255,255,255,.06); padding:12px; }
+  #scoutGmailSenderPanel .gs-grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:10px; }
+  #scoutGmailSenderPanel .gs-label { font-size:11px; text-transform:uppercase; color:#a7f3d0; letter-spacing:.06em; }
+  #scoutGmailSenderPanel .gs-value { font-size:24px; font-weight:900; margin-top:3px; }
+  #scoutGmailSenderPanel button { border:0; border-radius:12px; padding:10px 12px; font-weight:800; cursor:pointer; background:linear-gradient(135deg,#22c55e,#38bdf8); color:#03101c; }
+  #scoutGmailSenderPanel button.gs-secondary { background:rgba(255,255,255,.10); color:#e5e7eb; border:1px solid rgba(148,163,184,.25); }
+  #scoutGmailSenderPanel button.gs-danger { background:linear-gradient(135deg,#ef4444,#f97316); color:#fff; }
+  #scoutGmailSenderPanel input, #scoutGmailSenderPanel select { background:rgba(2,6,23,.7); color:#e5e7eb; border:1px solid rgba(148,163,184,.28); border-radius:12px; padding:10px; min-width:120px; }
+  #scoutGmailSenderPanel label { color:#d1fae5; font-size:12px; display:flex; gap:6px; align-items:center; }
+  #scoutGmailSenderPanel .gs-status { color:#bae6fd; min-height:22px; font-size:13px; white-space:pre-wrap; }
+  #scoutGmailSenderPanel .gs-warn { color:#fde68a; font-size:12px; }
+  @media(max-width:850px){ #scoutGmailSenderPanel .gs-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+</style>
+<script id="scout-email-scout-gmail-sender-v35">
+(function(){
+  if (window.__SCOUT_EMAIL_SCOUT_GMAIL_SENDER_V35__) return;
+  window.__SCOUT_EMAIL_SCOUT_GMAIL_SENDER_V35__ = true;
+
+  var gmailCandidates = [];
+
+  function getBackend(){
+    return (localStorage.getItem('scoutBackendUrl') || localStorage.getItem('backendUrl') || localStorage.getItem('SCOUT_BACKEND_URL') || '').replace(/\/$/, '');
+  }
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>\"]/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]); }); }
+  function status(msg){ var el=document.getElementById('gsStatus'); if(el) el.textContent=msg || ''; }
+  async function api(path, opts){
+    var backend = getBackend();
+    if (!backend) throw new Error('Save Backend URL first in Scout App.');
+    var r = await fetch(backend + path, Object.assign({ headers:{ 'Content-Type':'application/json' } }, opts || {}));
+    var text = await r.text();
+    var j = {}; try { j = JSON.parse(text); } catch(e) { j = { raw:text }; }
+    if (!r.ok) throw new Error(j.error || j.message || text || ('HTTP ' + r.status));
+    return j;
+  }
+  function looksLikeTokenObject(obj){
+    if (!obj || typeof obj !== 'object') return false;
+    return !!(obj.refresh_token || obj.refreshToken || obj.access_token || obj.accessToken || obj.gmailRefreshToken || obj.gmailAccessToken);
+  }
+  function candidateFromObject(obj, key){
+    var refresh = obj.refresh_token || obj.refreshToken || obj.gmailRefreshToken || '';
+    var access = obj.access_token || obj.accessToken || obj.gmailAccessToken || '';
+    var client = obj.client_id || obj.clientId || obj.googleClientId || obj.gmailClientId || localStorage.getItem('gmailClientId') || localStorage.getItem('googleClientId') || localStorage.getItem('GOOGLE_CLIENT_ID') || '';
+    var email = obj.email || obj.gmail || obj.connectedEmail || obj.gmailEmail || obj.userEmail || localStorage.getItem('gmailConnectedEmail') || '';
+    if (!refresh && !access) return null;
+    return { key:key, email:email || 'connected Gmail', refresh_token:refresh, access_token:access, client_id:client };
+  }
+  function scanGmailCandidates(){
+    var found = [];
+    var direct = candidateFromObject({
+      refresh_token: localStorage.getItem('gmailRefreshToken') || localStorage.getItem('refresh_token') || localStorage.getItem('googleRefreshToken'),
+      access_token: localStorage.getItem('gmailAccessToken') || localStorage.getItem('access_token') || localStorage.getItem('googleAccessToken'),
+      client_id: localStorage.getItem('gmailClientId') || localStorage.getItem('googleClientId') || localStorage.getItem('GOOGLE_CLIENT_ID'),
+      email: localStorage.getItem('gmailConnectedEmail') || localStorage.getItem('connectedEmail') || localStorage.getItem('userEmail')
+    }, 'direct-localStorage-keys');
+    if (direct) found.push(direct);
+    for (var i=0; i<localStorage.length; i++) {
+      var key = localStorage.key(i);
+      var val = localStorage.getItem(key) || '';
+      if (!/gmail|google|oauth|token|auth/i.test(key + ' ' + val.slice(0,80))) continue;
+      try {
+        var parsed = JSON.parse(val);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(function(x, idx){ var c = candidateFromObject(x, key+'['+idx+']'); if (c) found.push(c); });
+        } else if (looksLikeTokenObject(parsed)) {
+          var c = candidateFromObject(parsed, key); if (c) found.push(c);
+        } else {
+          Object.keys(parsed || {}).forEach(function(k){ var c = candidateFromObject(parsed[k], key+'.'+k); if (c) found.push(c); });
+        }
+      } catch(e) {}
+    }
+    var seen = new Set();
+    gmailCandidates = found.filter(function(c){ var sig = (c.email||'')+'|'+(c.refresh_token||'')+'|'+(c.access_token||''); if (seen.has(sig)) return false; seen.add(sig); return true; });
+    renderGmailCandidates();
+    return gmailCandidates;
+  }
+  function selectedCandidate(){
+    var sel = document.getElementById('gsGmailAccount');
+    var idx = Number(sel && sel.value || 0);
+    return gmailCandidates[idx] || null;
+  }
+  function renderGmailCandidates(){
+    var sel = document.getElementById('gsGmailAccount');
+    if (!sel) return;
+    if (!gmailCandidates.length) {
+      sel.innerHTML = '<option value="">No connected Gmail token detected</option>';
+      return;
+    }
+    sel.innerHTML = gmailCandidates.map(function(c, i){ return '<option value="'+i+'">'+esc(c.email || 'connected Gmail')+' — '+esc(c.key)+'</option>'; }).join('');
+  }
+  async function refreshSenderSummary(){
+    try {
+      var j = await api('/email-scout/summary');
+      var data = [
+        ['Ready to send', j.ready || 0], ['Already sent', j.sent || 0], ['With email', j.withEmail || 0], ['Invalid', j.invalid || 0]
+      ];
+      var grid = document.getElementById('gsSummary');
+      if (grid) grid.innerHTML = data.map(function(x){ return '<div class="gs-card"><div class="gs-label">'+esc(x[0])+'</div><div class="gs-value">'+Number(x[1]||0).toLocaleString()+'</div></div>'; }).join('');
+    } catch(e) {}
+  }
+  async function sendBatch(){
+    try {
+      var c = selectedCandidate();
+      if (!c) throw new Error('No connected Gmail token detected. Connect Gmail first, then click Scan Gmail Connection.');
+      var clientIdInput = document.getElementById('gsClientId').value.trim();
+      var senderEmailInput = document.getElementById('gsSenderEmail').value.trim() || c.email || '';
+      var limit = Math.max(1, Math.min(500, Number(document.getElementById('gsLimit').value || 50)));
+      var delayMs = Math.max(0, Math.min(60000, Number(document.getElementById('gsDelay').value || 1500)));
+      var dryRun = !!document.getElementById('gsDryRun').checked;
+      var warning = dryRun ? 'This is a dry run. No email will be sent.' : ('This will send up to '+limit+' email(s) from the selected connected Gmail account. Continue?');
+      if (!confirm(warning)) return;
+      status(dryRun ? 'Running dry-run batch…' : 'Sending batch through Gmail API… Do not close this tab until it finishes.');
+      var payload = {
+        limit: limit,
+        delayMs: delayMs,
+        dryRun: dryRun,
+        senderEmail: senderEmailInput,
+        access_token: c.access_token || '',
+        refresh_token: c.refresh_token || '',
+        client_id: clientIdInput || c.client_id || ''
+      };
+      var j = await api('/email-scout/send-batch', { method:'POST', body: JSON.stringify(payload) });
+      status('Batch complete. Sender: '+(j.senderEmail || senderEmailInput || 'connected Gmail')+'\nSent: '+(j.sent||0)+' · Failed: '+(j.failed||0)+' · Skipped: '+(j.skipped||0)+' · Batch: '+(j.batchId||''));
+      await refreshSenderSummary();
+      try { window.dispatchEvent(new CustomEvent('ScoutEmailScoutBatchSent', { detail:j })); } catch(e) {}
+    } catch(e) { status('Send failed: ' + (e.message || e)); }
+  }
+  function ensurePanel(){
+    if (document.getElementById('scoutGmailSenderPanel')) return;
+    var panel = document.createElement('section');
+    panel.id = 'scoutGmailSenderPanel';
+    panel.innerHTML = ''+
+      '<h2>✅ Email Scout Gmail Batch Sender</h2>'+ 
+      '<p>Send only verified, prepared Email Scout messages through the selected connected Gmail account. Choose the account and the exact number to send per batch.</p>'+ 
+      '<div class="gs-grid" id="gsSummary"></div>'+ 
+      '<div class="gs-row">'+
+        '<select id="gsGmailAccount" style="min-width:300px"><option>Scan Gmail connection…</option></select>'+ 
+        '<button id="gsScan" class="gs-secondary">Scan Gmail Connection</button>'+ 
+        '<input id="gsSenderEmail" placeholder="Sender email label" style="min-width:230px" />'+
+        '<input id="gsClientId" placeholder="Google Client ID if needed" style="min-width:260px" />'+
+      '</div>'+ 
+      '<div class="gs-row">'+
+        '<label>Send limit <input id="gsLimit" type="number" min="1" max="500" value="50" style="width:100px" /></label>'+ 
+        '<label>Delay ms <input id="gsDelay" type="number" min="0" max="60000" value="1500" style="width:120px" /></label>'+ 
+        '<label><input id="gsDryRun" type="checkbox" checked /> dry run first</label>'+ 
+        '<button id="gsSend" class="gs-danger">Send Ready Batch</button>'+ 
+        '<button id="gsRefresh" class="gs-secondary">Refresh Summary</button>'+ 
+      '</div>'+ 
+      '<div class="gs-warn">If you want to switch sender, connect a different Gmail account in Scout, click Scan Gmail Connection, then choose that account before sending the next batch. Sent leads are removed from the ready queue.</div>'+ 
+      '<div id="gsStatus" class="gs-status"></div>';
+    var target = document.getElementById('scoutEmailScoutPanel') || document.getElementById('scoutUnifiedPanel') || document.querySelector('main') || document.body;
+    if (target === document.body) document.body.appendChild(panel); else target.parentNode.insertBefore(panel, target.nextSibling);
+    document.getElementById('gsScan').onclick = function(){ var c = scanGmailCandidates(); status(c.length ? ('Detected '+c.length+' Gmail token candidate(s). Choose the right sender before sending.') : 'No Gmail token found in local storage. Connect Gmail first.'); };
+    document.getElementById('gsSend').onclick = sendBatch;
+    document.getElementById('gsRefresh').onclick = refreshSenderSummary;
+    scanGmailCandidates();
+    refreshSenderSummary();
+  }
+  document.addEventListener('DOMContentLoaded', ensurePanel);
+  setTimeout(ensurePanel, 1500);
+  window.addEventListener('ScoutEmailScoutReadyUpdated', function(){ setTimeout(refreshSenderSummary, 500); });
+  window.addEventListener('ScoutEmailScoutReadyLeadsLoaded', function(){ setTimeout(refreshSenderSummary, 500); });
+})();
+</script>
+
 </body>
 </html>
