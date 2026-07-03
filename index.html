@@ -743,7 +743,7 @@ Elevate Business Solutions
 
         <div class="settings-card" id="dorking-settings-section">
           <h3>🌐 Dorking Settings</h3>
-          <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Set your industry, location and signal query templates. The Elevate Scout extension reads these automatically when you start dorking. Each signal is a Bing search query with <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{industry}</code> and <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{location}</code> placeholders.</p>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Set your Airtable prospect industry, location and signal query templates. The extension and backend read these settings when you start dorking. Each signal is a Bing search query with <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{industry}</code> and <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{location}</code> placeholders.</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
             <div>
               <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Industry</label>
@@ -774,12 +774,15 @@ Elevate Business Solutions
             <textarea id="dork-signals-input" class="settings-input" rows="12" style="width:100%;resize:vertical;font-family:monospace;font-size:11px" placeholder="Paste your signal queries here, one per line…" oninput="updateDorkSignalCount()"></textarea>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="settings-btn" onclick="saveDorkSettings()" style="margin:0">Save &amp; Sync to Extension</button>
+            <button class="settings-btn" onclick="saveDorkSettings()" style="margin:0">Save &amp; Sync Signals</button>
+  <button class="topbar-btn primary" onclick="ScoutDorkPatch.verifyAllVisibleLeads()">✓ Verify Web Leads</button>
+  <button class="topbar-btn" onclick="ScoutDorkPatch.exportReadyCsv()">⬇ Ready Airtable Leads CSV</button>
             <button class="topbar-btn" onclick="document.getElementById('dork-signals-file').click()">📂 Import CSV</button>
             <button class="topbar-btn" onclick="exportDorkSignals()">⬇ Export</button>
             <input type="file" id="dork-signals-file" accept=".csv,.txt" style="display:none" onchange="importDorkSignals(this.files[0])">
           </div>
           <div id="dork-save-status" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+  <div id="dork-live-status" style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.6">Live web leads: 0 · Ready: 0 · Needs verification: 0</div>
         </div>
 
         <div class="settings-card" id="custom-msg-section">
@@ -4286,6 +4289,430 @@ function manualPollReplies() {
   });
 }
 
+</script>
+
+<script id="SCOUT_APP_DORK_LEADS_VERIFIER_PATCH_V28">
+/* SCOUT_APP_DORK_LEADS_VERIFIER_PATCH_V28
+   Adds live dork/web lead intake, backend dork-settings sync, email verification flow,
+   queue visibility, and CSV export for Airtable service outreach leads.
+*/
+(function(){
+  'use strict';
+  const LEADS_KEY = 'elevate_scout_dork_leads_v28';
+  const SETTINGS_KEY = 'dork_settings';
+  const LOG_PREFIX = '[Scout Dork Patch]';
+
+  function $(id){ return document.getElementById(id); }
+  function nowIso(){ return new Date().toISOString(); }
+  function normEmail(v){ return String(v || '').trim().toLowerCase(); }
+  function normUrl(v){ return String(v || '').trim(); }
+  function safeText(v){ return String(v ?? '').replace(/[<>]/g, ''); }
+  function toast(msg){
+    if (typeof window.showToast === 'function') return window.showToast(msg);
+    const el = $('toast');
+    if (el) { el.textContent = msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'), 2600); }
+    else console.log(LOG_PREFIX, msg);
+  }
+  function setStatus(msg){
+    const el = $('dork-save-status');
+    if (el) el.textContent = msg;
+    console.log(LOG_PREFIX, msg);
+  }
+  function getBackendUrl(){
+    const input = $('backend-url-input');
+    const candidates = [
+      input && input.value,
+      localStorage.getItem('backendUrl'),
+      localStorage.getItem('backend_url'),
+      localStorage.getItem('elevate_backend_url'),
+      localStorage.getItem('scout_backend_url')
+    ].filter(Boolean);
+    return String(candidates[0] || '').trim().replace(/\/+$/, '');
+  }
+  function getLeads(){
+    try { return JSON.parse(localStorage.getItem(LEADS_KEY) || '[]'); }
+    catch { return []; }
+  }
+  function saveLeads(leads){
+    localStorage.setItem(LEADS_KEY, JSON.stringify(leads || []));
+    updateLiveStatus();
+  }
+  function collectDorkSettings(){
+    const industry = ($('dork-industry-input') && $('dork-industry-input').value || '').trim();
+    const location = ($('dork-location-input') && $('dork-location-input').value || '').trim();
+    const resultsPerSignal = Math.max(1, Math.min(100, parseInt(($('dork-results-input') && $('dork-results-input').value) || '30', 10) || 30));
+    const signals = (($('dork-signals-input') && $('dork-signals-input').value) || '')
+      .split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    return { industry, location, signals, resultsPerSignal, delayBetweenPages: 8000, engine: 'bing', updatedAt: nowIso() };
+  }
+  function saveLocalDorkSettings(settings){
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      localStorage.setItem('elevate_scout_dork_settings', JSON.stringify(settings));
+    } catch(e) { console.warn(LOG_PREFIX, 'settings local save failed', e); }
+  }
+  async function syncDorkSettings(){
+    const settings = collectDorkSettings();
+    saveLocalDorkSettings(settings);
+
+    // Send to the extension content script. The fixed extension listens for this.
+    try { window.dispatchEvent(new CustomEvent('ElevateScoutSend', { detail: { type: 'SAVE_DORK_SETTINGS', settings } })); } catch(e) {}
+    try { window.postMessage({ source: 'ElevateScoutApp', type: 'SAVE_DORK_SETTINGS', settings }, '*'); } catch(e) {}
+
+    // Also send Scout URL + backend URL so the extension has both.
+    const scoutUrl = ($('scout-url-input') && $('scout-url-input').value || location.href).trim();
+    const backendUrl = getBackendUrl();
+    try { window.dispatchEvent(new CustomEvent('ElevateScoutSend', { detail: { type: 'SAVE_SETTINGS', scoutUrl, backendUrl } })); } catch(e) {}
+    try { window.postMessage({ source: 'ElevateScoutApp', type: 'SAVE_SETTINGS', scoutUrl, backendUrl }, '*'); } catch(e) {}
+
+    if (backendUrl) {
+      try {
+        const r = await fetch(backendUrl + '/dork-settings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        setStatus('Signals saved locally, synced to extension, and posted to backend.');
+      } catch (e) {
+        setStatus('Signals saved locally + sent to extension. Backend sync failed: ' + e.message);
+      }
+    } else {
+      setStatus('Signals saved locally + sent to extension. Add Backend Server URL to sync with server.');
+    }
+    updateLiveStatus();
+    return settings;
+  }
+
+  function scoreLead(lead){
+    let s = 0;
+    if (lead.email) s += 30;
+    if (lead.website || lead.url || lead.sourceUrl) s += 20;
+    if (lead.industry) s += 15;
+    if (lead.location) s += 15;
+    if (lead.name || lead.businessName) s += 10;
+    if (lead.sourceSignal || lead.sourceQuery) s += 5;
+    const email = normEmail(lead.email || (Array.isArray(lead.emails) && lead.emails[0]));
+    if (/^(info|contact|hello|sales|admin|support)@/.test(email)) s -= 5;
+    if (!email) s -= 30;
+    if (lead.verificationStatus === 'valid') s += 20;
+    if (lead.verificationStatus === 'invalid') s -= 80;
+    if (lead.verificationStatus === 'risky' || lead.verificationStatus === 'catch_all') s -= 15;
+    return Math.max(0, Math.min(100, s));
+  }
+
+  function normalizeLead(raw){
+    raw = raw || {};
+    const email = normEmail(raw.email || (Array.isArray(raw.emails) ? raw.emails[0] : ''));
+    const settings = collectDorkSettings();
+    const website = normUrl(raw.website || raw.url || raw.sourceUrl || raw.source_url || '');
+    const name = safeText(raw.name || raw.businessName || raw.title || (website ? website.replace(/^https?:\/\//,'').split('/')[0] : email.split('@')[0]) || 'Web lead');
+    const lead = {
+      id: raw.id || ('dork_' + (email || website || Date.now()).replace(/[^a-z0-9]+/gi,'_') + '_' + Math.random().toString(36).slice(2,7)),
+      source: 'dorking',
+      status: email ? 'found' : 'needs_verification',
+      name,
+      businessName: name,
+      email,
+      emails: Array.from(new Set([email].concat(raw.emails || []).map(normEmail).filter(Boolean))),
+      website,
+      url: website,
+      industry: raw.industry || settings.industry || '',
+      location: raw.location || settings.location || '',
+      sourceQuery: raw.sourceQuery || raw.query || '',
+      sourceSignal: raw.sourceSignal || raw.signal || '',
+      verificationStatus: raw.verificationStatus || raw.statusVerification || (email ? 'needs_verification' : 'no_email'),
+      readyToContact: Boolean(raw.readyToContact),
+      leadScore: Number(raw.leadScore || 0),
+      addedAt: raw.addedAt || raw.createdAt || nowIso(),
+      updatedAt: nowIso(),
+      raw
+    };
+    lead.leadScore = scoreLead(lead);
+    return lead;
+  }
+
+  async function postLeadToBackend(lead){
+    const backendUrl = getBackendUrl();
+    if (!backendUrl) return;
+    try {
+      await fetch(backendUrl + '/dork-leads', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead)
+      });
+    } catch(e) { console.warn(LOG_PREFIX, 'backend lead save failed', e); }
+  }
+
+  function addLead(raw, opts){
+    const lead = normalizeLead(raw);
+    if (!lead.email && !lead.website) return null;
+    const leads = getLeads();
+    const key = lead.email || lead.website;
+    const i = leads.findIndex(x => (x.email && x.email === lead.email) || (!lead.email && x.website && x.website === lead.website));
+    if (i >= 0) {
+      leads[i] = { ...leads[i], ...lead, id: leads[i].id, addedAt: leads[i].addedAt || lead.addedAt, updatedAt: nowIso() };
+    } else {
+      leads.unshift(lead);
+    }
+    saveLeads(leads);
+    if (!opts || opts.post !== false) postLeadToBackend(lead);
+    renderDorkLeadsIntoQueue();
+    return lead;
+  }
+
+  function verificationBadge(lead){
+    const v = lead.verificationStatus || 'needs_verification';
+    const ready = lead.readyToContact ? ' · READY' : '';
+    return `${v}${ready} · ${lead.leadScore || 0}/100`;
+  }
+
+  function renderDorkLeadsIntoQueue(){
+    const list = $('queue-list');
+    if (!list) return;
+    list.querySelectorAll('[data-dork-patch-lead]').forEach(el => el.remove());
+    const leads = getLeads();
+    if (!leads.length) return;
+
+    const activeFilterBtn = document.querySelector('#qp-actions .qp-action.active');
+    const filterText = (activeFilterBtn && activeFilterBtn.textContent || '').toLowerCase();
+    const showOnlyWeb = filterText.includes('web');
+    const showOnlyFound = filterText.includes('found');
+    const showOnlyPending = filterText.includes('pending');
+    const filtered = leads.filter(l => {
+      if (showOnlyFound) return !!l.email;
+      if (showOnlyPending) return ['needs_verification','needs_provider','unknown','catch_all','risky'].includes(l.verificationStatus || 'needs_verification');
+      return true || showOnlyWeb;
+    }).slice(0, 250);
+
+    const header = document.createElement('div');
+    header.setAttribute('data-dork-patch-lead','header');
+    header.style.cssText = 'font-size:11px;color:var(--muted);padding:8px 4px 4px;font-weight:700;display:flex;justify-content:space-between;gap:8px';
+    header.innerHTML = `<span>Web leads from signals</span><span>${filtered.length}</span>`;
+    list.appendChild(header);
+
+    filtered.forEach((lead) => {
+      const item = document.createElement('div');
+      item.className = 'qi';
+      item.setAttribute('data-dork-patch-lead', lead.id);
+      item.onclick = () => showLeadDetail(lead.id);
+      const badgeColor = lead.readyToContact ? 'var(--green)' : (lead.verificationStatus === 'invalid' ? 'var(--red)' : 'var(--amber)');
+      item.innerHTML = `
+        <div class="qi-name">${safeText(lead.name || lead.businessName)}</div>
+        <div class="qi-meta"><span class="qi-status s-found">WEB LEAD</span><span style="color:${badgeColor};font-size:10px;font-weight:700">${safeText(verificationBadge(lead))}</span></div>
+        ${lead.email ? `<div class="qi-email">${safeText(lead.email)}</div>` : ''}
+        <div class="qi-profile-link">${safeText(lead.industry || '')}${lead.location ? ' · ' + safeText(lead.location) : ''}</div>
+      `;
+      list.appendChild(item);
+    });
+  }
+
+  function showLeadDetail(id){
+    const lead = getLeads().find(x => x.id === id);
+    if (!lead) return;
+    const empty = $('detail-empty');
+    const panel = $('detail-panel');
+    if (!panel) return;
+    if (empty) empty.style.display = 'none';
+    panel.style.display = 'block';
+    panel.innerHTML = `
+      <div class="detail-header">
+        <div class="detail-biz-name">${safeText(lead.name || lead.businessName)}</div>
+        <div class="detail-actions">
+          <button class="topbar-btn primary" onclick="ScoutDorkPatch.verifyLead('${lead.id}')">✓ Verify Email</button>
+          <button class="topbar-btn" onclick="ScoutDorkPatch.markReady('${lead.id}')">Mark Ready</button>
+          <button class="topbar-btn" onclick="ScoutDorkPatch.copyEmail('${lead.id}')">Copy Email</button>
+          <button class="topbar-btn danger" onclick="ScoutDorkPatch.deleteLead('${lead.id}')">Delete</button>
+        </div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.8">
+          <strong>Email:</strong> ${safeText(lead.email || 'No email yet')}<br>
+          <strong>Website:</strong> ${lead.website ? `<a href="${safeText(lead.website)}" target="_blank" style="color:var(--accent)">${safeText(lead.website)}</a>` : '—'}<br>
+          <strong>Industry:</strong> ${safeText(lead.industry || '—')}<br>
+          <strong>Location:</strong> ${safeText(lead.location || '—')}<br>
+          <strong>Verification:</strong> ${safeText(verificationBadge(lead))}<br>
+          <strong>Source Signal:</strong> ${safeText(lead.sourceSignal || lead.sourceQuery || '—')}<br>
+          <strong>Date Found:</strong> ${safeText(lead.addedAt || '')}
+        </div>
+      </div>
+      <div class="detail-card" style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-top:10px">
+        <h3 style="font-size:13px;margin-bottom:8px">Airtable Outreach Process</h3>
+        <div style="font-size:12px;color:var(--muted);line-height:1.7">
+          1. Verify email first.<br>
+          2. Contact only if status is valid/ready, or carefully if catch-all/risky.<br>
+          3. Personalize around operations visibility, follow-up, client tracking, bookings, jobs, or admin bottlenecks.<br>
+          4. Mark contacted after sending so you do not message the same business twice.
+        </div>
+      </div>
+    `;
+  }
+
+  async function verifyLead(id){
+    const leads = getLeads();
+    const i = leads.findIndex(x => x.id === id);
+    if (i < 0) return;
+    const lead = leads[i];
+    if (!lead.email) { toast('No email to verify.'); return; }
+    const backendUrl = getBackendUrl();
+    if (!backendUrl) { toast('Add Backend Server URL first.'); return; }
+    try {
+      setStatus('Verifying ' + lead.email + '...');
+      const r = await fetch(backendUrl + '/verify-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: lead.email, lead })
+      });
+      const data = await r.json();
+      const result = data.result || data.verification || data;
+      lead.verificationStatus = result.status || result.result || result.verificationStatus || 'unknown';
+      lead.reason = result.reason || result.message || '';
+      lead.readyToContact = Boolean(result.readyToContact || lead.verificationStatus === 'valid');
+      lead.leadScore = scoreLead(lead);
+      lead.updatedAt = nowIso();
+      leads[i] = lead;
+      saveLeads(leads);
+      renderDorkLeadsIntoQueue();
+      showLeadDetail(id);
+      setStatus('Verified ' + lead.email + ': ' + lead.verificationStatus);
+    } catch(e) {
+      setStatus('Verification failed: ' + e.message);
+    }
+  }
+
+  async function verifyAllVisibleLeads(){
+    const backendUrl = getBackendUrl();
+    if (!backendUrl) { toast('Add Backend Server URL first.'); return; }
+    const leads = getLeads().filter(l => l.email && !['valid','invalid'].includes(l.verificationStatus));
+    if (!leads.length) { toast('No unverified emails found.'); return; }
+    try {
+      setStatus('Verifying ' + leads.length + ' web leads...');
+      const r = await fetch(backendUrl + '/batch-verify-emails', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails: leads.map(l => l.email), leads })
+      });
+      const data = await r.json();
+      const results = data.results || data.verified || [];
+      const all = getLeads();
+      results.forEach(res => {
+        const email = normEmail(res.email);
+        const idx = all.findIndex(l => l.email === email);
+        if (idx >= 0) {
+          const status = res.status || res.result || res.verificationStatus || 'unknown';
+          all[idx].verificationStatus = status;
+          all[idx].reason = res.reason || res.message || '';
+          all[idx].readyToContact = Boolean(res.readyToContact || status === 'valid');
+          all[idx].leadScore = scoreLead(all[idx]);
+          all[idx].updatedAt = nowIso();
+        }
+      });
+      saveLeads(all);
+      renderDorkLeadsIntoQueue();
+      setStatus('Verification complete. Ready leads: ' + all.filter(l => l.readyToContact).length);
+    } catch(e) {
+      setStatus('Batch verification failed: ' + e.message);
+    }
+  }
+
+  function csvEscape(v){ return '"' + String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ') + '"'; }
+  function downloadCsv(rows, filename){
+    const blob = new Blob([rows.map(r => r.map(csvEscape).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  function exportReadyCsv(){
+    const leads = getLeads().filter(l => l.readyToContact || l.verificationStatus === 'valid' || l.leadScore >= 80);
+    const rows = [[
+      'Business','Email','Website','Industry','Location','Verification Status','Lead Score','Source Signal','Source Query','Date Found','Airtable Angle'
+    ]];
+    leads.forEach(l => rows.push([
+      l.name || l.businessName, l.email, l.website, l.industry, l.location, l.verificationStatus, l.leadScore,
+      l.sourceSignal, l.sourceQuery, l.addedAt,
+      `Airtable system for ${l.industry || 'business'} operations, follow-up, visibility, client tracking, and admin automation`
+    ]));
+    downloadCsv(rows, 'ready_airtable_leads.csv');
+  }
+  function exportAllCsv(){
+    const rows = [['Business','Email','Website','Industry','Location','Verification Status','Ready','Lead Score','Source Signal','Source Query','Date Found']];
+    getLeads().forEach(l => rows.push([l.name||l.businessName,l.email,l.website,l.industry,l.location,l.verificationStatus,l.readyToContact,l.leadScore,l.sourceSignal,l.sourceQuery,l.addedAt]));
+    downloadCsv(rows, 'all_dork_web_leads.csv');
+  }
+  function markReady(id){
+    const leads = getLeads(); const i = leads.findIndex(l => l.id === id); if (i < 0) return;
+    leads[i].readyToContact = true; leads[i].verificationStatus = leads[i].verificationStatus || 'manually_ready'; leads[i].leadScore = scoreLead(leads[i]);
+    saveLeads(leads); renderDorkLeadsIntoQueue(); showLeadDetail(id); toast('Marked ready.');
+  }
+  function copyEmail(id){
+    const lead = getLeads().find(l => l.id === id); if (!lead || !lead.email) return;
+    navigator.clipboard && navigator.clipboard.writeText(lead.email); toast('Email copied.');
+  }
+  function deleteLead(id){
+    saveLeads(getLeads().filter(l => l.id !== id));
+    renderDorkLeadsIntoQueue(); toast('Lead deleted.');
+  }
+  function updateLiveStatus(){
+    const leads = getLeads();
+    const ready = leads.filter(l => l.readyToContact || l.verificationStatus === 'valid').length;
+    const needs = leads.filter(l => ['needs_verification','needs_provider','unknown','catch_all','risky'].includes(l.verificationStatus || 'needs_verification')).length;
+    const el = $('dork-live-status');
+    if (el) el.textContent = `Live web leads: ${leads.length} · Ready: ${ready} · Needs verification: ${needs}`;
+  }
+
+  function installListeners(){
+    window.addEventListener('ElevateScoutDorkLead', function(event){
+      const lead = addLead(event.detail || {}, { post: true });
+      if (lead) toast('New web lead added: ' + (lead.email || lead.name));
+    });
+    window.addEventListener('message', function(event){
+      const d = event.data || {};
+      if (d && (d.type === 'DORK_LEAD' || d.type === 'ElevateScoutDorkLead')) {
+        const lead = addLead(d.lead || d.detail || d.payload || {}, { post: true });
+        if (lead) toast('New web lead added: ' + (lead.email || lead.name));
+      }
+    });
+
+    // Wrap existing app functions when present, without breaking them.
+    const wrapSaveDork = () => {
+      if (window.__dorkPatchSaveWrapped) return;
+      const original = window.saveDorkSettings;
+      window.saveDorkSettings = async function(){
+        let originalResult;
+        try { if (typeof original === 'function') originalResult = await original.apply(this, arguments); } catch(e){ console.warn(LOG_PREFIX, 'original saveDorkSettings failed', e); }
+        await syncDorkSettings();
+        return originalResult;
+      };
+      window.__dorkPatchSaveWrapped = true;
+    };
+    wrapSaveDork();
+    setTimeout(wrapSaveDork, 1000);
+
+    const wrapRender = () => {
+      if (window.__dorkPatchRenderWrapped) return;
+      const originalRender = window.renderQueue;
+      if (typeof originalRender === 'function') {
+        window.renderQueue = function(){
+          const out = originalRender.apply(this, arguments);
+          setTimeout(renderDorkLeadsIntoQueue, 0);
+          return out;
+        };
+      }
+      window.__dorkPatchRenderWrapped = true;
+    };
+    wrapRender();
+    setTimeout(wrapRender, 1000);
+  }
+
+  window.ScoutDorkPatch = {
+    syncDorkSettings, addLead, getLeads, saveLeads, renderDorkLeadsIntoQueue,
+    verifyLead, verifyAllVisibleLeads, exportReadyCsv, exportAllCsv, markReady, copyEmail, deleteLead,
+    getBackendUrl
+  };
+
+  function init(){
+    installListeners();
+    updateLiveStatus();
+    setTimeout(renderDorkLeadsIntoQueue, 500);
+    setInterval(updateLiveStatus, 5000);
+    console.log(LOG_PREFIX, 'installed');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
 </script>
 </body>
 </html>
