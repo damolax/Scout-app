@@ -6,10 +6,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Elevate Scout">
+<meta name="apple-mobile-web-app-title" content="Scout App">
 <meta name="theme-color" content="#0d0f14">
 <link rel="manifest" href="manifest.json">
-<title>Elevate Scout</title>
+<title>Scout App v36</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -354,6 +354,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
   <button class="tt-btn active" onclick="showTabMobile('detail',this)">🏠 Queue</button>
   <button class="tt-btn" onclick="showTabMobile('upload',this)">📁 Upload</button>
   <button class="tt-btn" onclick="showTabMobile('email-scout-content',this)">📧 Email Scout</button>
+  <button class="tt-btn" onclick="showTabMobile('verify-send',this)">🧪 Verify</button>
   <button class="tt-btn" onclick="showTabMobile('batch',this)">✅ Approve</button>
   <button class="tt-btn" onclick="showTabMobile('autoscout',this)">🤖 Scout</button>
   <button class="tt-btn" onclick="showTabMobile('timeline',this)">📅 Timeline</button>
@@ -362,9 +363,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
 <!-- TOP BAR -->
 <div id="topbar">
-  <span id="topbar-logo">⚡ Elevate Scout</span>
-  <span id="topbar-title">v13 — Business Scouting System</span>
+  <span id="topbar-logo">🧭 Scout App</span>
+  <span id="topbar-title">v36 — Business Scouting System</span>
   <button class="topbar-btn" onclick="showTab('upload')">📁 Upload List</button>
+  <button class="topbar-btn" onclick="showTab('verify')">🧪 Verify & Send</button>
   <button class="topbar-btn" onclick="showTab('autoscout')">🤖 Auto-Scout</button>
   <button class="topbar-btn" id="batch-btn" onclick="showTab('batch')" style="display:none">✅ Batch Approve (<span id="batch-count">0</span>)</button>
   <button class="topbar-btn primary" onclick="showTab('timeline')">📅 Timeline</button>
@@ -424,6 +426,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
       <div class="nav-tab active" onclick="showContentTab('detail',this)" id="tab-detail">Business</div>
       <div class="nav-tab" onclick="showContentTab('upload-content',this)" id="tab-upload">Upload</div>
       <div class="nav-tab" onclick="showContentTab('email-scout-content',this)" id="tab-emailscout">📧 Email Scout</div>
+      <div class="nav-tab" onclick="showContentTab('verify-send-content',this)" id="tab-verify">🧪 Verify & Send</div>
       <div class="nav-tab" onclick="showContentTab('batch-content',this)" id="tab-batch">Batch Approve</div>
       <div class="nav-tab" onclick="showContentTab('autoscout-content',this)" id="tab-autoscout">Auto-Scout</div>
       <div class="nav-tab" onclick="showContentTab('timeline-content',this)" id="tab-timeline">Timeline</div>
@@ -569,6 +572,51 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         </div>
       </div>
     </div>
+
+
+    <!-- VERIFY & SEND -->
+    <div class="tab-panel" id="verify-send-content" style="overflow-y:auto">
+      <div id="verify-send-panel" style="padding:16px;max-width:980px;margin:0 auto">
+        <div style="margin-bottom:16px">
+          <h2 style="font-size:16px;font-weight:800;margin-bottom:4px">🧪 Verify & Send</h2>
+          <p style="font-size:12px;color:var(--muted);line-height:1.6">
+            This is a Scout App tab, not a separate app. It checks the businesses already in your queue, blocks invalid or duplicate emails, and moves only ready contacts into the existing Email Scout tab.
+          </p>
+        </div>
+
+        <div class="as-card" style="margin-bottom:14px">
+          <h3>1. Verify current queue</h3>
+          <p>Uses the emails already found by Google Maps extraction, website crawling, dorking, or upload. It does not remove any existing Scout App feature.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+            <button class="topbar-btn primary" onclick="sv36VerifyQueue()">Verify Queue</button>
+            <button class="topbar-btn" onclick="sv36RenderVerifySendTab()">Refresh Stats</button>
+            <button class="topbar-btn" onclick="sv36ExportReadyCSV()">Export Ready CSV</button>
+            <span id="sv36-verify-status" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+          <div id="sv36-summary" style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px"></div>
+        </div>
+
+        <div class="as-card" style="margin-bottom:14px">
+          <h3>2. Send ready contacts to Email Scout tab</h3>
+          <p>Choose how many ready contacts to move into the existing Email Scout tab. Example: if 1000 are ready, enter 200 and only 200 go into the Email Scout send list.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <label style="font-size:11px;color:var(--muted)">Batch limit</label>
+            <input id="sv36-batch-limit" type="number" min="1" value="200" class="as-input" style="width:110px">
+            <button class="topbar-btn primary" onclick="sv36SendReadyToEmailScout()">Send Ready Batch → Email Scout</button>
+            <button class="topbar-btn" onclick="showContentTab('email-scout-content', document.getElementById('tab-emailscout'))">Open Email Scout</button>
+          </div>
+          <div id="sv36-batch-result" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+        </div>
+
+        <div class="as-card">
+          <h3>3. Verification results</h3>
+          <div style="overflow-x:auto;max-height:380px;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
+            <table style="width:100%;border-collapse:collapse;font-size:11px" id="sv36-results-table"></table>
+          </div>
+        </div>
+      </div>
+    </div>
+
 
     <!-- AUTO-SCOUT -->
     <div class="tab-panel" id="autoscout-content">
@@ -743,7 +791,7 @@ Elevate Business Solutions
 
         <div class="settings-card" id="dorking-settings-section">
           <h3>🌐 Dorking Settings</h3>
-          <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Set your Airtable prospect industry, location and signal query templates. The extension and backend read these settings when you start dorking. Each signal is a Bing search query with <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{industry}</code> and <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{location}</code> placeholders.</p>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Set your industry, location and signal query templates. The Elevate Scout extension reads these automatically when you start dorking. Each signal is a Bing search query with <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{industry}</code> and <code style="background:var(--bg);padding:1px 4px;border-radius:3px">{location}</code> placeholders.</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
             <div>
               <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Industry</label>
@@ -774,19 +822,12 @@ Elevate Business Solutions
             <textarea id="dork-signals-input" class="settings-input" rows="12" style="width:100%;resize:vertical;font-family:monospace;font-size:11px" placeholder="Paste your signal queries here, one per line…" oninput="updateDorkSignalCount()"></textarea>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="settings-btn" onclick="saveDorkSettings()" style="margin:0">Save &amp; Sync Signals</button>
-  <button class="topbar-btn primary" onclick="ScoutDorkPatch.verifyAllVisibleLeads()">✓ Verify Web Leads</button>
-  <button class="topbar-btn" onclick="ScoutDorkPatch.exportReadyCsv()">⬇ Ready Airtable Leads CSV</button>
-  <input id="cloud-target-emails-input" type="number" value="1000" min="1" max="10000" title="Target unique emails" style="width:90px;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text)">
-  <button class="topbar-btn primary" onclick="ScoutCloudCampaign.startCloudCampaign()">☁ Start Cloud Campaign</button>
-  <button class="topbar-btn" onclick="ScoutCloudCampaign.stopCloudCampaign()">Stop Cloud</button>
+            <button class="settings-btn" onclick="saveDorkSettings()" style="margin:0">Save &amp; Sync to Extension</button>
             <button class="topbar-btn" onclick="document.getElementById('dork-signals-file').click()">📂 Import CSV</button>
             <button class="topbar-btn" onclick="exportDorkSignals()">⬇ Export</button>
             <input type="file" id="dork-signals-file" accept=".csv,.txt" style="display:none" onchange="importDorkSignals(this.files[0])">
           </div>
           <div id="dork-save-status" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
-  <div id="dork-live-status" style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.6">Live web leads: 0 · Ready: 0 · Needs verification: 0</div>
-  <div id="cloud-campaign-status" style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.7">Cloud campaign: not running</div>
         </div>
 
         <div class="settings-card" id="custom-msg-section">
@@ -3209,11 +3250,12 @@ function showContentTab(id, el) {
 
   if (id === 'timeline-content') renderTimeline();
   if (id === 'batch-content') { renderBatch(); updateBatchBtn(); }
+  if (id === 'verify-send-content' && typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab();
 }
 
 function showTab(name) {
-  const map = { upload: 'upload-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
-  const tabElMap = { upload: 'tab-upload', autoscout: 'tab-autoscout', batch: 'tab-batch', timeline: 'tab-timeline', settings: 'tab-settings', detail: 'tab-detail' };
+  const map = { upload: 'upload-content', verify: 'verify-send-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
+  const tabElMap = { upload: 'tab-upload', verify: 'tab-verify', autoscout: 'tab-autoscout', batch: 'tab-batch', timeline: 'tab-timeline', settings: 'tab-settings', detail: 'tab-detail' };
   showContentTab(map[name] || name, document.getElementById(tabElMap[name]));
 }
 
@@ -3373,7 +3415,7 @@ window.addEventListener('ElevateScoutDorkLead', (e) => {
   // Mobile tab switching
   function showTabMobile(tabId, el) {
     // Switch main content
-    const map = { upload: 'upload-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
+    const map = { upload: 'upload-content', verify: 'verify-send-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
     const contentId = map[tabId] || 'detail';
     document.querySelectorAll('.tab-panel, #detail').forEach(p => p.style.display = 'none');
     const panel = document.getElementById(contentId);
@@ -4293,979 +4335,215 @@ function manualPollReplies() {
   });
 }
 
-</script>
 
-<script id="SCOUT_APP_DORK_LEADS_VERIFIER_PATCH_V28">
-/* SCOUT_APP_DORK_LEADS_VERIFIER_PATCH_V28
-   Adds live dork/web lead intake, backend dork-settings sync, email verification flow,
-   queue visibility, and CSV export for Airtable service outreach leads.
-*/
+// ---------------------------------------------------------------
+// SCOUT APP v36 - VERIFY & SEND TAB
+// Minimal add-on: preserves original Scout App UI and sends ready contacts into existing Email Scout.
+// ---------------------------------------------------------------
 (function(){
-  'use strict';
-  const LEADS_KEY = 'elevate_scout_dork_leads_v28';
-  const SETTINGS_KEY = 'dork_settings';
-  const LOG_PREFIX = '[Scout Dork Patch]';
+  const SCOUT_APP_VERSION = 'v36';
+  const ROLE_PREFIXES = new Set(['info','contact','hello','sales','support','admin','office','team','service','customerservice','help','booking','reservations','orders','mail','marketing','press','hr','jobs','careers','enquiry','enquiries']);
+  const FREE_DOMAINS = new Set(['gmail.com','googlemail.com','yahoo.com','outlook.com','hotmail.com','live.com','icloud.com','me.com','aol.com','proton.me','protonmail.com','gmx.com','gmx.de','web.de','zoho.com','mail.com']);
+  const DISPOSABLE_DOMAINS = new Set(['mailinator.com','tempmail.com','10minutemail.com','guerrillamail.com','yopmail.com','trashmail.com','getnada.com','temp-mail.org','sharklasers.com','maildrop.cc','dispostable.com']);
 
-  function $(id){ return document.getElementById(id); }
-  function nowIso(){ return new Date().toISOString(); }
-  function normEmail(v){ return String(v || '').trim().toLowerCase(); }
-  function normUrl(v){ return String(v || '').trim(); }
-  function safeText(v){ return String(v ?? '').replace(/[<>]/g, ''); }
-  function toast(msg){
-    if (typeof window.showToast === 'function') return window.showToast(msg);
-    const el = $('toast');
-    if (el) { el.textContent = msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'), 2600); }
-    else console.log(LOG_PREFIX, msg);
+  function normEmail(email){
+    return String(email || '').trim().toLowerCase().replace(/^mailto:/,'').replace(/[;,.)\]]+$/g,'');
   }
-  function setStatus(msg){
-    const el = $('dork-save-status');
-    if (el) el.textContent = msg;
-    console.log(LOG_PREFIX, msg);
+  function emailDomain(email){ return normEmail(email).split('@')[1] || ''; }
+  function emailLocal(email){ return normEmail(email).split('@')[0] || ''; }
+  function validEmail(email){
+    const e = normEmail(email);
+    if (!/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,63}$/.test(e)) return false;
+    const [local, domain] = e.split('@');
+    if (!local || !domain || local.includes('..') || domain.includes('..')) return false;
+    return true;
   }
-  function getBackendUrl(){
-    const input = $('backend-url-input');
-    const candidates = [
-      input && input.value,
-      localStorage.getItem('backendUrl'),
-      localStorage.getItem('backend_url'),
-      localStorage.getItem('elevate_backend_url'),
-      localStorage.getItem('scout_backend_url')
-    ].filter(Boolean);
-    return String(candidates[0] || '').trim().replace(/\/+$/, '');
+  function normDomain(raw){
+    return String(raw || '').trim().toLowerCase()
+      .replace(/^https?:\/\//,'').replace(/^www\./,'')
+      .split(/[/?#]/)[0].split(':')[0].replace(/[;,.)\]]+$/g,'');
   }
-  function getLeads(){
-    try { return JSON.parse(localStorage.getItem(LEADS_KEY) || '[]'); }
-    catch { return []; }
-  }
-  function saveLeads(leads){
-    localStorage.setItem(LEADS_KEY, JSON.stringify(leads || []));
-    updateLiveStatus();
-  }
-  function collectDorkSettings(){
-    const industry = ($('dork-industry-input') && $('dork-industry-input').value || '').trim();
-    const location = ($('dork-location-input') && $('dork-location-input').value || '').trim();
-    const resultsPerSignal = Math.max(1, Math.min(100, parseInt(($('dork-results-input') && $('dork-results-input').value) || '30', 10) || 30));
-    const signals = (($('dork-signals-input') && $('dork-signals-input').value) || '')
-      .split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    return { industry, location, signals, resultsPerSignal, delayBetweenPages: 8000, engine: 'bing', updatedAt: nowIso() };
-  }
-  function saveLocalDorkSettings(settings){
-    try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-      localStorage.setItem('elevate_scout_dork_settings', JSON.stringify(settings));
-    } catch(e) { console.warn(LOG_PREFIX, 'settings local save failed', e); }
-  }
-  async function syncDorkSettings(){
-    const settings = collectDorkSettings();
-    saveLocalDorkSettings(settings);
-
-    // Send to the extension content script. The fixed extension listens for this.
-    try { window.dispatchEvent(new CustomEvent('ElevateScoutSend', { detail: { type: 'SAVE_DORK_SETTINGS', settings } })); } catch(e) {}
-    try { window.postMessage({ source: 'ElevateScoutApp', type: 'SAVE_DORK_SETTINGS', settings }, '*'); } catch(e) {}
-
-    // Also send Scout URL + backend URL so the extension has both.
-    const scoutUrl = ($('scout-url-input') && $('scout-url-input').value || location.href).trim();
-    const backendUrl = getBackendUrl();
-    try { window.dispatchEvent(new CustomEvent('ElevateScoutSend', { detail: { type: 'SAVE_SETTINGS', scoutUrl, backendUrl } })); } catch(e) {}
-    try { window.postMessage({ source: 'ElevateScoutApp', type: 'SAVE_SETTINGS', scoutUrl, backendUrl }, '*'); } catch(e) {}
-
-    if (backendUrl) {
-      try {
-        const r = await fetch(backendUrl + '/dork-settings', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
-        });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        setStatus('Signals saved locally, synced to extension, and posted to backend.');
-      } catch (e) {
-        setStatus('Signals saved locally + sent to extension. Backend sync failed: ' + e.message);
-      }
-    } else {
-      setStatus('Signals saved locally + sent to extension. Add Backend Server URL to sync with server.');
-    }
-    updateLiveStatus();
-    return settings;
+  function sameDomain(emailDom, webDom){
+    if (!emailDom || !webDom) return false;
+    return emailDom === webDom || emailDom.endsWith('.' + webDom) || webDom.endsWith('.' + emailDom);
   }
 
-  function scoreLead(lead){
-    let s = 0;
-    if (lead.email) s += 30;
-    if (lead.website || lead.url || lead.sourceUrl) s += 20;
-    if (lead.industry) s += 15;
-    if (lead.location) s += 15;
-    if (lead.name || lead.businessName) s += 10;
-    if (lead.sourceSignal || lead.sourceQuery) s += 5;
-    const email = normEmail(lead.email || (Array.isArray(lead.emails) && lead.emails[0]));
-    if (/^(info|contact|hello|sales|admin|support)@/.test(email)) s -= 5;
-    if (!email) s -= 30;
-    if (lead.verificationStatus === 'valid') s += 20;
-    if (lead.verificationStatus === 'invalid') s -= 80;
-    if (lead.verificationStatus === 'risky' || lead.verificationStatus === 'catch_all') s -= 15;
-    return Math.max(0, Math.min(100, s));
+  function verifyBiz(biz, duplicateCount){
+    const email = normEmail(biz.email || (Array.isArray(biz.emails) ? biz.emails[0] : ''));
+    const domain = emailDomain(email);
+    const webDomain = normDomain(biz.website || biz.domain || '');
+    const isValid = validEmail(email);
+    const isRole = isValid && ROLE_PREFIXES.has(emailLocal(email).split(/[.+_\-]/)[0]);
+    const isFree = isValid && FREE_DOMAINS.has(domain);
+    const isDisposable = isValid && DISPOSABLE_DOMAINS.has(domain);
+    const domainMatch = isValid && webDomain && sameDomain(domain, webDomain);
+    let score = 0;
+    const reasons = [];
+    if (email) { score += 30; reasons.push('email exists'); }
+    if (isValid) { score += 25; reasons.push('valid format'); }
+    if (biz.name) { score += 10; reasons.push('business name'); }
+    if (biz.website) { score += 10; reasons.push('website'); }
+    if (domainMatch) { score += 10; reasons.push('email domain matches website'); }
+    if (biz.phone || (biz.phones && biz.phones.length)) { score += 5; reasons.push('phone'); }
+    if (biz.rating || biz.reviews) { score += 5; reasons.push('maps context'); }
+    if (isFree) { score -= 8; reasons.push('free provider'); }
+    if (isRole) { score -= 8; reasons.push('role inbox'); }
+    if (isDisposable) { score -= 80; reasons.push('disposable'); }
+    if (email && !isValid) { score -= 70; reasons.push('invalid format'); }
+    if (duplicateCount > 1) { score -= 25; reasons.push('duplicate email'); }
+    score = Math.max(0, Math.min(100, score));
+
+    let status = 'NO_EMAIL';
+    let ready = false;
+    if (!email) status = 'NO_EMAIL';
+    else if (!isValid || isDisposable) status = 'INVALID';
+    else if (duplicateCount > 1) status = 'DUPLICATE';
+    else if (score >= 70) { status = 'READY'; ready = true; }
+    else if (score >= 45) { status = 'REVIEW'; ready = true; }
+    else status = 'RISKY';
+
+    return { email, status, ready, score, isValid, isRole, isFree, isDisposable, domainMatch, duplicateCount, reasons: reasons.join('; ') };
   }
 
-  function normalizeLead(raw){
-    raw = raw || {};
-    const email = normEmail(raw.email || (Array.isArray(raw.emails) ? raw.emails[0] : ''));
-    const settings = collectDorkSettings();
-    const website = normUrl(raw.website || raw.url || raw.sourceUrl || raw.source_url || '');
-    const name = safeText(raw.name || raw.businessName || raw.title || (website ? website.replace(/^https?:\/\//,'').split('/')[0] : email.split('@')[0]) || 'Web lead');
-    const lead = {
-      id: raw.id || ('dork_' + (email || website || Date.now()).replace(/[^a-z0-9]+/gi,'_') + '_' + Math.random().toString(36).slice(2,7)),
-      source: 'dorking',
-      status: email ? 'found' : 'needs_verification',
-      name,
-      businessName: name,
-      email,
-      emails: Array.from(new Set([email].concat(raw.emails || []).map(normEmail).filter(Boolean))),
-      website,
-      url: website,
-      industry: raw.industry || settings.industry || '',
-      location: raw.location || settings.location || '',
-      sourceQuery: raw.sourceQuery || raw.query || '',
-      sourceSignal: raw.sourceSignal || raw.signal || '',
-      verificationStatus: raw.verificationStatus || raw.statusVerification || (email ? 'needs_verification' : 'no_email'),
-      readyToContact: Boolean(raw.readyToContact),
-      leadScore: Number(raw.leadScore || 0),
-      addedAt: raw.addedAt || raw.createdAt || nowIso(),
-      updatedAt: nowIso(),
-      raw
-    };
-    lead.leadScore = scoreLead(lead);
-    return lead;
-  }
-
-  async function postLeadToBackend(lead){
-    const backendUrl = getBackendUrl();
-    if (!backendUrl) return;
-    try {
-      await fetch(backendUrl + '/dork-leads', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead)
-      });
-    } catch(e) { console.warn(LOG_PREFIX, 'backend lead save failed', e); }
-  }
-
-  function addLead(raw, opts){
-    const lead = normalizeLead(raw);
-    if (!lead.email && !lead.website) return null;
-    const leads = getLeads();
-    const key = lead.email || lead.website;
-    const i = leads.findIndex(x => (x.email && x.email === lead.email) || (!lead.email && x.website && x.website === lead.website));
-    if (i >= 0) {
-      leads[i] = { ...leads[i], ...lead, id: leads[i].id, addedAt: leads[i].addedAt || lead.addedAt, updatedAt: nowIso() };
-    } else {
-      leads.unshift(lead);
-    }
-    saveLeads(leads);
-    if (!opts || opts.post !== false) postLeadToBackend(lead);
-    renderDorkLeadsIntoQueue();
-    return lead;
-  }
-
-  function verificationBadge(lead){
-    const v = lead.verificationStatus || 'needs_verification';
-    const ready = lead.readyToContact ? ' · READY' : '';
-    return `${v}${ready} · ${lead.leadScore || 0}/100`;
-  }
-
-  function renderDorkLeadsIntoQueue(){
-    const list = $('queue-list');
-    if (!list) return;
-    list.querySelectorAll('[data-dork-patch-lead]').forEach(el => el.remove());
-    const leads = getLeads();
-    if (!leads.length) return;
-
-    const activeFilterBtn = document.querySelector('#qp-actions .qp-action.active');
-    const filterText = (activeFilterBtn && activeFilterBtn.textContent || '').toLowerCase();
-    const showOnlyWeb = filterText.includes('web');
-    const showOnlyFound = filterText.includes('found');
-    const showOnlyPending = filterText.includes('pending');
-    const filtered = leads.filter(l => {
-      if (showOnlyFound) return !!l.email;
-      if (showOnlyPending) return ['needs_verification','needs_provider','unknown','catch_all','risky'].includes(l.verificationStatus || 'needs_verification');
-      return true || showOnlyWeb;
-    }).slice(0, 250);
-
-    const header = document.createElement('div');
-    header.setAttribute('data-dork-patch-lead','header');
-    header.style.cssText = 'font-size:11px;color:var(--muted);padding:8px 4px 4px;font-weight:700;display:flex;justify-content:space-between;gap:8px';
-    header.innerHTML = `<span>Web leads from signals</span><span>${filtered.length}</span>`;
-    list.appendChild(header);
-
-    filtered.forEach((lead) => {
-      const item = document.createElement('div');
-      item.className = 'qi';
-      item.setAttribute('data-dork-patch-lead', lead.id);
-      item.onclick = () => showLeadDetail(lead.id);
-      const badgeColor = lead.readyToContact ? 'var(--green)' : (lead.verificationStatus === 'invalid' ? 'var(--red)' : 'var(--amber)');
-      item.innerHTML = `
-        <div class="qi-name">${safeText(lead.name || lead.businessName)}</div>
-        <div class="qi-meta"><span class="qi-status s-found">WEB LEAD</span><span style="color:${badgeColor};font-size:10px;font-weight:700">${safeText(verificationBadge(lead))}</span></div>
-        ${lead.email ? `<div class="qi-email">${safeText(lead.email)}</div>` : ''}
-        <div class="qi-profile-link">${safeText(lead.industry || '')}${lead.location ? ' · ' + safeText(lead.location) : ''}</div>
-      `;
-      list.appendChild(item);
+  window.sv36VerifyQueue = function(){
+    if (!Array.isArray(businesses)) { toast && toast('Business queue not loaded yet', 'err'); return; }
+    const counts = {};
+    businesses.forEach(b => {
+      const e = normEmail(b.email || (Array.isArray(b.emails) ? b.emails[0] : ''));
+      if (e) counts[e] = (counts[e] || 0) + 1;
     });
-  }
+    businesses.forEach(b => {
+      const e = normEmail(b.email || (Array.isArray(b.emails) ? b.emails[0] : ''));
+      const v = verifyBiz(b, e ? counts[e] || 0 : 0);
+      b.emailVerification = v;
+      b.readyToEmailScout = !!v.ready;
+      if (v.ready && b.status !== 'contacted' && b.status !== 'replied') b.status = 'found';
+      b.updatedAt = now ? now() : new Date().toISOString();
+    });
+    if (typeof save === 'function') save();
+    if (typeof renderQueue === 'function') renderQueue();
+    sv36RenderVerifySendTab();
+    const s = document.getElementById('sv36-verify-status');
+    if (s) s.textContent = 'Verified ' + businesses.length + ' queue items.';
+    if (typeof toast === 'function') toast('Scout App v36: queue verified', 'ok');
+  };
 
-  function showLeadDetail(id){
-    const lead = getLeads().find(x => x.id === id);
-    if (!lead) return;
-    const empty = $('detail-empty');
-    const panel = $('detail-panel');
-    if (!panel) return;
-    if (empty) empty.style.display = 'none';
-    panel.style.display = 'block';
-    panel.innerHTML = `
-      <div class="detail-header">
-        <div class="detail-biz-name">${safeText(lead.name || lead.businessName)}</div>
-        <div class="detail-actions">
-          <button class="topbar-btn primary" onclick="ScoutDorkPatch.verifyLead('${lead.id}')">✓ Verify Email</button>
-          <button class="topbar-btn" onclick="ScoutDorkPatch.markReady('${lead.id}')">Mark Ready</button>
-          <button class="topbar-btn" onclick="ScoutDorkPatch.copyEmail('${lead.id}')">Copy Email</button>
-          <button class="topbar-btn danger" onclick="ScoutDorkPatch.deleteLead('${lead.id}')">Delete</button>
-        </div>
-        <div style="font-size:12px;color:var(--muted);line-height:1.8">
-          <strong>Email:</strong> ${safeText(lead.email || 'No email yet')}<br>
-          <strong>Website:</strong> ${lead.website ? `<a href="${safeText(lead.website)}" target="_blank" style="color:var(--accent)">${safeText(lead.website)}</a>` : '—'}<br>
-          <strong>Industry:</strong> ${safeText(lead.industry || '—')}<br>
-          <strong>Location:</strong> ${safeText(lead.location || '—')}<br>
-          <strong>Verification:</strong> ${safeText(verificationBadge(lead))}<br>
-          <strong>Source Signal:</strong> ${safeText(lead.sourceSignal || lead.sourceQuery || '—')}<br>
-          <strong>Date Found:</strong> ${safeText(lead.addedAt || '')}
-        </div>
-      </div>
-      <div class="detail-card" style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-top:10px">
-        <h3 style="font-size:13px;margin-bottom:8px">Airtable Outreach Process</h3>
-        <div style="font-size:12px;color:var(--muted);line-height:1.7">
-          1. Verify email first.<br>
-          2. Contact only if status is valid/ready, or carefully if catch-all/risky.<br>
-          3. Personalize around operations visibility, follow-up, client tracking, bookings, jobs, or admin bottlenecks.<br>
-          4. Mark contacted after sending so you do not message the same business twice.
-        </div>
-      </div>
-    `;
-  }
-
-  async function verifyLead(id){
-    const leads = getLeads();
-    const i = leads.findIndex(x => x.id === id);
-    if (i < 0) return;
-    const lead = leads[i];
-    if (!lead.email) { toast('No email to verify.'); return; }
-    const backendUrl = getBackendUrl();
-    if (!backendUrl) { toast('Add Backend Server URL first.'); return; }
-    try {
-      setStatus('Verifying ' + lead.email + '...');
-      const r = await fetch(backendUrl + '/verify-email', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: lead.email, lead })
-      });
-      const data = await r.json();
-      const result = data.result || data.verification || data;
-      lead.verificationStatus = result.status || result.result || result.verificationStatus || 'unknown';
-      lead.reason = result.reason || result.message || '';
-      lead.readyToContact = Boolean(result.readyToContact || lead.verificationStatus === 'valid');
-      lead.leadScore = scoreLead(lead);
-      lead.updatedAt = nowIso();
-      leads[i] = lead;
-      saveLeads(leads);
-      renderDorkLeadsIntoQueue();
-      showLeadDetail(id);
-      setStatus('Verified ' + lead.email + ': ' + lead.verificationStatus);
-    } catch(e) {
-      setStatus('Verification failed: ' + e.message);
+  window.sv36RenderVerifySendTab = function(){
+    if (!Array.isArray(businesses)) return;
+    const rows = businesses.map(b => ({ biz:b, v:b.emailVerification || verifyBiz(b, 0) }));
+    const summary = {
+      total: businesses.length,
+      ready: rows.filter(r=>r.v.status==='READY').length,
+      review: rows.filter(r=>r.v.status==='REVIEW').length,
+      risky: rows.filter(r=>r.v.status==='RISKY').length,
+      invalid: rows.filter(r=>r.v.status==='INVALID').length,
+      dup: rows.filter(r=>r.v.status==='DUPLICATE').length,
+      noEmail: rows.filter(r=>r.v.status==='NO_EMAIL').length
+    };
+    const box = document.getElementById('sv36-summary');
+    if (box) {
+      box.innerHTML = [
+        ['Total', summary.total, 'var(--text)'],
+        ['Ready', summary.ready, 'var(--green)'],
+        ['Review', summary.review, 'var(--amber)'],
+        ['Risky', summary.risky, 'var(--amber)'],
+        ['Invalid/Dup/No Email', summary.invalid + summary.dup + summary.noEmail, 'var(--red)']
+      ].map(([label,val,color]) => `<div style="background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:900;color:${color}">${val}</div><div style="font-size:11px;color:var(--muted)">${label}</div></div>`).join('');
     }
-  }
-
-  async function verifyAllVisibleLeads(){
-    const backendUrl = getBackendUrl();
-    if (!backendUrl) { toast('Add Backend Server URL first.'); return; }
-    const leads = getLeads().filter(l => l.email && !['valid','invalid'].includes(l.verificationStatus));
-    if (!leads.length) { toast('No unverified emails found.'); return; }
-    try {
-      setStatus('Verifying ' + leads.length + ' web leads...');
-      const r = await fetch(backendUrl + '/batch-verify-emails', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emails: leads.map(l => l.email), leads })
-      });
-      const data = await r.json();
-      const results = data.results || data.verified || [];
-      const all = getLeads();
-      results.forEach(res => {
-        const email = normEmail(res.email);
-        const idx = all.findIndex(l => l.email === email);
-        if (idx >= 0) {
-          const status = res.status || res.result || res.verificationStatus || 'unknown';
-          all[idx].verificationStatus = status;
-          all[idx].reason = res.reason || res.message || '';
-          all[idx].readyToContact = Boolean(res.readyToContact || status === 'valid');
-          all[idx].leadScore = scoreLead(all[idx]);
-          all[idx].updatedAt = nowIso();
-        }
-      });
-      saveLeads(all);
-      renderDorkLeadsIntoQueue();
-      setStatus('Verification complete. Ready leads: ' + all.filter(l => l.readyToContact).length);
-    } catch(e) {
-      setStatus('Batch verification failed: ' + e.message);
+    const table = document.getElementById('sv36-results-table');
+    if (table) {
+      const preview = rows
+        .filter(r => r.v.email || r.v.status === 'NO_EMAIL')
+        .slice(0, 80);
+      table.innerHTML = `
+        <tr style="position:sticky;top:0;background:var(--card2);z-index:1">
+          <th style="text-align:left;padding:8px;color:var(--muted)">Business</th>
+          <th style="text-align:left;padding:8px;color:var(--muted)">Email</th>
+          <th style="text-align:left;padding:8px;color:var(--muted)">Status</th>
+          <th style="text-align:left;padding:8px;color:var(--muted)">Score</th>
+          <th style="text-align:left;padding:8px;color:var(--muted)">Reason</th>
+        </tr>
+        ${preview.map(({biz,v}) => `<tr>
+          <td style="padding:8px;border-top:1px solid var(--border);color:var(--text)">${esc ? esc(cleanBizName ? cleanBizName(biz.name || '') : (biz.name || '')) : (biz.name || '')}</td>
+          <td style="padding:8px;border-top:1px solid var(--border);color:var(--green)">${esc ? esc(v.email || '') : (v.email || '')}</td>
+          <td style="padding:8px;border-top:1px solid var(--border);font-weight:700;color:${v.ready ? 'var(--green)' : v.status==='REVIEW' ? 'var(--amber)' : 'var(--red)'}">${v.status}</td>
+          <td style="padding:8px;border-top:1px solid var(--border);color:var(--text)">${v.score}</td>
+          <td style="padding:8px;border-top:1px solid var(--border);color:var(--muted)">${esc ? esc(v.reasons || '') : (v.reasons || '')}</td>
+        </tr>`).join('')}
+      `;
     }
-  }
+  };
 
-  function csvEscape(v){ return '"' + String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ') + '"'; }
-  function downloadCsv(rows, filename){
-    const blob = new Blob([rows.map(r => r.map(csvEscape).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
+  window.sv36SendReadyToEmailScout = function(){
+    if (!Array.isArray(businesses)) return;
+    if (!Array.isArray(esContacts)) esContacts = [];
+    const limit = Math.max(1, parseInt(document.getElementById('sv36-batch-limit')?.value || '200', 10));
+    const already = new Set((esContacts || []).map(c => normEmail(c.email)));
+    const ready = businesses
+      .filter(b => (b.emailVerification || verifyBiz(b,0)).ready)
+      .filter(b => normEmail(b.email || (Array.isArray(b.emails) ? b.emails[0] : '')))
+      .filter(b => !already.has(normEmail(b.email || (Array.isArray(b.emails) ? b.emails[0] : ''))))
+      .slice(0, limit);
+
+    ready.forEach(b => {
+      const email = normEmail(b.email || (Array.isArray(b.emails) ? b.emails[0] : ''));
+      esContacts.push({
+        name: cleanBizName ? cleanBizName(b.name || '') : (b.name || ''),
+        email,
+        website: b.website || '',
+        phone: b.phone || (Array.isArray(b.phones) ? b.phones[0] : '') || ''
+      });
+      already.add(email);
+    });
+    if (typeof renderEsPreview === 'function') renderEsPreview();
+    if (typeof updateEsSendStats === 'function') updateEsSendStats();
+    const msg = `Added ${ready.length} ready contacts to Email Scout.`;
+    const out = document.getElementById('sv36-batch-result');
+    if (out) out.textContent = msg;
+    if (typeof toast === 'function') toast(msg, 'ok');
+    showContentTab('email-scout-content', document.getElementById('tab-emailscout'));
+  };
+
+  window.sv36ExportReadyCSV = function(){
+    if (!Array.isArray(businesses)) return;
+    const cols = ['business','email','website','phone','status','score','reason','source','location','industry'];
+    const rows = businesses
+      .filter(b => (b.emailVerification || verifyBiz(b,0)).ready)
+      .map(b => {
+        const v = b.emailVerification || verifyBiz(b,0);
+        return {
+          business: cleanBizName ? cleanBizName(b.name || '') : (b.name || ''),
+          email: v.email,
+          website: b.website || '',
+          phone: b.phone || (Array.isArray(b.phones) ? b.phones[0] : '') || '',
+          status: v.status,
+          score: v.score,
+          reason: v.reasons,
+          source: b.source || '',
+          location: b.location || '',
+          industry: b.industry || ''
+        };
+      });
+    const csv = [cols.join(','), ...rows.map(r => cols.map(c => `"${String(r[c] || '').replace(/"/g,'""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = filename;
+    a.download = 'scout_app_ready_email_scout_contacts.csv';
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-  }
-  function exportReadyCsv(){
-    const leads = getLeads().filter(l => l.readyToContact || l.verificationStatus === 'valid' || l.leadScore >= 80);
-    const rows = [[
-      'Business','Email','Website','Industry','Location','Verification Status','Lead Score','Source Signal','Source Query','Date Found','Airtable Angle'
-    ]];
-    leads.forEach(l => rows.push([
-      l.name || l.businessName, l.email, l.website, l.industry, l.location, l.verificationStatus, l.leadScore,
-      l.sourceSignal, l.sourceQuery, l.addedAt,
-      `Airtable system for ${l.industry || 'business'} operations, follow-up, visibility, client tracking, and admin automation`
-    ]));
-    downloadCsv(rows, 'ready_airtable_leads.csv');
-  }
-  function exportAllCsv(){
-    const rows = [['Business','Email','Website','Industry','Location','Verification Status','Ready','Lead Score','Source Signal','Source Query','Date Found']];
-    getLeads().forEach(l => rows.push([l.name||l.businessName,l.email,l.website,l.industry,l.location,l.verificationStatus,l.readyToContact,l.leadScore,l.sourceSignal,l.sourceQuery,l.addedAt]));
-    downloadCsv(rows, 'all_dork_web_leads.csv');
-  }
-  function markReady(id){
-    const leads = getLeads(); const i = leads.findIndex(l => l.id === id); if (i < 0) return;
-    leads[i].readyToContact = true; leads[i].verificationStatus = leads[i].verificationStatus || 'manually_ready'; leads[i].leadScore = scoreLead(leads[i]);
-    saveLeads(leads); renderDorkLeadsIntoQueue(); showLeadDetail(id); toast('Marked ready.');
-  }
-  function copyEmail(id){
-    const lead = getLeads().find(l => l.id === id); if (!lead || !lead.email) return;
-    navigator.clipboard && navigator.clipboard.writeText(lead.email); toast('Email copied.');
-  }
-  function deleteLead(id){
-    saveLeads(getLeads().filter(l => l.id !== id));
-    renderDorkLeadsIntoQueue(); toast('Lead deleted.');
-  }
-  function updateLiveStatus(){
-    const leads = getLeads();
-    const ready = leads.filter(l => l.readyToContact || l.verificationStatus === 'valid').length;
-    const needs = leads.filter(l => ['needs_verification','needs_provider','unknown','catch_all','risky'].includes(l.verificationStatus || 'needs_verification')).length;
-    const el = $('dork-live-status');
-    if (el) el.textContent = `Live web leads: ${leads.length} · Ready: ${ready} · Needs verification: ${needs}`;
-  }
-
-  function installListeners(){
-    window.addEventListener('ElevateScoutDorkLead', function(event){
-      const lead = addLead(event.detail || {}, { post: true });
-      if (lead) toast('New web lead added: ' + (lead.email || lead.name));
-    });
-    window.addEventListener('message', function(event){
-      const d = event.data || {};
-      if (d && (d.type === 'DORK_LEAD' || d.type === 'ElevateScoutDorkLead')) {
-        const lead = addLead(d.lead || d.detail || d.payload || {}, { post: true });
-        if (lead) toast('New web lead added: ' + (lead.email || lead.name));
-      }
-    });
-
-    // Wrap existing app functions when present, without breaking them.
-    const wrapSaveDork = () => {
-      if (window.__dorkPatchSaveWrapped) return;
-      const original = window.saveDorkSettings;
-      window.saveDorkSettings = async function(){
-        let originalResult;
-        try { if (typeof original === 'function') originalResult = await original.apply(this, arguments); } catch(e){ console.warn(LOG_PREFIX, 'original saveDorkSettings failed', e); }
-        await syncDorkSettings();
-        return originalResult;
-      };
-      window.__dorkPatchSaveWrapped = true;
-    };
-    wrapSaveDork();
-    setTimeout(wrapSaveDork, 1000);
-
-    const wrapRender = () => {
-      if (window.__dorkPatchRenderWrapped) return;
-      const originalRender = window.renderQueue;
-      if (typeof originalRender === 'function') {
-        window.renderQueue = function(){
-          const out = originalRender.apply(this, arguments);
-          setTimeout(renderDorkLeadsIntoQueue, 0);
-          return out;
-        };
-      }
-      window.__dorkPatchRenderWrapped = true;
-    };
-    wrapRender();
-    setTimeout(wrapRender, 1000);
-  }
-
-  window.ScoutDorkPatch = {
-    syncDorkSettings, addLead, getLeads, saveLeads, renderDorkLeadsIntoQueue,
-    verifyLead, verifyAllVisibleLeads, exportReadyCsv, exportAllCsv, markReady, copyEmail, deleteLead,
-    getBackendUrl
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   };
 
-  function init(){
-    installListeners();
-    updateLiveStatus();
-    setTimeout(renderDorkLeadsIntoQueue, 500);
-    setInterval(updateLiveStatus, 5000);
-    console.log(LOG_PREFIX, 'installed');
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      const logo = document.getElementById('topbar-logo');
+      const title = document.getElementById('topbar-title');
+      if (logo) logo.textContent = '🧭 Scout App';
+      if (title) title.textContent = SCOUT_APP_VERSION + ' — Business Scouting System';
+    } catch {}
+  });
 })();
+
 </script>
-
-<script id="SCOUT_APP_CLOUD_CAMPAIGN_RUNNER_PATCH_V30">
-/* SCOUT_APP_CLOUD_CAMPAIGN_RUNNER_PATCH_V30
-   Adds backend/cloud dork campaign start/stop/status polling to Scout App.
-   Leads are stored by the backend and imported into the app live. Email duplicates are not added twice.
-*/
-(function(){
-  'use strict';
-  const CAMPAIGN_KEY = 'elevate_scout_active_cloud_campaign_v30';
-  const LEADS_KEY = 'elevate_scout_dork_leads_v28';
-  const LOG_PREFIX = '[Scout Cloud Campaign]';
-  let pollTimer = null;
-
-  function $(id){ return document.getElementById(id); }
-  function nowIso(){ return new Date().toISOString(); }
-  function normEmail(v){ return String(v || '').trim().toLowerCase(); }
-  function toast(msg){
-    if (typeof window.showToast === 'function') return window.showToast(msg);
-    const el = $('toast');
-    if (el) { el.textContent = msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'), 2600); }
-    else console.log(LOG_PREFIX, msg);
-  }
-  function status(msg){
-    const el = $('cloud-campaign-status');
-    if (el) el.textContent = msg;
-    console.log(LOG_PREFIX, msg);
-  }
-  function getBackendUrl(){
-    if (window.ScoutDorkPatch && typeof window.ScoutDorkPatch.getBackendUrl === 'function') {
-      return window.ScoutDorkPatch.getBackendUrl();
-    }
-    const input = $('backend-url-input');
-    return String((input && input.value) || localStorage.getItem('backendUrl') || localStorage.getItem('backend_url') || '').trim().replace(/\/+$/, '');
-  }
-  function collectDorkSettings(){
-    if (window.ScoutDorkPatch && typeof window.ScoutDorkPatch.syncDorkSettings === 'function') {
-      // We do not await here; startCloudCampaign awaits it when needed.
-    }
-    const industry = (($('dork-industry-input') && $('dork-industry-input').value) || '').trim();
-    const location = (($('dork-location-input') && $('dork-location-input').value) || '').trim();
-    const resultsPerSignal = Math.max(1, Math.min(100, parseInt((($('dork-results-input') && $('dork-results-input').value) || '30'), 10) || 30));
-    const signals = ((($('dork-signals-input') && $('dork-signals-input').value) || '')).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-    return { industry, location, signals, resultsPerSignal, delayBetweenPages: 8000, engine: 'bing', updatedAt: nowIso() };
-  }
-  function getLocalLeads(){
-    try { return JSON.parse(localStorage.getItem(LEADS_KEY) || '[]'); }
-    catch { return []; }
-  }
-  function saveLocalLeads(leads){
-    localStorage.setItem(LEADS_KEY, JSON.stringify(leads || []));
-  }
-  function scoreLead(lead){
-    let s = 0;
-    if (lead.email) s += 30;
-    if (lead.website || lead.url || lead.sourceUrl) s += 20;
-    if (lead.industry) s += 15;
-    if (lead.location) s += 15;
-    if (lead.name || lead.businessName) s += 10;
-    if (lead.sourceSignal || lead.sourceQuery) s += 5;
-    if (lead.verificationStatus === 'valid') s += 20;
-    if (lead.verificationStatus === 'invalid') s -= 80;
-    if (lead.verificationStatus === 'risky' || lead.verificationStatus === 'catch_all') s -= 15;
-    return Math.max(0, Math.min(100, s));
-  }
-  function normalizeLead(raw){
-    raw = raw || {};
-    const email = normEmail(raw.email || (Array.isArray(raw.emails) ? raw.emails[0] : ''));
-    const website = String(raw.website || raw.url || raw.sourceUrl || raw.source_url || '').trim();
-    const name = String(raw.name || raw.businessName || raw.business_name || raw.title || (website ? website.replace(/^https?:\/\//,'').split('/')[0] : (email ? email.split('@')[0] : 'Web lead'))).replace(/[<>]/g, '');
-    const lead = {
-      id: raw.id || ('cloud_' + (email || website || Date.now()).replace(/[^a-z0-9]+/gi,'_')),
-      source: raw.source || 'cloud_campaign',
-      status: raw.status || 'found',
-      name,
-      businessName: raw.businessName || raw.business_name || name,
-      email,
-      emails: Array.from(new Set([email].concat(raw.emails || []).map(normEmail).filter(Boolean))),
-      website,
-      url: website,
-      industry: raw.industry || '',
-      location: raw.location || '',
-      sourceQuery: raw.sourceQuery || raw.source_query || '',
-      sourceSignal: raw.sourceSignal ?? raw.source_signal ?? '',
-      sourceQueries: raw.sourceQueries || [],
-      sourceSignals: raw.sourceSignals || [],
-      sources: raw.sources || [],
-      campaignId: raw.campaignId || '',
-      campaignIds: raw.campaignIds || (raw.campaignId ? [raw.campaignId] : []),
-      verificationStatus: raw.verificationStatus || raw.verification_status || 'needs_verification',
-      verificationScore: raw.verificationScore || raw.verification_score || '',
-      verificationProvider: raw.verificationProvider || raw.verification_provider || '',
-      verificationReason: raw.verificationReason || raw.verification_reason || '',
-      verifiedAt: raw.verifiedAt || raw.verified_at || '',
-      readyToContact: Boolean(raw.readyToContact || raw.ready_to_contact),
-      leadScore: Number(raw.leadScore || 0),
-      addedAt: raw.addedAt || raw.firstSeenAt || nowIso(),
-      firstSeenAt: raw.firstSeenAt || raw.addedAt || nowIso(),
-      lastSeenAt: raw.lastSeenAt || raw.updatedAt || nowIso(),
-      sourceCount: Number(raw.sourceCount || (raw.sources || []).length || 1),
-      raw
-    };
-    lead.leadScore = lead.leadScore || scoreLead(lead);
-    return lead;
-  }
-  function mergeLocalLead(existing, incoming){
-    const merged = { ...existing };
-    Object.keys(incoming).forEach(k => {
-      if ((merged[k] === undefined || merged[k] === null || merged[k] === '') && incoming[k]) merged[k] = incoming[k];
-    });
-    merged.emails = Array.from(new Set([...(existing.emails || []), ...(incoming.emails || [])].map(normEmail).filter(Boolean)));
-    ['sources','sourceQueries','sourceSignals','campaignIds'].forEach(k => {
-      merged[k] = Array.from(new Set([...(existing[k] || []), ...(incoming[k] || [])].map(v => String(v || '').trim()).filter(Boolean)));
-    });
-    merged.lastSeenAt = incoming.lastSeenAt || nowIso();
-    merged.sourceCount = Math.max(Number(existing.sourceCount || 1), Number(incoming.sourceCount || 1), (merged.sources || []).length || 1);
-    if ((!existing.verificationStatus || existing.verificationStatus === 'needs_verification') && incoming.verificationStatus) {
-      merged.verificationStatus = incoming.verificationStatus;
-      merged.verificationScore = incoming.verificationScore || existing.verificationScore || '';
-      merged.verificationProvider = incoming.verificationProvider || existing.verificationProvider || '';
-      merged.verificationReason = incoming.verificationReason || existing.verificationReason || '';
-      merged.readyToContact = Boolean(incoming.readyToContact || existing.readyToContact);
-    }
-    merged.leadScore = scoreLead(merged);
-    return merged;
-  }
-  function importLeads(rawLeads){
-    const incoming = (rawLeads || []).map(normalizeLead).filter(l => l.email || l.website);
-    if (!incoming.length) return { added: 0, updated: 0, total: getLocalLeads().length };
-    const local = getLocalLeads();
-    let added = 0, updated = 0;
-    incoming.forEach(lead => {
-      const idx = local.findIndex(x => (lead.email && normEmail(x.email) === lead.email) || (!lead.email && x.website && x.website === lead.website));
-      if (idx >= 0) { local[idx] = mergeLocalLead(local[idx], lead); updated++; }
-      else { local.unshift(lead); added++; }
-    });
-    saveLocalLeads(local);
-    if (window.ScoutDorkPatch && typeof window.ScoutDorkPatch.renderDorkLeadsIntoQueue === 'function') {
-      window.ScoutDorkPatch.renderDorkLeadsIntoQueue();
-    }
-    return { added, updated, total: local.length };
-  }
-
-  async function startCloudCampaign(){
-    const backendUrl = getBackendUrl();
-    if (!backendUrl) { toast('Add Backend Server URL first.'); return; }
-    if (window.ScoutDorkPatch && typeof window.ScoutDorkPatch.syncDorkSettings === 'function') {
-      try { await window.ScoutDorkPatch.syncDorkSettings(); } catch(e) {}
-    }
-    const settings = collectDorkSettings();
-    if (!settings.signals.length) { toast('Add at least one signal first.'); return; }
-    const targetInput = $('cloud-target-emails-input');
-    const maxEmails = Math.max(1, Math.min(10000, parseInt((targetInput && targetInput.value) || '1000', 10) || 1000));
-    status('Starting cloud campaign...');
-    const r = await fetch(backendUrl + '/campaigns/start', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settings, maxEmails, name: ((settings.industry || 'Airtable prospects') + ' - ' + (settings.location || 'Cloud run')) })
-    });
-    const data = await r.json();
-    if (!r.ok || !data.success) throw new Error(data.error || 'Could not start campaign');
-    localStorage.setItem(CAMPAIGN_KEY, data.campaign.id);
-    toast('Cloud campaign started.');
-    status('Cloud campaign running: ' + data.campaign.id);
-    startPolling(data.campaign.id);
-  }
-
-  async function stopCloudCampaign(){
-    const backendUrl = getBackendUrl();
-    const id = localStorage.getItem(CAMPAIGN_KEY);
-    if (!backendUrl || !id) { toast('No active cloud campaign.'); return; }
-    try {
-      const r = await fetch(backendUrl + '/campaigns/' + encodeURIComponent(id) + '/stop', { method: 'POST' });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || 'Stop failed');
-      status('Cloud campaign stopping...');
-      toast('Stop requested.');
-    } catch(e) { toast('Stop failed: ' + e.message); }
-  }
-
-  async function pollOnce(id){
-    const backendUrl = getBackendUrl();
-    if (!backendUrl || !id) return;
-    try {
-      const [statusRes, leadsRes] = await Promise.all([
-        fetch(backendUrl + '/campaigns/' + encodeURIComponent(id)),
-        fetch(backendUrl + '/campaigns/' + encodeURIComponent(id) + '/leads?limit=50000')
-      ]);
-      const statusData = await statusRes.json();
-      const leadsData = await leadsRes.json();
-      if (Array.isArray(leadsData.leads)) {
-        const imported = importLeads(leadsData.leads);
-        const c = statusData.campaign || {};
-        status('Cloud campaign ' + (c.status || 'unknown') + ' · unique emails added: ' + (c.newEmailsAdded || 0) + ' · pages checked: ' + (c.pagesChecked || 0) + ' · local total: ' + imported.total + ' · duplicates merged: ' + (c.duplicatesSkipped || 0));
-      }
-      const c = statusData.campaign || {};
-      if (['completed','failed','stopped'].includes(c.status)) {
-        stopPolling();
-        status('Cloud campaign ' + c.status + '. Added ' + (c.newEmailsAdded || 0) + ' unique emails. Duplicates merged: ' + (c.duplicatesSkipped || 0) + '.');
-      }
-    } catch(e) {
-      status('Cloud campaign poll failed: ' + e.message);
-    }
-  }
-
-  function startPolling(id){
-    stopPolling();
-    if (!id) id = localStorage.getItem(CAMPAIGN_KEY);
-    if (!id) return;
-    pollOnce(id);
-    pollTimer = setInterval(() => pollOnce(id), 5000);
-  }
-  function stopPolling(){ if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
-
-  async function pullLatestCloudLeads(){
-    const backendUrl = getBackendUrl();
-    if (!backendUrl) { toast('Add Backend Server URL first.'); return; }
-    const r = await fetch(backendUrl + '/dork-leads?limit=50000');
-    const data = await r.json();
-    const imported = importLeads(data.leads || []);
-    toast('Pulled cloud leads. Added ' + imported.added + ', updated ' + imported.updated + '.');
-  }
-
-  window.ScoutCloudCampaign = {
-    startCloudCampaign, stopCloudCampaign, startPolling, stopPolling, pollOnce, pullLatestCloudLeads, importLeads
-  };
-
-  function init(){
-    const id = localStorage.getItem(CAMPAIGN_KEY);
-    if (id) startPolling(id);
-    setTimeout(() => {
-      const el = $('cloud-campaign-status');
-      if (el && !id) el.textContent = 'Cloud campaign: ready. Set target emails, then click Start Cloud Campaign.';
-    }, 500);
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-})();
-</script>
-
-<!-- Scout Email Scout Verify Ready Queue v34 -->
-<style id="scout-email-scout-verify-ready-v34-style">
-  #scoutEmailScoutPanel { margin: 18px auto; max-width: 1180px; padding: 16px; border: 1px solid rgba(148,163,184,.25); border-radius: 18px; background: linear-gradient(180deg, rgba(15,23,42,.96), rgba(2,6,23,.96)); color: #e5e7eb; box-shadow: 0 20px 48px rgba(0,0,0,.28); font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
-  #scoutEmailScoutPanel * { box-sizing: border-box; }
-  #scoutEmailScoutPanel h2 { margin: 0 0 6px; font-size: 20px; }
-  #scoutEmailScoutPanel p { color:#94a3b8; margin: 5px 0 12px; line-height:1.45; }
-  #scoutEmailScoutPanel .es-grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:10px; }
-  #scoutEmailScoutPanel .es-card { border:1px solid rgba(148,163,184,.22); border-radius:14px; background:rgba(255,255,255,.06); padding:12px; }
-  #scoutEmailScoutPanel .es-label { font-size:11px; text-transform:uppercase; color:#94a3b8; letter-spacing:.06em; }
-  #scoutEmailScoutPanel .es-value { font-size:24px; font-weight:900; margin-top:3px; }
-  #scoutEmailScoutPanel .es-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin: 12px 0; }
-  #scoutEmailScoutPanel button { border:0; border-radius:12px; padding:10px 12px; font-weight:800; cursor:pointer; background:linear-gradient(135deg,#38bdf8,#22c55e); color:#03101c; }
-  #scoutEmailScoutPanel button.es-secondary { background:rgba(255,255,255,.10); color:#e5e7eb; border:1px solid rgba(148,163,184,.25); }
-  #scoutEmailScoutPanel input, #scoutEmailScoutPanel select { background:rgba(2,6,23,.7); color:#e5e7eb; border:1px solid rgba(148,163,184,.28); border-radius:12px; padding:10px; min-width:120px; }
-  #scoutEmailScoutPanel label { color:#cbd5e1; font-size:12px; display:flex; gap:6px; align-items:center; }
-  #scoutEmailScoutPanel .es-status { color:#bae6fd; min-height:22px; font-size:13px; }
-  #scoutEmailScoutPanel .es-warn { color:#fde68a; font-size:12px; }
-  #scoutEmailScoutPanel table { width:100%; border-collapse:collapse; margin-top:10px; min-width:920px; }
-  #scoutEmailScoutPanel th, #scoutEmailScoutPanel td { border-bottom:1px solid rgba(148,163,184,.18); padding:9px; text-align:left; font-size:12px; vertical-align:top; }
-  #scoutEmailScoutPanel th { color:#bae6fd; text-transform:uppercase; font-size:11px; letter-spacing:.05em; position:sticky; top:0; background:#0f172a; }
-  #scoutEmailScoutPanel .es-table-wrap { overflow:auto; max-height:420px; border:1px solid rgba(148,163,184,.18); border-radius:14px; }
-  @media(max-width:850px){ #scoutEmailScoutPanel .es-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-</style>
-<script id="scout-email-scout-verify-ready-v34">
-(function(){
-  if (window.__SCOUT_EMAIL_SCOUT_VERIFY_READY_V34__) return;
-  window.__SCOUT_EMAIL_SCOUT_VERIFY_READY_V34__ = true;
-
-  function getBackend(){
-    return (localStorage.getItem('scoutBackendUrl') || localStorage.getItem('backendUrl') || localStorage.getItem('SCOUT_BACKEND_URL') || '').replace(/\/$/, '');
-  }
-  function setBackend(v){
-    if (v) { localStorage.setItem('scoutBackendUrl', v.replace(/\/$/, '')); localStorage.setItem('backendUrl', v.replace(/\/$/, '')); }
-  }
-  function esc(v){ return String(v == null ? '' : v).replace(/[&<>\"]/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]); }); }
-  async function api(path, opts){
-    var backend = getBackend();
-    if (!backend) throw new Error('Save Backend URL first.');
-    var r = await fetch(backend + path, Object.assign({ headers: { 'Content-Type':'application/json' } }, opts || {}));
-    var text = await r.text();
-    var j = {}; try { j = JSON.parse(text); } catch(e) { j = { raw:text }; }
-    if (!r.ok) throw new Error(j.error || j.message || text || ('HTTP ' + r.status));
-    return j;
-  }
-  function downloadUrl(path){
-    var backend = getBackend();
-    if (!backend) return alert('Save Backend URL first.');
-    window.open(backend + path, '_blank');
-  }
-  function clickEmailScoutTab(){
-    var candidates = Array.from(document.querySelectorAll('button,a,[role="tab"],.tab'));
-    var found = candidates.find(function(el){ return /email\s*scout|ready\s*emails|email\s*send/i.test(el.textContent || ''); });
-    if (found) { try { found.click(); return true; } catch(e){} }
-    var panel = document.getElementById('scoutEmailScoutPanel');
-    if (panel) panel.scrollIntoView({ behavior:'smooth', block:'start' });
-    return false;
-  }
-  function ensurePanel(){
-    if (document.getElementById('scoutEmailScoutPanel')) return document.getElementById('scoutEmailScoutPanel');
-    var panel = document.createElement('section');
-    panel.id = 'scoutEmailScoutPanel';
-    panel.innerHTML = ''+
-      '<h2>📧 Email Scout Verify → Ready Queue</h2>'+
-      '<p>Verify found emails, build safe Airtable messages, and move only complete messages to the Email Scout ready queue. This panel prepares and exports; it does not automatically send emails.</p>'+
-      '<div class="es-row">'+
-        '<input id="esBackendUrl" placeholder="Backend URL" style="min-width:300px" />'+
-        '<button id="esSaveBackend" class="es-secondary">Save Backend</button>'+
-        '<input id="esLimit" type="number" min="1" value="500" title="Limit" />'+
-        '<input id="esMinScore" type="number" min="0" max="100" value="50" title="Minimum lead score" />'+
-        '<label><input id="esAllowRisky" type="checkbox" /> allow risky/catch-all</label>'+
-        '<label><input id="esAllowNeedsProvider" type="checkbox" /> allow basic/MX-only</label>'+
-      '</div>'+
-      '<div class="es-row">'+
-        '<button id="esVerifyPrepare">Verify & Build Ready Queue</button>'+
-        '<button id="esRefresh" class="es-secondary">Refresh Ready Queue</button>'+
-        '<button id="esOpenTab" class="es-secondary">Open Email Scout Tab</button>'+
-        '<button id="esExport" class="es-secondary">Export Ready CSV</button>'+
-      '</div>'+
-      '<div class="es-warn">Automatic browser/Gmail sending is not enabled here. Use the ready queue/export for review, then send through your approved Email Scout sending flow.</div>'+
-      '<div id="esStatus" class="es-status"></div>'+
-      '<div class="es-grid" id="esSummary"></div>'+
-      '<div class="es-table-wrap"><table><thead><tr><th>Email</th><th>Subject</th><th>Name</th><th>Industry</th><th>Location</th><th>Status</th><th>Score</th></tr></thead><tbody id="esRows"></tbody></table></div>';
-    var target = document.getElementById('scoutUnifiedPanel') || document.querySelector('main') || document.body;
-    if (target === document.body) document.body.appendChild(panel); else target.parentNode.insertBefore(panel, target.nextSibling);
-    bindPanel(panel);
-    return panel;
-  }
-  function status(msg){ var el=document.getElementById('esStatus'); if(el) el.textContent=msg || ''; }
-  function bindPanel(panel){
-    var backendInput = document.getElementById('esBackendUrl');
-    if (backendInput) backendInput.value = getBackend();
-    document.getElementById('esSaveBackend').onclick = function(){ setBackend(backendInput.value); status('Backend URL saved.'); };
-    document.getElementById('esVerifyPrepare').onclick = verifyPrepare;
-    document.getElementById('esRefresh').onclick = refreshReady;
-    document.getElementById('esOpenTab').onclick = function(){ if(!clickEmailScoutTab()) status('No existing Email Scout tab found, so use this Email Scout ready panel.'); };
-    document.getElementById('esExport').onclick = function(){ downloadUrl('/email-scout/ready?format=csv'); };
-    refreshSummary().catch(function(){});
-    refreshReady().catch(function(){});
-  }
-  async function refreshSummary(){
-    var j = await api('/email-scout/summary');
-    var data = [
-      ['Total leads', j.total || 0], ['With email', j.withEmail || 0], ['Verified', j.verified || 0], ['Needs verification', j.needsVerification || 0],
-      ['Invalid', j.invalid || 0], ['Ready queue', j.ready || 0], ['Blocked codes', j.blockedMissingCodes || 0], ['Sent marked', j.sent || 0]
-    ];
-    var grid = document.getElementById('esSummary');
-    if (grid) grid.innerHTML = data.map(function(x){ return '<div class="es-card"><div class="es-label">'+esc(x[0])+'</div><div class="es-value">'+Number(x[1]||0).toLocaleString()+'</div></div>'; }).join('');
-  }
-  async function verifyPrepare(){
-    try {
-      status('Verifying and preparing safe Email Scout messages…');
-      var limit = Number(document.getElementById('esLimit').value || 500);
-      var minLeadScore = Number(document.getElementById('esMinScore').value || 50);
-      var allowRisky = !!document.getElementById('esAllowRisky').checked;
-      var allowNeedsProvider = !!document.getElementById('esAllowNeedsProvider').checked;
-      var j = await api('/email-scout/verify-and-prepare', { method:'POST', body: JSON.stringify({ limit:limit, verifyLimit:limit, minLeadScore:minLeadScore, allowRisky:allowRisky, allowNeedsProvider:allowNeedsProvider }) });
-      status('Done. Checked '+(j.checked||0)+' · prepared '+(j.prepared||0)+' · blocked '+(j.blocked||0)+' · ready '+(j.ready||0)+'.');
-      await refreshSummary(); await refreshReady();
-      try { window.dispatchEvent(new CustomEvent('ScoutEmailScoutReadyUpdated', { detail:j })); } catch(e){}
-    } catch(e) { status('Failed: ' + (e.message || e)); }
-  }
-  async function refreshReady(){
-    try {
-      var j = await api('/email-scout/ready?limit=300');
-      localStorage.setItem('emailScoutReadyLeads', JSON.stringify(j.leads || []));
-      var rows = document.getElementById('esRows');
-      if (rows) rows.innerHTML = (j.leads || []).map(function(l){ return '<tr>'+
-        '<td>'+esc(l.email)+'</td><td>'+esc(l.subject)+'</td><td>'+esc(l.name || l.businessName)+'</td><td>'+esc(l.industry)+'</td><td>'+esc(l.location)+'</td><td>'+esc(l.verificationStatus || l.contactStatus)+'</td><td>'+esc(l.leadScore)+'</td>'+
-        '</tr>'; }).join('') || '<tr><td colspan="7">No ready emails yet.</td></tr>';
-      status('Ready queue loaded: '+(j.total || 0)+' email(s).');
-      await refreshSummary();
-      try { window.dispatchEvent(new CustomEvent('ScoutEmailScoutReadyLeadsLoaded', { detail:j })); } catch(e){}
-    } catch(e) { status('Ready refresh failed: ' + (e.message || e)); }
-  }
-  document.addEventListener('DOMContentLoaded', ensurePanel);
-  setTimeout(ensurePanel, 1200);
-  window.addEventListener('ScoutUnifiedLeadsRefreshRequested', function(){ setTimeout(function(){ refreshSummary().catch(function(){}); refreshReady().catch(function(){}); }, 800); });
-})();
-</script>
-
-
-<!-- Scout Email Scout Gmail Batch Sender v35 -->
-<style id="scout-email-scout-gmail-sender-v35-style">
-  #scoutGmailSenderPanel { margin: 18px auto; max-width: 1180px; padding: 16px; border: 1px solid rgba(34,197,94,.28); border-radius: 18px; background: linear-gradient(180deg, rgba(6,78,59,.96), rgba(2,6,23,.96)); color: #e5e7eb; box-shadow: 0 20px 48px rgba(0,0,0,.28); font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
-  #scoutGmailSenderPanel * { box-sizing: border-box; }
-  #scoutGmailSenderPanel h2 { margin: 0 0 6px; font-size: 20px; }
-  #scoutGmailSenderPanel p { color:#bbf7d0; margin: 5px 0 12px; line-height:1.45; }
-  #scoutGmailSenderPanel .gs-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin: 12px 0; }
-  #scoutGmailSenderPanel .gs-card { border:1px solid rgba(148,163,184,.22); border-radius:14px; background:rgba(255,255,255,.06); padding:12px; }
-  #scoutGmailSenderPanel .gs-grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:10px; }
-  #scoutGmailSenderPanel .gs-label { font-size:11px; text-transform:uppercase; color:#a7f3d0; letter-spacing:.06em; }
-  #scoutGmailSenderPanel .gs-value { font-size:24px; font-weight:900; margin-top:3px; }
-  #scoutGmailSenderPanel button { border:0; border-radius:12px; padding:10px 12px; font-weight:800; cursor:pointer; background:linear-gradient(135deg,#22c55e,#38bdf8); color:#03101c; }
-  #scoutGmailSenderPanel button.gs-secondary { background:rgba(255,255,255,.10); color:#e5e7eb; border:1px solid rgba(148,163,184,.25); }
-  #scoutGmailSenderPanel button.gs-danger { background:linear-gradient(135deg,#ef4444,#f97316); color:#fff; }
-  #scoutGmailSenderPanel input, #scoutGmailSenderPanel select { background:rgba(2,6,23,.7); color:#e5e7eb; border:1px solid rgba(148,163,184,.28); border-radius:12px; padding:10px; min-width:120px; }
-  #scoutGmailSenderPanel label { color:#d1fae5; font-size:12px; display:flex; gap:6px; align-items:center; }
-  #scoutGmailSenderPanel .gs-status { color:#bae6fd; min-height:22px; font-size:13px; white-space:pre-wrap; }
-  #scoutGmailSenderPanel .gs-warn { color:#fde68a; font-size:12px; }
-  @media(max-width:850px){ #scoutGmailSenderPanel .gs-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-</style>
-<script id="scout-email-scout-gmail-sender-v35">
-(function(){
-  if (window.__SCOUT_EMAIL_SCOUT_GMAIL_SENDER_V35__) return;
-  window.__SCOUT_EMAIL_SCOUT_GMAIL_SENDER_V35__ = true;
-
-  var gmailCandidates = [];
-
-  function getBackend(){
-    return (localStorage.getItem('scoutBackendUrl') || localStorage.getItem('backendUrl') || localStorage.getItem('SCOUT_BACKEND_URL') || '').replace(/\/$/, '');
-  }
-  function esc(v){ return String(v == null ? '' : v).replace(/[&<>\"]/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]); }); }
-  function status(msg){ var el=document.getElementById('gsStatus'); if(el) el.textContent=msg || ''; }
-  async function api(path, opts){
-    var backend = getBackend();
-    if (!backend) throw new Error('Save Backend URL first in Scout App.');
-    var r = await fetch(backend + path, Object.assign({ headers:{ 'Content-Type':'application/json' } }, opts || {}));
-    var text = await r.text();
-    var j = {}; try { j = JSON.parse(text); } catch(e) { j = { raw:text }; }
-    if (!r.ok) throw new Error(j.error || j.message || text || ('HTTP ' + r.status));
-    return j;
-  }
-  function looksLikeTokenObject(obj){
-    if (!obj || typeof obj !== 'object') return false;
-    return !!(obj.refresh_token || obj.refreshToken || obj.access_token || obj.accessToken || obj.gmailRefreshToken || obj.gmailAccessToken);
-  }
-  function candidateFromObject(obj, key){
-    var refresh = obj.refresh_token || obj.refreshToken || obj.gmailRefreshToken || '';
-    var access = obj.access_token || obj.accessToken || obj.gmailAccessToken || '';
-    var client = obj.client_id || obj.clientId || obj.googleClientId || obj.gmailClientId || localStorage.getItem('gmailClientId') || localStorage.getItem('googleClientId') || localStorage.getItem('GOOGLE_CLIENT_ID') || '';
-    var email = obj.email || obj.gmail || obj.connectedEmail || obj.gmailEmail || obj.userEmail || localStorage.getItem('gmailConnectedEmail') || '';
-    if (!refresh && !access) return null;
-    return { key:key, email:email || 'connected Gmail', refresh_token:refresh, access_token:access, client_id:client };
-  }
-  function scanGmailCandidates(){
-    var found = [];
-    var direct = candidateFromObject({
-      refresh_token: localStorage.getItem('gmailRefreshToken') || localStorage.getItem('refresh_token') || localStorage.getItem('googleRefreshToken'),
-      access_token: localStorage.getItem('gmailAccessToken') || localStorage.getItem('access_token') || localStorage.getItem('googleAccessToken'),
-      client_id: localStorage.getItem('gmailClientId') || localStorage.getItem('googleClientId') || localStorage.getItem('GOOGLE_CLIENT_ID'),
-      email: localStorage.getItem('gmailConnectedEmail') || localStorage.getItem('connectedEmail') || localStorage.getItem('userEmail')
-    }, 'direct-localStorage-keys');
-    if (direct) found.push(direct);
-    for (var i=0; i<localStorage.length; i++) {
-      var key = localStorage.key(i);
-      var val = localStorage.getItem(key) || '';
-      if (!/gmail|google|oauth|token|auth/i.test(key + ' ' + val.slice(0,80))) continue;
-      try {
-        var parsed = JSON.parse(val);
-        if (Array.isArray(parsed)) {
-          parsed.forEach(function(x, idx){ var c = candidateFromObject(x, key+'['+idx+']'); if (c) found.push(c); });
-        } else if (looksLikeTokenObject(parsed)) {
-          var c = candidateFromObject(parsed, key); if (c) found.push(c);
-        } else {
-          Object.keys(parsed || {}).forEach(function(k){ var c = candidateFromObject(parsed[k], key+'.'+k); if (c) found.push(c); });
-        }
-      } catch(e) {}
-    }
-    var seen = new Set();
-    gmailCandidates = found.filter(function(c){ var sig = (c.email||'')+'|'+(c.refresh_token||'')+'|'+(c.access_token||''); if (seen.has(sig)) return false; seen.add(sig); return true; });
-    renderGmailCandidates();
-    return gmailCandidates;
-  }
-  function selectedCandidate(){
-    var sel = document.getElementById('gsGmailAccount');
-    var idx = Number(sel && sel.value || 0);
-    return gmailCandidates[idx] || null;
-  }
-  function renderGmailCandidates(){
-    var sel = document.getElementById('gsGmailAccount');
-    if (!sel) return;
-    if (!gmailCandidates.length) {
-      sel.innerHTML = '<option value="">No connected Gmail token detected</option>';
-      return;
-    }
-    sel.innerHTML = gmailCandidates.map(function(c, i){ return '<option value="'+i+'">'+esc(c.email || 'connected Gmail')+' — '+esc(c.key)+'</option>'; }).join('');
-  }
-  async function refreshSenderSummary(){
-    try {
-      var j = await api('/email-scout/summary');
-      var data = [
-        ['Ready to send', j.ready || 0], ['Already sent', j.sent || 0], ['With email', j.withEmail || 0], ['Invalid', j.invalid || 0]
-      ];
-      var grid = document.getElementById('gsSummary');
-      if (grid) grid.innerHTML = data.map(function(x){ return '<div class="gs-card"><div class="gs-label">'+esc(x[0])+'</div><div class="gs-value">'+Number(x[1]||0).toLocaleString()+'</div></div>'; }).join('');
-    } catch(e) {}
-  }
-  async function sendBatch(){
-    try {
-      var c = selectedCandidate();
-      if (!c) throw new Error('No connected Gmail token detected. Connect Gmail first, then click Scan Gmail Connection.');
-      var clientIdInput = document.getElementById('gsClientId').value.trim();
-      var senderEmailInput = document.getElementById('gsSenderEmail').value.trim() || c.email || '';
-      var limit = Math.max(1, Math.min(500, Number(document.getElementById('gsLimit').value || 50)));
-      var delayMs = Math.max(0, Math.min(60000, Number(document.getElementById('gsDelay').value || 1500)));
-      var dryRun = !!document.getElementById('gsDryRun').checked;
-      var warning = dryRun ? 'This is a dry run. No email will be sent.' : ('This will send up to '+limit+' email(s) from the selected connected Gmail account. Continue?');
-      if (!confirm(warning)) return;
-      status(dryRun ? 'Running dry-run batch…' : 'Sending batch through Gmail API… Do not close this tab until it finishes.');
-      var payload = {
-        limit: limit,
-        delayMs: delayMs,
-        dryRun: dryRun,
-        senderEmail: senderEmailInput,
-        access_token: c.access_token || '',
-        refresh_token: c.refresh_token || '',
-        client_id: clientIdInput || c.client_id || ''
-      };
-      var j = await api('/email-scout/send-batch', { method:'POST', body: JSON.stringify(payload) });
-      status('Batch complete. Sender: '+(j.senderEmail || senderEmailInput || 'connected Gmail')+'\nSent: '+(j.sent||0)+' · Failed: '+(j.failed||0)+' · Skipped: '+(j.skipped||0)+' · Batch: '+(j.batchId||''));
-      await refreshSenderSummary();
-      try { window.dispatchEvent(new CustomEvent('ScoutEmailScoutBatchSent', { detail:j })); } catch(e) {}
-    } catch(e) { status('Send failed: ' + (e.message || e)); }
-  }
-  function ensurePanel(){
-    if (document.getElementById('scoutGmailSenderPanel')) return;
-    var panel = document.createElement('section');
-    panel.id = 'scoutGmailSenderPanel';
-    panel.innerHTML = ''+
-      '<h2>✅ Email Scout Gmail Batch Sender</h2>'+ 
-      '<p>Send only verified, prepared Email Scout messages through the selected connected Gmail account. Choose the account and the exact number to send per batch.</p>'+ 
-      '<div class="gs-grid" id="gsSummary"></div>'+ 
-      '<div class="gs-row">'+
-        '<select id="gsGmailAccount" style="min-width:300px"><option>Scan Gmail connection…</option></select>'+ 
-        '<button id="gsScan" class="gs-secondary">Scan Gmail Connection</button>'+ 
-        '<input id="gsSenderEmail" placeholder="Sender email label" style="min-width:230px" />'+
-        '<input id="gsClientId" placeholder="Google Client ID if needed" style="min-width:260px" />'+
-      '</div>'+ 
-      '<div class="gs-row">'+
-        '<label>Send limit <input id="gsLimit" type="number" min="1" max="500" value="50" style="width:100px" /></label>'+ 
-        '<label>Delay ms <input id="gsDelay" type="number" min="0" max="60000" value="1500" style="width:120px" /></label>'+ 
-        '<label><input id="gsDryRun" type="checkbox" checked /> dry run first</label>'+ 
-        '<button id="gsSend" class="gs-danger">Send Ready Batch</button>'+ 
-        '<button id="gsRefresh" class="gs-secondary">Refresh Summary</button>'+ 
-      '</div>'+ 
-      '<div class="gs-warn">If you want to switch sender, connect a different Gmail account in Scout, click Scan Gmail Connection, then choose that account before sending the next batch. Sent leads are removed from the ready queue.</div>'+ 
-      '<div id="gsStatus" class="gs-status"></div>';
-    var target = document.getElementById('scoutEmailScoutPanel') || document.getElementById('scoutUnifiedPanel') || document.querySelector('main') || document.body;
-    if (target === document.body) document.body.appendChild(panel); else target.parentNode.insertBefore(panel, target.nextSibling);
-    document.getElementById('gsScan').onclick = function(){ var c = scanGmailCandidates(); status(c.length ? ('Detected '+c.length+' Gmail token candidate(s). Choose the right sender before sending.') : 'No Gmail token found in local storage. Connect Gmail first.'); };
-    document.getElementById('gsSend').onclick = sendBatch;
-    document.getElementById('gsRefresh').onclick = refreshSenderSummary;
-    scanGmailCandidates();
-    refreshSenderSummary();
-  }
-  document.addEventListener('DOMContentLoaded', ensurePanel);
-  setTimeout(ensurePanel, 1500);
-  window.addEventListener('ScoutEmailScoutReadyUpdated', function(){ setTimeout(refreshSenderSummary, 500); });
-  window.addEventListener('ScoutEmailScoutReadyLeadsLoaded', function(){ setTimeout(refreshSenderSummary, 500); });
-})();
-</script>
-
 </body>
 </html>
