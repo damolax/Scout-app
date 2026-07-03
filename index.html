@@ -5109,7 +5109,7 @@ function manualPollReplies() {
 
 
 // ---------------------------------------------------------------
-// Scout App v40 - Email Found batch source for Verify & Send
+// Scout App v41 - Email Found batch source for Verify & Send
 // Keeps Upload as the only upload point. Adds source selection so
 // users can send 200 contacts from Email Found / current queue filter.
 // ---------------------------------------------------------------
@@ -5235,12 +5235,366 @@ function manualPollReplies() {
     try {
       const logo = q('topbar-logo'); const title = q('topbar-title');
       if (logo) logo.textContent = '🧭 Scout App';
-      if (title) title.textContent = 'Scout App v40 — Business Scouting System';
+      if (title) title.textContent = 'Scout App v41 — Business Scouting System';
       injectBatchSourceControls();
       const p = q('sv36-batch-result');
       if (p) p.textContent = 'To send 200 from Email Found: set Source = Email Found tab, Batch limit = 200, then Send Ready Batch → Email Scout.';
-    } catch(e) { console.warn('Scout App v40 init warning', e); }
+    } catch(e) { console.warn('Scout App v41 init warning', e); }
   });
+})();
+
+
+// ---------------------------------------------------------------
+// Scout App v41 - Correct Email Verification Workflow
+// Pending = not researched yet.
+// Email Found = found/imported email, not verified yet.
+// Ready to Send = verified READY only.
+// Auto-Scout researches Pending only. No Email is terminal until user deletes/reimports.
+// ---------------------------------------------------------------
+(function(){
+  const VERSION = 'Scout App v41';
+  function q(id){ return document.getElementById(id); }
+  function escLocal(v){ try { return typeof esc === 'function' ? esc(v || '') : String(v || '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); } catch(e){ return String(v || ''); } }
+  function cleanName(b){
+    const raw = (b && (b.name || b.business || b.company || b.business_name || b.domain || b.website)) || '';
+    try { return typeof cleanBizName === 'function' ? cleanBizName(raw) : raw; } catch(e){ return raw; }
+  }
+  function normEmail(email){ return String(email || '').trim().toLowerCase().replace(/^mailto:/,'').replace(/[;,.)\]]+$/g,'').replace(/^[\[(]+/g,''); }
+  function emailOf(b){ return normEmail((b && (b.email || (Array.isArray(b.emails) ? b.emails[0] : ''))) || ''); }
+  function emailDomain(email){ return normEmail(email).split('@')[1] || ''; }
+  function emailLocal(email){ return normEmail(email).split('@')[0] || ''; }
+  function normDomain(raw){
+    let v = String(raw || '').trim().toLowerCase();
+    if (!v) return '';
+    v = v.replace(/^https?:\/\//,'').replace(/^www\./,'').split(/[\/?#]/)[0].split(':')[0].replace(/[;,.)\]]+$/g,'');
+    return /^[a-z0-9.-]+\.[a-z]{2,63}$/.test(v) ? v : '';
+  }
+  function validEmail(email){
+    const e = normEmail(email);
+    if (!/^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,63}$/.test(e)) return false;
+    const [local, domain] = e.split('@');
+    if (!local || !domain || local.length > 64 || e.length > 254) return false;
+    if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) return false;
+    if (domain.includes('..')) return false;
+    return domain.split('.').every(part => part && part.length <= 63 && !part.startsWith('-') && !part.endsWith('-'));
+  }
+  const FREE = new Set(['gmail.com','googlemail.com','yahoo.com','yahoo.co.uk','outlook.com','hotmail.com','live.com','msn.com','icloud.com','me.com','aol.com','proton.me','protonmail.com','gmx.de','gmx.com','web.de','zoho.com','mail.com','yandex.com','tutanota.com']);
+  const ROLES = new Set(['info','contact','hello','sales','support','admin','office','shop','team','service','customerservice','help','booking','reservations','orders','mail','post','marketing','press','hr','jobs','career','careers','enquiries','inquiry','inquiries']);
+  const DISPOSABLE = new Set(['mailinator.com','tempmail.com','10minutemail.com','guerrillamail.com','yopmail.com','trashmail.com','getnada.com','temp-mail.org','sharklasers.com','dispostable.com','maildrop.cc','fakeinbox.com']);
+  function domainRelated(a,b){ return !!(a && b && (a === b || a.endsWith('.' + b) || b.endsWith('.' + a))); }
+  function bizWebDomain(b){ return normDomain((b && (b.website || b.domain || b.url || b.site)) || ''); }
+  function isProtectedStatus(status){ return ['contacted','replied','closed'].includes(status); }
+
+  function verifyOne(b, duplicateCount){
+    const email = emailOf(b);
+    const domain = emailDomain(email);
+    const web = bizWebDomain(b);
+    const isValid = validEmail(email);
+    const isFree = isValid && FREE.has(domain);
+    const isRole = isValid && ROLES.has(emailLocal(email).split(/[.+_\-]/)[0]);
+    const isDisposable = isValid && DISPOSABLE.has(domain);
+    const domainMatch = isValid && !!web && domainRelated(domain, web);
+    let score = 0;
+    const reasons = [];
+    if (email) { score += 30; reasons.push('email exists'); }
+    if (isValid) { score += 25; reasons.push('valid format'); }
+    if (cleanName(b)) { score += 10; reasons.push('business name'); }
+    if (web || b.website || b.domain) { score += 10; reasons.push('website/domain'); }
+    if (domainMatch) { score += 15; reasons.push('email domain matches website'); }
+    if (b.phone || (Array.isArray(b.phones) && b.phones.length)) { score += 5; reasons.push('phone'); }
+    if (b.category || b.industry || b.mainCategory) { score += 5; reasons.push('category'); }
+    if (b.rating || b.reviews) { score += 5; reasons.push('maps context'); }
+    if (isFree) { score -= 10; reasons.push('free provider allowed, lower confidence'); }
+    if (isRole) { score -= 8; reasons.push('role inbox'); }
+    if (email && web && !domainMatch && !isFree) { score -= 18; reasons.push('email domain mismatch'); }
+    if (isDisposable) { score -= 80; reasons.push('disposable/temp email'); }
+    if (email && !isValid) { score -= 70; reasons.push('invalid email format'); }
+    if (duplicateCount > 1) { score -= 30; reasons.push('duplicate email'); }
+    score = Math.max(0, Math.min(100, score));
+
+    let status = 'NO_EMAIL';
+    if (!email) status = 'NO_EMAIL';
+    else if (!isValid || isDisposable) status = 'INVALID';
+    else if (duplicateCount > 1) status = 'DUPLICATE';
+    else if (score >= 80) status = 'READY';
+    else if (score >= 50) status = 'REVIEW';
+    else if (score >= 25) status = 'RISKY';
+    else status = 'INVALID';
+    return { email, status, ready: status === 'READY', score, isValid, isFree, isRole, isDisposable, domainMatch, duplicateCount, reasons: reasons.join('; ') };
+  }
+
+  function applyVerificationStatus(b, v){
+    b.emailVerification = v;
+    b.readyToSend = v.status === 'READY';
+    b.readyToEmailScout = v.status === 'READY';
+    b.needsVerification = !!v.email && v.status !== 'READY';
+    if (!isProtectedStatus(b.status)) {
+      if (!v.email) {
+        // Keep Pending as Pending. Pending means this lead has not been researched yet.
+        if (b.status === 'found' || b.status === 'ready' || b.status === 'ready_to_send' || b.status === 'review' || b.status === 'risky' || b.status === 'invalid' || b.status === 'duplicate') b.status = 'pending';
+      } else if (v.status === 'READY') b.status = 'ready_to_send';
+      else if (v.status === 'REVIEW') b.status = 'review';
+      else if (v.status === 'RISKY') b.status = 'risky';
+      else if (v.status === 'INVALID') b.status = 'invalid';
+      else if (v.status === 'DUPLICATE') b.status = 'duplicate';
+    }
+    b.verifiedAt = new Date().toISOString();
+    b.updatedAt = (typeof now === 'function') ? now() : new Date().toISOString();
+  }
+
+  function duplicateCounts(){
+    const counts = {};
+    (Array.isArray(businesses) ? businesses : []).forEach(b => { const e = emailOf(b); if (e) counts[e] = (counts[e] || 0) + 1; });
+    return counts;
+  }
+
+  function verifyMatching(filterFn){
+    if (!Array.isArray(businesses)) return {checked:0,ready:0,review:0,risky:0,invalid:0,duplicate:0,noEmail:0};
+    const counts = duplicateCounts();
+    const stats = {checked:0,ready:0,review:0,risky:0,invalid:0,duplicate:0,noEmail:0};
+    businesses.forEach(b => {
+      if (filterFn && !filterFn(b)) return;
+      const e = emailOf(b);
+      if (!e) return; // Do not convert pending no-email records during verification.
+      const v = verifyOne(b, counts[e] || 0);
+      applyVerificationStatus(b, v);
+      stats.checked++;
+      if (v.status === 'READY') stats.ready++;
+      else if (v.status === 'REVIEW') stats.review++;
+      else if (v.status === 'RISKY') stats.risky++;
+      else if (v.status === 'INVALID') stats.invalid++;
+      else if (v.status === 'DUPLICATE') stats.duplicate++;
+      else stats.noEmail++;
+    });
+    if (typeof save === 'function') save();
+    if (typeof renderQueue === 'function') renderQueue();
+    if (typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab();
+    return stats;
+  }
+
+  window.sv41VerifyEmailFound = function(){
+    const s = verifyMatching(b => ['found','ready','ready_to_send','review','risky','invalid','duplicate'].includes(b.status) || !!emailOf(b));
+    const msg = `Verified ${s.checked} emails: ${s.ready} Ready to Send, ${s.review} Review, ${s.risky} Risky, ${s.invalid} Invalid, ${s.duplicate} Duplicate.`;
+    const el = q('sv36-verify-status'); if (el) el.textContent = msg;
+    if (typeof toast === 'function') toast(msg, 'ok');
+    return s;
+  };
+
+  window.sv36VerifyQueue = function(){
+    return window.sv41VerifyEmailFound();
+  };
+
+  function statusLabel(status){
+    return ({ pending:'Pending', scanning:'Scanning…', found:'Email Found', ready:'Ready to Send', ready_to_send:'Ready to Send', review:'Review', risky:'Risky', invalid:'Invalid', duplicate:'Duplicate', contacted:'Contacted', replied:'Replied', closed:'Closed', no_email:'No Email' }[status]) || status;
+  }
+  function statusClass(status){ return 's-' + (status === 'ready' ? 'ready_to_send' : status); }
+
+  function installFilterButtons(){
+    const box = q('qp-actions'); if (!box || q('sv41-ready-filter')) return;
+    const buttons = [
+      ['ready_to_send','✅ Ready to Send','sv41-ready-filter'],
+      ['review','🟡 Review','sv41-review-filter'],
+      ['risky','⚠️ Risky','sv41-risky-filter'],
+      ['invalid','⛔ Invalid','sv41-invalid-filter'],
+      ['duplicate','🔁 Duplicate','sv41-duplicate-filter']
+    ];
+    buttons.forEach(([filter,label,id]) => {
+      const btn = document.createElement('button');
+      btn.id = id; btn.className = 'qp-action'; btn.textContent = label;
+      btn.onclick = function(){ setFilter(filter, this); };
+      box.appendChild(btn);
+    });
+  }
+
+  function installStyles(){
+    if (q('sv41-style')) return;
+    const style = document.createElement('style');
+    style.id = 'sv41-style';
+    style.textContent = `
+      .s-ready_to_send{background:rgba(16,201,128,.22);color:#34d399;border:1px solid rgba(16,201,128,.42)}
+      .s-review{background:rgba(245,158,11,.16);color:#fbbf24;border:1px solid rgba(245,158,11,.32)}
+      .s-risky{background:rgba(245,158,11,.10);color:#f59e0b;border:1px solid rgba(245,158,11,.28)}
+      .s-invalid{background:rgba(239,68,68,.16);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+      .s-duplicate{background:rgba(124,58,237,.16);color:#c4b5fd;border:1px solid rgba(124,58,237,.32)}
+      #sv41-workflow-note{background:rgba(91,110,245,.08);border:1px solid rgba(91,110,245,.22);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px}
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Replace updateBatchBtn so found emails are not automatically converted into ready/batch.
+  window.updateBatchBtn = function(){
+    const count = Object.keys(window.batchApprovals || batchApprovals || {}).length;
+    const btn = q('batch-btn'); const countEl = q('batch-count');
+    if (btn) btn.style.display = count > 0 ? '' : 'none';
+    if (countEl) countEl.textContent = count;
+    if (typeof renderBatch === 'function') renderBatch();
+  };
+
+  // Auto-Scout researches Pending only, not No Email.
+  window.updateAsStats = function(){
+    const total = (Array.isArray(businesses) ? businesses : []).filter(b => b.status === 'pending').length;
+    const t=q('as-total'), d=q('as-done'), f=q('as-found');
+    if (t) t.textContent = total;
+    if (d) d.textContent = (window.autoScoutStats || autoScoutStats || {done:0}).done || 0;
+    if (f) f.textContent = (window.autoScoutStats || autoScoutStats || {found:0}).found || 0;
+  };
+
+  const oldStartAutoScout = window.startAutoScout;
+  window.startAutoScout = async function(){
+    if (!Array.isArray(businesses)) return;
+    const pending = businesses.filter(b => b.status === 'pending');
+    if (!pending.length) { if (typeof toast === 'function') toast('No pending businesses to research', 'err'); return; }
+    autoScoutStats = { done: 0, found: 0 };
+    window.autoScoutStats = autoScoutStats;
+    updateAsStats();
+    const queue = pending.map(b => ({ id:b.id, name:b.name, website:b.website || b.domain || extractDomainFromProfile?.(b.profileLink) || '', profileLink:b.profileLink || '', place_id:b.place_id || null }));
+    q('scout-status-bar')?.classList.add('active');
+    if (q('as-start-btn')) q('as-start-btn').style.display = 'none';
+    if (q('as-pause-btn')) q('as-pause-btn').style.display = '';
+    if (q('as-stop-btn')) q('as-stop-btn').style.display = '';
+    if (typeof updateAutoScoutUI === 'function') updateAutoScoutUI(0, queue.length);
+    if (window.extAvailable || extAvailable) {
+      if (typeof addLog === 'function') addLog('info', `Starting auto-scout for ${queue.length} Pending businesses via extension`);
+      if (typeof sendToExt === 'function') return sendToExt({ type:'START_AUTO_SCOUT', businesses: queue });
+    }
+    if (window.settings?.backendUrl || settings?.backendUrl) {
+      if (typeof addLog === 'function') addLog('info', `Starting auto-scout for ${queue.length} Pending businesses via backend`);
+      if (typeof runAutoScoutViaBackend === 'function') return runAutoScoutViaBackend(queue);
+    }
+    if (typeof toast === 'function') toast('No extension or backend server available. Set up one first.', 'err');
+    q('scout-status-bar')?.classList.remove('active');
+    if (q('as-start-btn')) q('as-start-btn').style.display = '';
+    if (q('as-pause-btn')) q('as-pause-btn').style.display = 'none';
+    if (q('as-stop-btn')) q('as-stop-btn').style.display = 'none';
+  };
+
+  // Final queue renderer with Ready to Send as a separate filter/status.
+  window.renderQueue = function(){
+    try { if (typeof renderFollowUpBanner === 'function') renderFollowUpBanner(); } catch(e) {}
+    installFilterButtons(); installStyles();
+    const search = (q('qp-search')?.value || '').toLowerCase();
+    let list = (Array.isArray(businesses) ? businesses : []).filter(b => {
+      if (queueFilter === 'followup') return typeof getFollowUpsDue === 'function' && getFollowUpsDue().some(d => d.id === b.id);
+      if (queueFilter === 'blocked') return !!b.blockedByDedup;
+      if (queueFilter === 'dorking') return b.source === 'dorking';
+      if (queueFilter === 'maps') return b.source !== 'dorking';
+      if (queueFilter !== 'all' && b.status !== queueFilter) return false;
+      const hay = [b.name,b.email,b.website,b.domain,b.category,b.industry,b.location,b.address].join(' ').toLowerCase();
+      if (search && !hay.includes(search)) return false;
+      return true;
+    });
+    const stats = {};
+    (Array.isArray(businesses) ? businesses : []).forEach(b => { stats[b.status] = (stats[b.status] || 0) + 1; });
+    const statDef = [
+      ['pending','var(--pending)','Pending'], ['scanning','var(--scanning)','Scanning'], ['found','var(--found)','Email Found'],
+      ['ready_to_send','var(--green)','Ready to Send'], ['review','var(--amber)','Review'], ['risky','var(--amber)','Risky'],
+      ['invalid','var(--red)','Invalid'], ['duplicate','#c4b5fd','Duplicate'], ['contacted','var(--contacted)','Contacted'], ['replied','var(--replied)','Replied'], ['no_email','var(--red)','No Email']
+    ];
+    const qpStats = q('qp-stats');
+    if (qpStats) qpStats.innerHTML = statDef.filter(([key]) => stats[key]).map(([key,color,label]) => `<div class="qp-stat"><div class="qp-stat-dot" style="background:${color}"></div><span class="qp-stat-count">${stats[key]}</span><span class="qp-stat-label">${label}</span></div>`).join('');
+    const container = q('queue-list'); if (!container) return;
+    if (!list.length) { container.innerHTML = `<div id="queue-empty"><div class="icon">${businesses?.length ? '🔍' : '📋'}</div><p>${businesses?.length ? 'No matches for this filter' : 'Upload a CSV to load businesses'}</p></div>`; return; }
+    container.innerHTML = list.map(b => {
+      const sc = b.status || 'pending';
+      const v = b.emailVerification || null;
+      const email = emailOf(b);
+      return `<div class="qi${b.id === activeId ? ' active' : ''}" onclick="selectBiz('${b.id}')">
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
+          <div class="qi-name" style="margin:0;flex:1">${escLocal(cleanName(b))}</div>
+          ${b.source === 'dorking' ? '<span style="font-size:9px;background:rgba(99,102,241,.2);color:var(--accent);padding:1px 5px;border-radius:4px;flex-shrink:0">WEB</span>' : ''}
+        </div>
+        <div class="qi-meta">
+          ${sc === 'scanning' ? '<span class="qi-scanning-pulse"></span>' : ''}
+          <span class="qi-status ${statusClass(sc)}">${statusLabel(sc)}</span>
+          ${v && email ? `<span style="font-size:10px;color:var(--muted)">${v.status} · ${v.score}</span>` : ''}
+          ${b.rating ? `<span class="rating-star">★</span><span>${b.rating}</span>` : ''}
+          ${b.reviews ? `<span>${escLocal(b.reviews)} reviews</span>` : ''}
+        </div>
+        ${email ? `<div class="qi-email">✉ ${escLocal(email)}${sc === 'found' ? ' · needs verification' : ''}</div>` : ''}
+        ${b.category || b.industry ? `<div style="font-size:10px;margin-top:3px;color:var(--muted)">🏷 ${escLocal(b.category || b.industry)}</div>` : ''}
+        ${b.status === 'contacted' && !b.theirReply && b.contactedAt && (Date.now()-new Date(b.contactedAt).getTime())>86400000 ? `<div style="font-size:10px;margin-top:2px;color:var(--amber)">⏰ Follow-up due</div>` : ''}
+        ${b.theirReply && b.status === 'replied' ? `<div style="font-size:10px;margin-top:2px;color:var(--accent)">💬 Replied</div>` : ''}
+        ${b.blockedByDedup ? `<div style="font-size:10px;margin-top:2px;color:var(--amber)">🚫 Already scouted by team</div>` : ''}
+        <button onclick="event.stopPropagation();deleteBiz('${b.id}')" style="position:absolute;top:6px;right:6px;background:transparent;border:none;color:var(--faint);font-size:13px;cursor:pointer;padding:2px 5px;border-radius:4px;line-height:1" title="Delete">✕</button>
+        ${b.profileLink ? `<div class="qi-profile-link">🗺 Google Maps</div>` : ''}
+      </div>`;
+    }).join('');
+  };
+
+  window.sv36RenderVerifySendTab = function(){
+    if (!Array.isArray(businesses)) return;
+    installStyles(); installFilterButtons();
+    const counts = duplicateCounts();
+    const rows = businesses.map(b => ({ biz:b, v:b.emailVerification || (emailOf(b) ? verifyOne(b, counts[emailOf(b)] || 0) : {email:'',status:'NO_EMAIL',score:0,reasons:'No email found',ready:false}) }));
+    const summary = { total: businesses.length, found: businesses.filter(b => b.status==='found').length, ready: businesses.filter(b => b.status==='ready_to_send').length, review: businesses.filter(b=>b.status==='review').length, risky: businesses.filter(b=>b.status==='risky').length, invalid: businesses.filter(b=>b.status==='invalid').length, duplicate: businesses.filter(b=>b.status==='duplicate').length, pending: businesses.filter(b=>b.status==='pending').length, noEmail: businesses.filter(b=>b.status==='no_email').length };
+    const box = q('sv36-summary');
+    if (box) box.innerHTML = [
+      ['Email Found', summary.found, 'var(--found)'], ['Ready to Send', summary.ready, 'var(--green)'], ['Review', summary.review, 'var(--amber)'], ['Risky/Invalid/Dup', summary.risky + summary.invalid + summary.duplicate, 'var(--red)'], ['Pending/No Email', summary.pending + summary.noEmail, 'var(--muted)']
+    ].map(([label,val,color]) => `<div style="background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:900;color:${color}">${val}</div><div style="font-size:11px;color:var(--muted)">${label}</div></div>`).join('');
+    const tab = q('verify-send-content');
+    if (tab && !q('sv41-workflow-note')) {
+      const note = document.createElement('div'); note.id = 'sv41-workflow-note';
+      note.innerHTML = `<strong>Workflow:</strong> Pending = not researched yet. Email Found = email found but not verified. Ready to Send = verified READY only. Sending pulls from Ready to Send, not raw Email Found.`;
+      const firstCard = tab.querySelector('.as-card'); if (firstCard) firstCard.parentNode.insertBefore(note, firstCard);
+    }
+    const limit = q('sv36-batch-limit');
+    if (limit && !q('sv41-source-note')) {
+      const note = document.createElement('span'); note.id = 'sv41-source-note'; note.style.cssText = 'font-size:11px;color:var(--muted)';
+      note.textContent = 'Only Ready to Send emails are moved. Email Found is verified first.';
+      limit.parentNode.appendChild(note);
+    }
+    const table = q('sv36-results-table');
+    if (table) {
+      const preview = rows.filter(r => r.v.email || ['pending','found','ready_to_send','review','risky','invalid','duplicate','no_email'].includes(r.biz.status)).slice(0, 120);
+      table.innerHTML = `<tr style="position:sticky;top:0;background:var(--card2);z-index:1"><th style="text-align:left;padding:8px;color:var(--muted)">Business</th><th style="text-align:left;padding:8px;color:var(--muted)">Email</th><th style="text-align:left;padding:8px;color:var(--muted)">Queue Status</th><th style="text-align:left;padding:8px;color:var(--muted)">Verification</th><th style="text-align:left;padding:8px;color:var(--muted)">Score</th><th style="text-align:left;padding:8px;color:var(--muted)">Reason</th></tr>
+        ${preview.map(({biz,v}) => `<tr><td style="padding:8px;border-top:1px solid var(--border);color:var(--text)">${escLocal(cleanName(biz))}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--green)">${escLocal(v.email || '')}</td><td style="padding:8px;border-top:1px solid var(--border)"><span class="qi-status ${statusClass(biz.status)}">${statusLabel(biz.status)}</span></td><td style="padding:8px;border-top:1px solid var(--border);font-weight:700;color:${v.status==='READY'?'var(--green)':v.status==='REVIEW'||v.status==='RISKY'?'var(--amber)':'var(--red)'}">${v.status}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--text)">${v.score || 0}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--muted)">${escLocal(v.reasons || '')}</td></tr>`).join('')}`;
+    }
+  };
+
+  window.sv36SendReadyToEmailScout = function(){
+    if (!Array.isArray(businesses)) return;
+    // If raw Email Found is selected in v40 selector, verify it first, then only move Ready to Send.
+    const source = q('sv40-batch-source') ? q('sv40-batch-source').value : 'verified_ready';
+    if (source === 'email_found') window.sv41VerifyEmailFound();
+    const limit = Math.max(1, parseInt(q('sv36-batch-limit')?.value || '200', 10));
+    const clearFirst = q('sv40-clear-email-scout') ? q('sv40-clear-email-scout').checked : true;
+    if (!Array.isArray(esContacts)) window.esContacts = esContacts = [];
+    if (clearFirst) esContacts.length = 0;
+    const already = new Set((esContacts || []).map(c => normEmail(c.email)));
+    const picked = [];
+    for (const b of businesses) {
+      const e = emailOf(b); if (!e || already.has(e)) continue;
+      let include = b.status === 'ready_to_send' && b.emailVerification && b.emailVerification.status === 'READY';
+      if (source === 'current_filter') include = include && (queueFilter === 'all' || b.status === queueFilter);
+      if (!include) continue;
+      picked.push(b); already.add(e); if (picked.length >= limit) break;
+    }
+    picked.forEach(b => {
+      const e = emailOf(b);
+      esContacts.push({ name: cleanName(b), email:e, website:b.website || b.domain || '', phone:b.phone || (Array.isArray(b.phones) ? b.phones[0] : '') || '', category:b.category || b.industry || b.mainCategory || '', industry:b.industry || b.category || b.mainCategory || '', location:b.location || b.address || b.city || '', rating:b.rating || '', reviews:b.reviews || '', sourceType:b.sourceType || b.source || '' });
+      b.sentToEmailScoutAt = new Date().toISOString();
+    });
+    if (typeof save === 'function') save();
+    if (typeof renderEsPreview === 'function') renderEsPreview();
+    if (typeof updateEsSendStats === 'function') updateEsSendStats();
+    const msg = `Moved ${picked.length} Ready to Send contacts to Email Scout. ${source === 'email_found' ? 'Raw Email Found was verified first.' : ''}`;
+    const out = q('sv36-batch-result'); if (out) out.textContent = msg;
+    if (typeof toast === 'function') toast(msg, picked.length ? 'ok' : 'err');
+    if (picked.length && typeof showContentTab === 'function') showContentTab('email-scout-content', q('tab-emailscout'));
+  };
+
+  function initV41(){
+    installStyles(); installFilterButtons();
+    const logo = q('topbar-logo'), title = q('topbar-title');
+    if (logo) logo.textContent = '🧭 Scout App';
+    if (title) title.textContent = VERSION + ' — Business Scouting System';
+    const verifyBtn = q('sv36-verify-status');
+    if (verifyBtn) verifyBtn.textContent = 'Email Found must be verified before it becomes Ready to Send.';
+    if (typeof renderQueue === 'function') renderQueue();
+    if (typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab();
+    if (typeof updateAsStats === 'function') updateAsStats();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initV41); else initV41();
 })();
 
 </script>
