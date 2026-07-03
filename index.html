@@ -777,12 +777,16 @@ Elevate Business Solutions
             <button class="settings-btn" onclick="saveDorkSettings()" style="margin:0">Save &amp; Sync Signals</button>
   <button class="topbar-btn primary" onclick="ScoutDorkPatch.verifyAllVisibleLeads()">✓ Verify Web Leads</button>
   <button class="topbar-btn" onclick="ScoutDorkPatch.exportReadyCsv()">⬇ Ready Airtable Leads CSV</button>
+  <input id="cloud-target-emails-input" type="number" value="1000" min="1" max="10000" title="Target unique emails" style="width:90px;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text)">
+  <button class="topbar-btn primary" onclick="ScoutCloudCampaign.startCloudCampaign()">☁ Start Cloud Campaign</button>
+  <button class="topbar-btn" onclick="ScoutCloudCampaign.stopCloudCampaign()">Stop Cloud</button>
             <button class="topbar-btn" onclick="document.getElementById('dork-signals-file').click()">📂 Import CSV</button>
             <button class="topbar-btn" onclick="exportDorkSignals()">⬇ Export</button>
             <input type="file" id="dork-signals-file" accept=".csv,.txt" style="display:none" onchange="importDorkSignals(this.files[0])">
           </div>
           <div id="dork-save-status" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
   <div id="dork-live-status" style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.6">Live web leads: 0 · Ready: 0 · Needs verification: 0</div>
+  <div id="cloud-campaign-status" style="margin-top:8px;font-size:12px;color:var(--muted);line-height:1.7">Cloud campaign: not running</div>
         </div>
 
         <div class="settings-card" id="custom-msg-section">
@@ -4710,6 +4714,242 @@ function manualPollReplies() {
     setTimeout(renderDorkLeadsIntoQueue, 500);
     setInterval(updateLiveStatus, 5000);
     console.log(LOG_PREFIX, 'installed');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+<script id="SCOUT_APP_CLOUD_CAMPAIGN_RUNNER_PATCH_V30">
+/* SCOUT_APP_CLOUD_CAMPAIGN_RUNNER_PATCH_V30
+   Adds backend/cloud dork campaign start/stop/status polling to Scout App.
+   Leads are stored by the backend and imported into the app live. Email duplicates are not added twice.
+*/
+(function(){
+  'use strict';
+  const CAMPAIGN_KEY = 'elevate_scout_active_cloud_campaign_v30';
+  const LEADS_KEY = 'elevate_scout_dork_leads_v28';
+  const LOG_PREFIX = '[Scout Cloud Campaign]';
+  let pollTimer = null;
+
+  function $(id){ return document.getElementById(id); }
+  function nowIso(){ return new Date().toISOString(); }
+  function normEmail(v){ return String(v || '').trim().toLowerCase(); }
+  function toast(msg){
+    if (typeof window.showToast === 'function') return window.showToast(msg);
+    const el = $('toast');
+    if (el) { el.textContent = msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'), 2600); }
+    else console.log(LOG_PREFIX, msg);
+  }
+  function status(msg){
+    const el = $('cloud-campaign-status');
+    if (el) el.textContent = msg;
+    console.log(LOG_PREFIX, msg);
+  }
+  function getBackendUrl(){
+    if (window.ScoutDorkPatch && typeof window.ScoutDorkPatch.getBackendUrl === 'function') {
+      return window.ScoutDorkPatch.getBackendUrl();
+    }
+    const input = $('backend-url-input');
+    return String((input && input.value) || localStorage.getItem('backendUrl') || localStorage.getItem('backend_url') || '').trim().replace(/\/+$/, '');
+  }
+  function collectDorkSettings(){
+    if (window.ScoutDorkPatch && typeof window.ScoutDorkPatch.syncDorkSettings === 'function') {
+      // We do not await here; startCloudCampaign awaits it when needed.
+    }
+    const industry = (($('dork-industry-input') && $('dork-industry-input').value) || '').trim();
+    const location = (($('dork-location-input') && $('dork-location-input').value) || '').trim();
+    const resultsPerSignal = Math.max(1, Math.min(100, parseInt((($('dork-results-input') && $('dork-results-input').value) || '30'), 10) || 30));
+    const signals = ((($('dork-signals-input') && $('dork-signals-input').value) || '')).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    return { industry, location, signals, resultsPerSignal, delayBetweenPages: 8000, engine: 'bing', updatedAt: nowIso() };
+  }
+  function getLocalLeads(){
+    try { return JSON.parse(localStorage.getItem(LEADS_KEY) || '[]'); }
+    catch { return []; }
+  }
+  function saveLocalLeads(leads){
+    localStorage.setItem(LEADS_KEY, JSON.stringify(leads || []));
+  }
+  function scoreLead(lead){
+    let s = 0;
+    if (lead.email) s += 30;
+    if (lead.website || lead.url || lead.sourceUrl) s += 20;
+    if (lead.industry) s += 15;
+    if (lead.location) s += 15;
+    if (lead.name || lead.businessName) s += 10;
+    if (lead.sourceSignal || lead.sourceQuery) s += 5;
+    if (lead.verificationStatus === 'valid') s += 20;
+    if (lead.verificationStatus === 'invalid') s -= 80;
+    if (lead.verificationStatus === 'risky' || lead.verificationStatus === 'catch_all') s -= 15;
+    return Math.max(0, Math.min(100, s));
+  }
+  function normalizeLead(raw){
+    raw = raw || {};
+    const email = normEmail(raw.email || (Array.isArray(raw.emails) ? raw.emails[0] : ''));
+    const website = String(raw.website || raw.url || raw.sourceUrl || raw.source_url || '').trim();
+    const name = String(raw.name || raw.businessName || raw.business_name || raw.title || (website ? website.replace(/^https?:\/\//,'').split('/')[0] : (email ? email.split('@')[0] : 'Web lead'))).replace(/[<>]/g, '');
+    const lead = {
+      id: raw.id || ('cloud_' + (email || website || Date.now()).replace(/[^a-z0-9]+/gi,'_')),
+      source: raw.source || 'cloud_campaign',
+      status: raw.status || 'found',
+      name,
+      businessName: raw.businessName || raw.business_name || name,
+      email,
+      emails: Array.from(new Set([email].concat(raw.emails || []).map(normEmail).filter(Boolean))),
+      website,
+      url: website,
+      industry: raw.industry || '',
+      location: raw.location || '',
+      sourceQuery: raw.sourceQuery || raw.source_query || '',
+      sourceSignal: raw.sourceSignal ?? raw.source_signal ?? '',
+      sourceQueries: raw.sourceQueries || [],
+      sourceSignals: raw.sourceSignals || [],
+      sources: raw.sources || [],
+      campaignId: raw.campaignId || '',
+      campaignIds: raw.campaignIds || (raw.campaignId ? [raw.campaignId] : []),
+      verificationStatus: raw.verificationStatus || raw.verification_status || 'needs_verification',
+      verificationScore: raw.verificationScore || raw.verification_score || '',
+      verificationProvider: raw.verificationProvider || raw.verification_provider || '',
+      verificationReason: raw.verificationReason || raw.verification_reason || '',
+      verifiedAt: raw.verifiedAt || raw.verified_at || '',
+      readyToContact: Boolean(raw.readyToContact || raw.ready_to_contact),
+      leadScore: Number(raw.leadScore || 0),
+      addedAt: raw.addedAt || raw.firstSeenAt || nowIso(),
+      firstSeenAt: raw.firstSeenAt || raw.addedAt || nowIso(),
+      lastSeenAt: raw.lastSeenAt || raw.updatedAt || nowIso(),
+      sourceCount: Number(raw.sourceCount || (raw.sources || []).length || 1),
+      raw
+    };
+    lead.leadScore = lead.leadScore || scoreLead(lead);
+    return lead;
+  }
+  function mergeLocalLead(existing, incoming){
+    const merged = { ...existing };
+    Object.keys(incoming).forEach(k => {
+      if ((merged[k] === undefined || merged[k] === null || merged[k] === '') && incoming[k]) merged[k] = incoming[k];
+    });
+    merged.emails = Array.from(new Set([...(existing.emails || []), ...(incoming.emails || [])].map(normEmail).filter(Boolean)));
+    ['sources','sourceQueries','sourceSignals','campaignIds'].forEach(k => {
+      merged[k] = Array.from(new Set([...(existing[k] || []), ...(incoming[k] || [])].map(v => String(v || '').trim()).filter(Boolean)));
+    });
+    merged.lastSeenAt = incoming.lastSeenAt || nowIso();
+    merged.sourceCount = Math.max(Number(existing.sourceCount || 1), Number(incoming.sourceCount || 1), (merged.sources || []).length || 1);
+    if ((!existing.verificationStatus || existing.verificationStatus === 'needs_verification') && incoming.verificationStatus) {
+      merged.verificationStatus = incoming.verificationStatus;
+      merged.verificationScore = incoming.verificationScore || existing.verificationScore || '';
+      merged.verificationProvider = incoming.verificationProvider || existing.verificationProvider || '';
+      merged.verificationReason = incoming.verificationReason || existing.verificationReason || '';
+      merged.readyToContact = Boolean(incoming.readyToContact || existing.readyToContact);
+    }
+    merged.leadScore = scoreLead(merged);
+    return merged;
+  }
+  function importLeads(rawLeads){
+    const incoming = (rawLeads || []).map(normalizeLead).filter(l => l.email || l.website);
+    if (!incoming.length) return { added: 0, updated: 0, total: getLocalLeads().length };
+    const local = getLocalLeads();
+    let added = 0, updated = 0;
+    incoming.forEach(lead => {
+      const idx = local.findIndex(x => (lead.email && normEmail(x.email) === lead.email) || (!lead.email && x.website && x.website === lead.website));
+      if (idx >= 0) { local[idx] = mergeLocalLead(local[idx], lead); updated++; }
+      else { local.unshift(lead); added++; }
+    });
+    saveLocalLeads(local);
+    if (window.ScoutDorkPatch && typeof window.ScoutDorkPatch.renderDorkLeadsIntoQueue === 'function') {
+      window.ScoutDorkPatch.renderDorkLeadsIntoQueue();
+    }
+    return { added, updated, total: local.length };
+  }
+
+  async function startCloudCampaign(){
+    const backendUrl = getBackendUrl();
+    if (!backendUrl) { toast('Add Backend Server URL first.'); return; }
+    if (window.ScoutDorkPatch && typeof window.ScoutDorkPatch.syncDorkSettings === 'function') {
+      try { await window.ScoutDorkPatch.syncDorkSettings(); } catch(e) {}
+    }
+    const settings = collectDorkSettings();
+    if (!settings.signals.length) { toast('Add at least one signal first.'); return; }
+    const targetInput = $('cloud-target-emails-input');
+    const maxEmails = Math.max(1, Math.min(10000, parseInt((targetInput && targetInput.value) || '1000', 10) || 1000));
+    status('Starting cloud campaign...');
+    const r = await fetch(backendUrl + '/campaigns/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings, maxEmails, name: ((settings.industry || 'Airtable prospects') + ' - ' + (settings.location || 'Cloud run')) })
+    });
+    const data = await r.json();
+    if (!r.ok || !data.success) throw new Error(data.error || 'Could not start campaign');
+    localStorage.setItem(CAMPAIGN_KEY, data.campaign.id);
+    toast('Cloud campaign started.');
+    status('Cloud campaign running: ' + data.campaign.id);
+    startPolling(data.campaign.id);
+  }
+
+  async function stopCloudCampaign(){
+    const backendUrl = getBackendUrl();
+    const id = localStorage.getItem(CAMPAIGN_KEY);
+    if (!backendUrl || !id) { toast('No active cloud campaign.'); return; }
+    try {
+      const r = await fetch(backendUrl + '/campaigns/' + encodeURIComponent(id) + '/stop', { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Stop failed');
+      status('Cloud campaign stopping...');
+      toast('Stop requested.');
+    } catch(e) { toast('Stop failed: ' + e.message); }
+  }
+
+  async function pollOnce(id){
+    const backendUrl = getBackendUrl();
+    if (!backendUrl || !id) return;
+    try {
+      const [statusRes, leadsRes] = await Promise.all([
+        fetch(backendUrl + '/campaigns/' + encodeURIComponent(id)),
+        fetch(backendUrl + '/campaigns/' + encodeURIComponent(id) + '/leads?limit=50000')
+      ]);
+      const statusData = await statusRes.json();
+      const leadsData = await leadsRes.json();
+      if (Array.isArray(leadsData.leads)) {
+        const imported = importLeads(leadsData.leads);
+        const c = statusData.campaign || {};
+        status('Cloud campaign ' + (c.status || 'unknown') + ' · unique emails added: ' + (c.newEmailsAdded || 0) + ' · pages checked: ' + (c.pagesChecked || 0) + ' · local total: ' + imported.total + ' · duplicates merged: ' + (c.duplicatesSkipped || 0));
+      }
+      const c = statusData.campaign || {};
+      if (['completed','failed','stopped'].includes(c.status)) {
+        stopPolling();
+        status('Cloud campaign ' + c.status + '. Added ' + (c.newEmailsAdded || 0) + ' unique emails. Duplicates merged: ' + (c.duplicatesSkipped || 0) + '.');
+      }
+    } catch(e) {
+      status('Cloud campaign poll failed: ' + e.message);
+    }
+  }
+
+  function startPolling(id){
+    stopPolling();
+    if (!id) id = localStorage.getItem(CAMPAIGN_KEY);
+    if (!id) return;
+    pollOnce(id);
+    pollTimer = setInterval(() => pollOnce(id), 5000);
+  }
+  function stopPolling(){ if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
+
+  async function pullLatestCloudLeads(){
+    const backendUrl = getBackendUrl();
+    if (!backendUrl) { toast('Add Backend Server URL first.'); return; }
+    const r = await fetch(backendUrl + '/dork-leads?limit=50000');
+    const data = await r.json();
+    const imported = importLeads(data.leads || []);
+    toast('Pulled cloud leads. Added ' + imported.added + ', updated ' + imported.updated + '.');
+  }
+
+  window.ScoutCloudCampaign = {
+    startCloudCampaign, stopCloudCampaign, startPolling, stopPolling, pollOnce, pullLatestCloudLeads, importLeads
+  };
+
+  function init(){
+    const id = localStorage.getItem(CAMPAIGN_KEY);
+    if (id) startPolling(id);
+    setTimeout(() => {
+      const el = $('cloud-campaign-status');
+      if (el && !id) el.textContent = 'Cloud campaign: ready. Set target emails, then click Start Cloud Campaign.';
+    }, 500);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
