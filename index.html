@@ -500,7 +500,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         <!-- Upload section -->
         <div class="as-card" style="margin-bottom:14px">
           <h3>1. Upload Business List</h3>
-          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">CSV or Excel file. Required columns: <strong>Business</strong>, <strong>Email</strong>. Optional: Website, Phone.</p>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">CSV or Excel file. Best columns: <strong>Business</strong>/<strong>Name</strong> and <strong>Email</strong>. Also supports email1/email2/email3, validatedEmail1/2/3, domain, phone1, website, socials.</p>
           <div id="es-dropzone" style="border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;transition:.12s" onclick="document.getElementById('es-file-input').click()" ondragover="event.preventDefault();this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor='var(--border)'" ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleEsFile(event.dataTransfer.files[0])">
             <div style="font-size:24px;margin-bottom:6px">📂</div>
             <div style="font-size:13px;font-weight:600;color:var(--text)">Click or drag file here</div>
@@ -652,7 +652,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         <div style="margin-bottom:16px">
           <h2 style="font-size:16px;font-weight:800;margin-bottom:4px">🧪 Verify & Send</h2>
           <p style="font-size:12px;color:var(--muted);line-height:1.6">
-            This is a Scout App tab, not a separate app. It checks the businesses already in your queue, blocks invalid or duplicate emails, and moves only ready contacts into the existing Email Scout tab.
+            This is a Scout App tab, not a separate app. Upload/import leads through Upload List first, then this tab checks the businesses already in your queue, blocks invalid or duplicate emails, and moves only ready contacts into the existing Email Scout tab.
           </p>
         </div>
 
@@ -2397,7 +2397,79 @@ function parseCSV(text) {
     const row = {};
     headers.forEach((h, i) => row[h] = (cols[i] || '').trim());
     return row;
-  }).filter(r => r.business || r['business name']);
+  }).filter(r => Object.values(r).some(v => String(v || '').trim()));
+}
+
+// ---------------------------------------------------------------
+// SMART LEAD COLUMN HELPERS - v38
+// Accepts BootLeads-style files and generic CSV/XLSX files:
+// name, business_name, company, domain, email1/email2/email3,
+// validatedEmail1/2/3, phone1, mainCategories, address, socials, etc.
+// ---------------------------------------------------------------
+function lcKey(k){ return String(k || '').toLowerCase().replace(/[^a-z0-9]/g,''); }
+function getRowValue(row, names){
+  const keys = Object.keys(row || {});
+  for (const name of names) {
+    const target = lcKey(name);
+    const k = keys.find(x => lcKey(x) === target);
+    if (k && row[k] !== undefined && row[k] !== null && String(row[k]).trim()) return String(row[k]).trim();
+  }
+  for (const name of names) {
+    const target = lcKey(name);
+    const k = keys.find(x => lcKey(x).includes(target));
+    if (k && row[k] !== undefined && row[k] !== null && String(row[k]).trim()) return String(row[k]).trim();
+  }
+  return '';
+}
+function extractEmailsFromTextV38(value){
+  return Array.from(new Set((String(value || '').match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[A-Za-z]{2,}/g) || [])
+    .map(e => e.toLowerCase().replace(/^mailto:/,'').replace(/[;,.)\]]+$/g,''))
+    .filter(Boolean)));
+}
+function extractEmailsFromRowV38(row){
+  const keys = Object.keys(row || {});
+  const priorityNames = ['validatedEmail1','validated_email1','verifiedEmail1','verified_email1','email1','email','emailAddress','business_email','contact_email','validatedEmail2','validatedEmail3','email2','email3'];
+  const found = [];
+  for (const name of priorityNames) {
+    const val = getRowValue(row, [name]);
+    extractEmailsFromTextV38(val).forEach(e => { if (!found.includes(e)) found.push(e); });
+  }
+  // Also scan every cell, because some files hide emails inside notes/HTML/text columns.
+  keys.forEach(k => extractEmailsFromTextV38(row[k]).forEach(e => { if (!found.includes(e)) found.push(e); }));
+  return found;
+}
+function pickBestEmailV38(row){
+  const emails = extractEmailsFromRowV38(row);
+  if (!emails.length) return '';
+  const score = (email) => {
+    const local = email.split('@')[0] || '';
+    const domain = email.split('@')[1] || '';
+    let s = 0;
+    if (/^[^@]+@[^@]+\.[^@]+$/.test(email)) s += 30;
+    if (!/(gmail|yahoo|outlook|hotmail|icloud|aol|gmx|web|proton)/i.test(domain)) s += 12;
+    if (/^(info|contact|hello|sales|support|admin|office|team|service)$/i.test(local)) s -= 4;
+    if (/validated|verified/i.test(Object.keys(row).find(k => String(row[k]).toLowerCase().includes(email)) || '')) s += 15;
+    return s;
+  };
+  return emails.slice().sort((a,b)=>score(b)-score(a))[0];
+}
+function smartBusinessNameV38(row){
+  const name = getRowValue(row, ['business','business name','business_name','company','company_name','name','organization','organisation','store','shop']);
+  if (name) return name;
+  const domain = getRowValue(row, ['domain','website','url','site']);
+  if (domain) return String(domain).replace(/^https?:\/\//,'').replace(/^www\./,'').split(/[/?#]/)[0];
+  return pickBestEmailV38(row) || 'Unknown Business';
+}
+function smartWebsiteV38(row){
+  let v = getRowValue(row, ['website','url','site','domain','web']);
+  if (!v) return '';
+  return v.trim();
+}
+function smartPhoneV38(row){
+  return getRowValue(row, ['phone','phone1','telephone','tel','mobile','number','whatsapp']);
+}
+function smartIndustryV38(row, fallbackName, profileLink){
+  return getRowValue(row, ['industry','category','categories','mainCategories','main_categories','niche']) || (typeof detectIndustry === 'function' ? detectIndustry(fallbackName || '', profileLink || '') : 'general');
 }
 
 function parseCsvLine(line) {
@@ -2456,10 +2528,14 @@ async function confirmUpload() {
 
   // Step 2: Import rows, blocking already-scouted ones
   pendingUploadData.forEach(row => {
-    const name = row.business || row['business name'] || '';
-    const profileLink = row['profile link'] || row.profile_link || row.url || '';
-    const placeId = row['place id'] || row['place_id'] || null;
-    if (!name) return;
+    const name = smartBusinessNameV38(row);
+    const email = pickBestEmailV38(row);
+    const allEmails = extractEmailsFromRowV38(row);
+    const website = smartWebsiteV38(row);
+    const phone = smartPhoneV38(row);
+    const profileLink = row['profile link'] || row.profile_link || row.mapsurl || row.maps_url || row.googlemaps || row.google_maps || row.url || '';
+    const placeId = row['place id'] || row['place_id'] || row.placeid || row.placeId || null;
+    if (!name && !email) return;
 
     // Block if already scouted by anyone (backend dedup)
     if (placeId && scoutedIds[placeId]?.contacted) {
@@ -2487,16 +2563,21 @@ async function confirmUpload() {
       id: genId(),
       name,
       rating: row.rating ? parseFloat(row.rating) : null,
-      reviews: row.reviews || null,
+      reviews: row.reviews || row.review_count || row.reviewcount || null,
       band: row.band || null,
       profileLink,
       place_id: placeId,
-      website: row.website || null,
-      email: row.email || null,
-      emails: row.email ? [row.email] : [],
-      phones: [],
-      industry: detectIndustry(name, profileLink),
-      status: row.email ? 'found' : 'pending',
+      website: website || null,
+      email: email || null,
+      emails: allEmails,
+      phones: phone ? [phone] : [],
+      phone: phone || '',
+      address: row.address || row.location || '',
+      facebook: row.facebook || '',
+      instagram: row.instagram || '',
+      linkedin: row.linkedin || '',
+      industry: smartIndustryV38(row, name, profileLink),
+      status: email ? 'found' : 'pending',
       generatedMessage: null,
       messageStage: 0,
       notes: '',
@@ -3559,23 +3640,15 @@ function handleEsFile(file) {
           rows = parseCSV(typeof e.target.result === 'string' ? e.target.result : '');
         }
       }
-      // Normalize headers
-      esContacts = rows.map(r => {
-        const keys = Object.keys(r);
-        const get = (...names) => {
-          for (const n of names) {
-            const k = keys.find(k => k.toLowerCase().replace(/[^a-z]/g,'') === n.replace(/[^a-z]/g,''));
-            if (k && r[k]) return String(r[k]).trim();
-          }
-          return '';
-        };
-        return {
-          name: get('business','businessname','company','name') || '',
-          email: get('email','emailaddress','mail') || '',
-          website: get('website','url','site') || '',
-          phone: get('phone','tel','mobile','number') || '',
-        };
-      }).filter(r => r.name && r.email);
+      // Normalize headers with smart detection. Supports Business/Email and also
+      // BootLeads-style columns such as name, domain, email1, email2, email3,
+      // validatedEmail1, phone1, mainCategories, address, socials, etc.
+      esContacts = rows.map(r => ({
+        name: smartBusinessNameV38(r) || '',
+        email: pickBestEmailV38(r) || '',
+        website: smartWebsiteV38(r) || '',
+        phone: smartPhoneV38(r) || '',
+      })).filter(r => r.name && r.email);
 
       const statusEl = document.getElementById('es-upload-status');
       if (statusEl) statusEl.textContent = `✓ ${esContacts.length} contacts loaded (${rows.length - esContacts.length} skipped  -  no email)`;
@@ -4503,7 +4576,7 @@ function manualPollReplies() {
     sv36RenderVerifySendTab();
     const s = document.getElementById('sv36-verify-status');
     if (s) s.textContent = 'Verified ' + businesses.length + ' queue items.';
-    if (typeof toast === 'function') toast('Scout App v36: queue verified', 'ok');
+    if (typeof toast === 'function') toast('Scout App v38: queue verified', 'ok');
   };
 
   window.sv36RenderVerifySendTab = function(){
