@@ -5107,6 +5107,142 @@ function manualPollReplies() {
   });
 })();
 
+
+// ---------------------------------------------------------------
+// Scout App v40 - Email Found batch source for Verify & Send
+// Keeps Upload as the only upload point. Adds source selection so
+// users can send 200 contacts from Email Found / current queue filter.
+// ---------------------------------------------------------------
+(function(){
+  function q(id){ return document.getElementById(id); }
+  function norm(email){ return String(email || '').trim().toLowerCase().replace(/^mailto:/,'').replace(/[;,.)\]]+$/g,''); }
+  function bizEmail(b){ return norm((b && (b.email || (Array.isArray(b.emails) ? b.emails[0] : ''))) || ''); }
+  function bizName(b){
+    try { return typeof cleanBizName === 'function' ? cleanBizName(b.name || b.business || b.company || '') : (b.name || b.business || b.company || ''); }
+    catch(e){ return b.name || b.business || b.company || ''; }
+  }
+  function passesCurrentFilter(b){
+    try {
+      if (queueFilter === 'all') return true;
+      if (queueFilter === 'dorking') return b.source === 'dorking';
+      if (queueFilter === 'maps') return b.source !== 'dorking';
+      if (queueFilter === 'blocked') return !!b.blockedByDedup;
+      if (queueFilter === 'followup') return typeof getFollowUpsDue === 'function' && getFollowUpsDue().some(d => d.id === b.id);
+      return b.status === queueFilter;
+    } catch(e) { return true; }
+  }
+  function ensureVerified(){
+    if (typeof window.sv36VerifyQueue === 'function') {
+      try { window.sv36VerifyQueue(); } catch(e) { console.warn('Verify before batch failed', e); }
+    }
+  }
+  function injectBatchSourceControls(){
+    const limit = q('sv36-batch-limit');
+    if (!limit || q('sv40-batch-source')) return;
+    const wrap = document.createElement('span');
+    wrap.style.display = 'inline-flex';
+    wrap.style.gap = '6px';
+    wrap.style.alignItems = 'center';
+    wrap.style.flexWrap = 'wrap';
+    wrap.innerHTML = `
+      <label style="font-size:11px;color:var(--muted)">Source</label>
+      <select id="sv40-batch-source" class="as-input" style="width:190px">
+        <option value="verified_ready">Verified ready/review</option>
+        <option value="email_found">Email Found tab</option>
+        <option value="current_filter">Current left filter</option>
+        <option value="all_with_email">All with email</option>
+      </select>
+      <label style="display:inline-flex;gap:5px;align-items:center;font-size:11px;color:var(--muted);white-space:nowrap">
+        <input type="checkbox" id="sv40-clear-email-scout" checked> replace Email Scout list
+      </label>`;
+    limit.parentNode.insertBefore(wrap, limit.nextSibling);
+    const note = q('sv36-batch-result');
+    if (note) note.textContent = 'Pick Email Found tab + batch limit 200 to move 200 verified found emails into Email Scout.';
+  }
+
+  const oldRender = window.sv36RenderVerifySendTab;
+  window.sv36RenderVerifySendTab = function(){
+    if (typeof oldRender === 'function') oldRender();
+    injectBatchSourceControls();
+  };
+
+  window.sv40SendEmailFoundBatchToEmailScout = function(){
+    const sourceEl = q('sv40-batch-source');
+    if (sourceEl) sourceEl.value = 'email_found';
+    window.sv36SendReadyToEmailScout();
+  };
+
+  const oldSend = window.sv36SendReadyToEmailScout;
+  window.sv36SendReadyToEmailScout = function(){
+    if (!Array.isArray(businesses)) return;
+    ensureVerified();
+
+    const source = q('sv40-batch-source') ? q('sv40-batch-source').value : 'verified_ready';
+    const limit = Math.max(1, parseInt(q('sv36-batch-limit')?.value || '200', 10));
+    const clearFirst = q('sv40-clear-email-scout') ? q('sv40-clear-email-scout').checked : false;
+    if (!Array.isArray(esContacts)) esContacts = [];
+    if (clearFirst) esContacts.length = 0;
+
+    const already = new Set((esContacts || []).map(c => norm(c.email)));
+    const picked = [];
+
+    for (const b of businesses) {
+      const email = bizEmail(b);
+      if (!email || already.has(email)) continue;
+      const v = b.emailVerification || {};
+      const isReady = !!(v.ready || v.status === 'READY' || v.status === 'REVIEW');
+      const isEmailFound = b.status === 'found' || b.readyToEmailScout || !!email;
+      let include = false;
+      if (source === 'verified_ready') include = isReady;
+      else if (source === 'email_found') include = isEmailFound && isReady;
+      else if (source === 'current_filter') include = passesCurrentFilter(b) && isEmailFound && isReady;
+      else if (source === 'all_with_email') include = isEmailFound && isReady;
+      if (!include) continue;
+
+      picked.push(b);
+      already.add(email);
+      if (picked.length >= limit) break;
+    }
+
+    picked.forEach(b => {
+      const email = bizEmail(b);
+      esContacts.push({
+        name: bizName(b),
+        email: email,
+        website: b.website || b.domain || '',
+        phone: b.phone || (Array.isArray(b.phones) ? b.phones[0] : '') || '',
+        category: b.category || b.industry || b.mainCategory || '',
+        industry: b.industry || b.category || b.mainCategory || '',
+        location: b.location || b.address || b.city || '',
+        rating: b.rating || '',
+        reviews: b.reviews || '',
+        sourceType: b.sourceType || b.source || ''
+      });
+      b.sentToEmailScoutAt = new Date().toISOString();
+    });
+
+    if (typeof save === 'function') save();
+    if (typeof renderEsPreview === 'function') renderEsPreview();
+    if (typeof updateEsSendStats === 'function') updateEsSendStats();
+    const labelMap = { verified_ready:'verified ready/review', email_found:'Email Found', current_filter:'current filter', all_with_email:'all with email' };
+    const msg = `Moved ${picked.length} contacts from ${labelMap[source] || source} to Email Scout${clearFirst ? ' (replaced previous list)' : ''}.`;
+    const out = q('sv36-batch-result'); if (out) out.textContent = msg;
+    if (typeof toast === 'function') toast(msg, picked.length ? 'ok' : 'err');
+    if (picked.length) showContentTab('email-scout-content', q('tab-emailscout'));
+  };
+
+  document.addEventListener('DOMContentLoaded', function(){
+    try {
+      const logo = q('topbar-logo'); const title = q('topbar-title');
+      if (logo) logo.textContent = '🧭 Scout App';
+      if (title) title.textContent = 'Scout App v40 — Business Scouting System';
+      injectBatchSourceControls();
+      const p = q('sv36-batch-result');
+      if (p) p.textContent = 'To send 200 from Email Found: set Source = Email Found tab, Batch limit = 200, then Send Ready Batch → Email Scout.';
+    } catch(e) { console.warn('Scout App v40 init warning', e); }
+  });
+})();
+
 </script>
 </body>
 </html>
