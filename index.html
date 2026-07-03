@@ -447,7 +447,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()" ondragover="e=>{e.preventDefault();this.classList.add('drag')}" ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)">
           <div class="icon">📋</div>
           <h3>Upload Business List</h3>
-          <p>Drop your CSV file here or click to browse.<br>Required columns: <strong>Business, Rating, Reviews, Band, Profile link</strong><br>Optional: <strong>Website, Industry, Email</strong></p>
+          <p>Drop any Scout CSV here: Google Maps/directories, Bing dorking/web leads, or generic lead files. After upload, Scout App will auto-detect fields and let you confirm the mapping before import.</p>
         </div>
         <input type="file" id="file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleFileSelect(event)">
         <div id="upload-preview-container" style="display:none">
@@ -4692,6 +4692,418 @@ function manualPollReplies() {
       if (logo) logo.textContent = '🧭 Scout App';
       if (title) title.textContent = SCOUT_APP_VERSION + ' — Business Scouting System';
     } catch {}
+  });
+})();
+
+
+
+// ---------------------------------------------------------------
+// SCOUT APP v39 - SIMPLIFIED UPLOAD -> FIELD MAP -> VERIFY -> EMAIL SCOUT
+// Keeps Scout App UI. Upload is the only upload point. Email Scout sends queued contacts only.
+// ---------------------------------------------------------------
+(function(){
+  const SCOUT_APP_VERSION = 'v39';
+  const SOURCE_LABELS = {
+    auto: 'Auto-detect',
+    maps_directory: 'Google Maps / directory CSV',
+    bing_dorking: 'Bing dorking / web leads CSV',
+    generic_lead_file: 'Generic lead file / BootLeads-style CSV'
+  };
+  const MESSAGE_REQUIREMENTS = {
+    maps_directory: {
+      label: 'Google Maps / directories',
+      best: ['name','category/industry','location','rating','reviews','website'],
+      minimum: ['name','email'],
+      notes: 'Best personalization can mention rating/reviews and local category. If rating/reviews are missing, use a simpler message.'
+    },
+    bing_dorking: {
+      label: 'Bing dorking / web leads',
+      best: ['name','website','category/industry','source signal'],
+      minimum: ['name or website','email'],
+      notes: 'Best personalization should mention their website/category, not ratings, because dorking usually does not include review data.'
+    },
+    generic_lead_file: {
+      label: 'Generic lead list / BootLeads-style',
+      best: ['name','mainCategories/category','website/domain','location/address'],
+      minimum: ['name or domain','email'],
+      notes: 'Use name and main category for the message. This is the right type for files with domain, name, mainCategories, email1, validatedEmail1, phone/social columns.'
+    }
+  };
+  window.scoutV39MessageRequirements = MESSAGE_REQUIREMENTS;
+
+  function q(id){ return document.getElementById(id); }
+  function keysOfPending(){
+    const first = Array.isArray(window.pendingUploadData) && window.pendingUploadData[0] ? window.pendingUploadData[0] : {};
+    return Object.keys(first || {});
+  }
+  function cleanKey(k){ return String(k || '').toLowerCase().replace(/[^a-z0-9]/g,''); }
+  function findHeader(headers, names){
+    for (const n of names) {
+      const target = cleanKey(n);
+      const exact = headers.find(h => cleanKey(h) === target);
+      if (exact) return exact;
+    }
+    for (const n of names) {
+      const target = cleanKey(n);
+      const partial = headers.find(h => cleanKey(h).includes(target) || target.includes(cleanKey(h)));
+      if (partial) return partial;
+    }
+    return '';
+  }
+  function getMappedSelect(field){ return q('v39-map-' + field)?.value || ''; }
+  function getMappedValue(row, field, fallbackNames){
+    const selected = getMappedSelect(field);
+    if (selected && selected !== '__auto__' && row[selected] !== undefined && row[selected] !== null) return String(row[selected]).trim();
+    if (typeof getRowValue === 'function') return getRowValue(row, fallbackNames || []);
+    return '';
+  }
+  function inferSourceType(row, headers){
+    const joinedHeaders = headers.map(cleanKey).join('|');
+    if (/profilelink|profileurl|mapsurl|googlemaps|placeid|rating|reviews|reviewcount/.test(joinedHeaders)) return 'maps_directory';
+    if (/dork|signal|query|sourceurl|sourcepage|resulturl|bing|serp/.test(joinedHeaders)) return 'bing_dorking';
+    if (/validatedemail|email1|email2|email3|maincategories|domain|instagram|facebook|linkedin/.test(joinedHeaders)) return 'generic_lead_file';
+    const vals = Object.values(row || {}).join(' ').toLowerCase();
+    if (vals.includes('google.com/maps') || vals.includes('maps.app.goo.gl')) return 'maps_directory';
+    return 'generic_lead_file';
+  }
+  window.scoutV39DetectUploadSource = function(){
+    const headers = keysOfPending();
+    const row = (window.pendingUploadData && window.pendingUploadData[0]) || {};
+    return inferSourceType(row, headers);
+  };
+  function renderOptionList(headers, selected){
+    return ['<option value="__auto__">Auto-detect</option>'].concat(headers.map(h => `<option value="${esc(h)}" ${h===selected?'selected':''}>${esc(h)}</option>`)).join('');
+  }
+  function renderFieldMapping(data){
+    const headers = Object.keys(data[0] || {});
+    const row = data[0] || {};
+    const inferred = inferSourceType(row, headers);
+    const defaults = {
+      name: findHeader(headers, ['business','business name','business_name','company','company_name','name','organization','store','shop']),
+      email: findHeader(headers, ['validatedEmail1','validated_email1','email','email1','email2','business_email','contact_email']),
+      website: findHeader(headers, ['website','url','site','domain','web']),
+      category: findHeader(headers, ['mainCategories','main_categories','category','categories','industry','niche']),
+      location: findHeader(headers, ['location','address','city','state','country','region']),
+      phone: findHeader(headers, ['phone','phone1','telephone','tel','mobile','whatsapp']),
+      rating: findHeader(headers, ['rating','stars','score']),
+      reviews: findHeader(headers, ['reviews','review_count','reviewcount','number_of_reviews']),
+      profile: findHeader(headers, ['profile link','profile_link','maps_url','mapsurl','google_maps','googlemaps','place_url','listing_url']),
+    };
+    const html = `
+      <div id="v39-field-mapping" class="upload-preview" style="margin-top:14px">
+        <div class="upload-preview-head">
+          <span>Field Mapping</span>
+          <span style="color:var(--accent);font-size:12px">Detected: ${SOURCE_LABELS[inferred] || inferred}</span>
+        </div>
+        <div style="padding:14px 16px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+            Upload is now the only place for files. Confirm what fields this CSV has, then import. No-email rows enter <strong>Pending</strong> so Auto-Scout can find emails later.
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Source type</label><select id="v39-source-type" class="upload-opt-select" style="width:100%">${Object.entries(SOURCE_LABELS).filter(([k])=>k!=='auto').map(([k,v])=>`<option value="${k}" ${k===inferred?'selected':''}>${v}</option>`).join('')}</select></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Business/name</label><select id="v39-map-name" class="upload-opt-select" style="width:100%">${renderOptionList(headers, defaults.name)}</select></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Best email</label><select id="v39-map-email" class="upload-opt-select" style="width:100%">${renderOptionList(headers, defaults.email)}</select></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Website/domain</label><select id="v39-map-website" class="upload-opt-select" style="width:100%">${renderOptionList(headers, defaults.website)}</select></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Category/industry</label><select id="v39-map-category" class="upload-opt-select" style="width:100%">${renderOptionList(headers, defaults.category)}</select></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Location/address</label><select id="v39-map-location" class="upload-opt-select" style="width:100%">${renderOptionList(headers, defaults.location)}</select></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Phone</label><select id="v39-map-phone" class="upload-opt-select" style="width:100%">${renderOptionList(headers, defaults.phone)}</select></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Rating</label><select id="v39-map-rating" class="upload-opt-select" style="width:100%">${renderOptionList(headers, defaults.rating)}</select></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Reviews</label><select id="v39-map-reviews" class="upload-opt-select" style="width:100%">${renderOptionList(headers, defaults.reviews)}</select></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Map/profile/source link</label><select id="v39-map-profile" class="upload-opt-select" style="width:100%">${renderOptionList(headers, defaults.profile)}</select></div>
+          </div>
+        </div>
+      </div>`;
+    const old = q('v39-field-mapping');
+    if (old) old.remove();
+    const container = q('upload-preview-container');
+    if (container) container.insertAdjacentHTML('beforeend', html);
+  }
+
+  const oldShowUploadPreview = window.showUploadPreview;
+  window.showUploadPreview = function(data){
+    if (typeof oldShowUploadPreview === 'function') oldShowUploadPreview(data);
+    try {
+      const cols = Object.keys(data[0] || {}).slice(0, 8);
+      const table = q('preview-table');
+      if (table && cols.length) {
+        table.innerHTML = `
+          <thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${data.slice(0, 8).map(r => `<tr>${cols.map(c => `<td>${esc(r[c] || '')}</td>`).join('')}</tr>`).join('')}
+            ${data.length > 8 ? `<tr><td colspan="${cols.length}" style="color:var(--muted);font-style:italic">… and ${data.length - 8} more</td></tr>` : ''}
+          </tbody>`;
+      }
+      renderFieldMapping(data);
+    } catch(e){ console.warn('v39 mapping render failed', e); }
+  };
+
+  function mappedEmail(row){
+    const col = getMappedSelect('email');
+    if (col && col !== '__auto__') {
+      const emails = typeof extractEmailsFromTextV38 === 'function' ? extractEmailsFromTextV38(row[col] || '') : [];
+      if (emails.length) return emails[0];
+    }
+    return typeof pickBestEmailV38 === 'function' ? pickBestEmailV38(row) : '';
+  }
+  function mappedAllEmails(row){
+    const all = typeof extractEmailsFromRowV38 === 'function' ? extractEmailsFromRowV38(row) : [];
+    const e = mappedEmail(row);
+    return Array.from(new Set([e].concat(all).filter(Boolean)));
+  }
+  function sourceToBizSource(sourceType){
+    if (sourceType === 'bing_dorking') return 'dorking';
+    if (sourceType === 'maps_directory') return 'maps';
+    return 'upload';
+  }
+
+  window.confirmUpload = async function(){
+    if (!Array.isArray(window.pendingUploadData) || !window.pendingUploadData.length) return;
+    const dupMode = q('dup-mode')?.value || 'skip';
+    const sourceType = q('v39-source-type')?.value || scoutV39DetectUploadSource();
+    let added = 0, skipped = 0, updated = 0, alreadyScouted = 0, noEmailPending = 0, withEmail = 0;
+    const backendUrl = settings.backendUrl;
+    let scoutedIds = {};
+    if (backendUrl) {
+      const placeIds = pendingUploadData.map(row => getMappedValue(row, 'profile', ['place id','place_id','placeid']) || row['place id'] || row['place_id'] || null).filter(Boolean);
+      if (placeIds.length) {
+        try {
+          const res = await fetch(`${backendUrl}/check-contacted`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ place_ids: placeIds }) });
+          const data = await res.json(); scoutedIds = data.results || {};
+        } catch(e){ console.warn('Dedup check failed:', e); }
+      }
+    }
+    pendingUploadData.forEach(row => {
+      const nameFromMap = getMappedValue(row, 'name', ['business','business name','business_name','company','company_name','name','organization','store','shop']);
+      const name = nameFromMap || (typeof smartBusinessNameV38 === 'function' ? smartBusinessNameV38(row) : 'Unknown Business');
+      const email = mappedEmail(row);
+      const allEmails = mappedAllEmails(row);
+      const website = getMappedValue(row, 'website', ['website','url','site','domain','web']) || (typeof smartWebsiteV38 === 'function' ? smartWebsiteV38(row) : '');
+      const phone = getMappedValue(row, 'phone', ['phone','phone1','telephone','tel','mobile','whatsapp']) || (typeof smartPhoneV38 === 'function' ? smartPhoneV38(row) : '');
+      const profileLink = getMappedValue(row, 'profile', ['profile link','profile_link','mapsurl','maps_url','googlemaps','google_maps','url','source_url']) || '';
+      const placeId = getRowValue ? getRowValue(row, ['place id','place_id','placeid','placeId']) : '';
+      const category = getMappedValue(row, 'category', ['industry','category','categories','mainCategories','main_categories','niche']) || '';
+      const location = getMappedValue(row, 'location', ['location','address','city','state','country','region']) || '';
+      const rating = getMappedValue(row, 'rating', ['rating','stars','score']) || '';
+      const reviews = getMappedValue(row, 'reviews', ['reviews','review_count','reviewcount','number_of_reviews']) || '';
+      if (!name && !email && !website) return;
+      if (placeId && scoutedIds[placeId]?.contacted) { alreadyScouted++; return; }
+      const existing = businesses.find(b => {
+        const sameProfile = profileLink && b.profileLink === profileLink;
+        const sameEmail = email && (b.email || '').toLowerCase() === email.toLowerCase();
+        const sameName = name && b.name && b.name.toLowerCase() === name.toLowerCase();
+        return sameProfile || sameEmail || sameName;
+      });
+      if (existing) {
+        if (dupMode === 'skip') { skipped++; return; }
+        if (dupMode === 'update') {
+          updateBiz(existing.id, {
+            rating: rating || existing.rating,
+            reviews: reviews || existing.reviews,
+            website: website || existing.website,
+            email: email || existing.email,
+            emails: allEmails.length ? allEmails : existing.emails,
+            phone: phone || existing.phone,
+            phones: phone ? [phone] : (existing.phones || []),
+            industry: category || existing.industry,
+            category: category || existing.category,
+            location: location || existing.location,
+            address: location || existing.address,
+            sourceType,
+            source: sourceToBizSource(sourceType),
+            status: (email || existing.email) ? 'found' : 'pending'
+          });
+          updated++; return;
+        }
+      }
+      const newBiz = {
+        id: genId(), name, rating: rating ? parseFloat(String(rating).replace(/[^0-9.]/g,'')) || rating : null, reviews: reviews || null,
+        band: row.band || null, profileLink, place_id: placeId || null, website: website || null,
+        email: email || null, emails: allEmails, phones: phone ? [phone] : [], phone: phone || '',
+        address: location || '', location: location || '', facebook: row.facebook || '', instagram: row.instagram || '', linkedin: row.linkedin || '',
+        industry: category || (typeof smartIndustryV38 === 'function' ? smartIndustryV38(row, name, profileLink) : 'general'), category: category || '',
+        sourceType, source: sourceToBizSource(sourceType),
+        status: email ? 'found' : 'pending', generatedMessage: null, messageStage: 0, notes: '', originalRow: row,
+        addedAt: now(), updatedAt: now()
+      };
+      businesses.push(newBiz); added++;
+      if (email) withEmail++; else noEmailPending++;
+    });
+    save();
+    window.pendingUploadData = [];
+    const up = q('upload-preview-container'); if (up) up.style.display = 'none';
+    renderQueue(); updateAsStats(); updateBatchBtn();
+    const msg = `Imported ${added} leads · ${withEmail} with emails · ${noEmailPending} pending Auto-Scout${updated ? ' · ' + updated + ' updated' : ''}${skipped ? ' · ' + skipped + ' skipped' : ''}${alreadyScouted ? ' · ' + alreadyScouted + ' blocked' : ''}`;
+    toast(msg, alreadyScouted ? 'warn' : 'ok');
+    showContentTab('detail', q('tab-detail'));
+  };
+
+  function addMessageRequirementCard(){
+    const emailScout = q('email-scout-content');
+    if (!emailScout || q('v39-message-guide')) return;
+    const inner = emailScout.querySelector('div[style*="max-width:860px"]') || emailScout.firstElementChild;
+    if (!inner) return;
+    const guide = document.createElement('div');
+    guide.id = 'v39-message-guide';
+    guide.className = 'as-card';
+    guide.style.marginBottom = '14px';
+    guide.innerHTML = `
+      <h3>Message personalization guide</h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Choose templates based on the fields available from the source. Scout App will replace only fields that exist.</p>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+        ${Object.entries(MESSAGE_REQUIREMENTS).map(([key, r]) => `<div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px">
+          <div style="font-size:12px;font-weight:800;color:var(--text);margin-bottom:5px">${r.label}</div>
+          <div style="font-size:11px;color:var(--muted);line-height:1.55"><strong>Minimum:</strong> ${r.minimum.join(', ')}<br><strong>Best:</strong> ${r.best.join(', ')}</div>
+        </div>`).join('')}
+      </div>`;
+    const uploadCard = Array.from(inner.querySelectorAll('.as-card')).find(card => (card.querySelector('h3')?.textContent || '').includes('Upload Business List'));
+    if (uploadCard) uploadCard.insertAdjacentElement('afterend', guide);
+    else inner.insertBefore(guide, inner.children[1] || null);
+  }
+  function simplifyEmailScoutUpload(){
+    const cards = Array.from(document.querySelectorAll('#email-scout-content .as-card'));
+    const uploadCard = cards.find(card => (card.querySelector('h3')?.textContent || '').includes('Upload Business List'));
+    if (uploadCard) {
+      uploadCard.innerHTML = `
+        <h3>Contacts source</h3>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Uploads now happen only in the Upload tab. Email Scout receives active contacts from Verify &amp; Send after emails are verified.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="topbar-btn" onclick="showContentTab('upload-content', document.getElementById('tab-upload'))">Open Upload</button>
+          <button class="topbar-btn primary" onclick="showContentTab('verify-send-content', document.getElementById('tab-verify'))">Open Verify &amp; Send</button>
+        </div>
+        <div id="es-upload-status" style="margin-top:10px;font-size:12px;color:var(--muted)">No direct upload here. Load contacts through Upload → Verify &amp; Send.</div>
+        <div id="es-preview" style="margin-top:12px;display:none"><div style="font-size:12px;font-weight:700;margin-bottom:6px;color:var(--text)">Ready send list (<span id="es-count">0</span> contacts):</div><div style="overflow-x:auto;max-height:160px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse" id="es-preview-table"></table></div></div>`;
+    }
+    const h3s = Array.from(document.querySelectorAll('#email-scout-content .as-card h3'));
+    h3s.forEach(h => {
+      if (h.textContent.includes('2. Message Templates')) h.textContent = '1. Message Templates';
+      if (h.textContent.includes('3. Send Settings')) h.textContent = '2. Send Settings';
+      if (h.textContent.includes('4. Send')) h.textContent = '3. Send Message';
+    });
+    addMessageRequirementCard();
+  }
+
+  const oldRenderEsTemplates = window.renderEsTemplates;
+  window.renderEsTemplates = function(){
+    if (typeof oldRenderEsTemplates === 'function') oldRenderEsTemplates();
+    try {
+      const mode = q('es-rotation-mode');
+      if (mode && !Array.from(mode.options).some(o => o.value === 'selected')) {
+        const opt = document.createElement('option'); opt.value = 'selected'; opt.textContent = 'Use selected message only'; mode.appendChild(opt);
+      }
+      let picker = q('es-selected-template');
+      if (!picker && mode) {
+        picker = document.createElement('select'); picker.id = 'es-selected-template'; picker.className = 'upload-opt-select'; picker.style.cssText='background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;color:var(--text);font-size:12px';
+        mode.insertAdjacentElement('afterend', picker);
+      }
+      if (picker) picker.innerHTML = (esTemplates || []).map((t,i)=>`<option value="${i}">Message ${i+1}</option>`).join('');
+      const help = q('es-template-shortcode-help') || document.createElement('div');
+      help.id = 'es-template-shortcode-help';
+      help.style.cssText = 'font-size:11px;color:var(--muted);margin:8px 0;line-height:1.6';
+      help.innerHTML = 'Shortcodes: <code>{name}</code> <code>{email}</code> <code>{website}</code> <code>{category}</code> <code>{industry}</code> <code>{location}</code> <code>{rating}</code> <code>{reviews}</code> <code>{phone}</code>';
+      const list = q('es-templates-list'); if (list && !q('es-template-shortcode-help')) list.insertAdjacentElement('beforebegin', help);
+    } catch(e) {}
+  };
+
+  window.personaliseEsMsg = function(template, contact){
+    const c = contact || {};
+    const val = (key) => c[key] || (key === 'category' ? c.industry : '') || '';
+    return String(template || '')
+      .replace(/\{name\}/gi, val('name'))
+      .replace(/\{email\}/gi, val('email'))
+      .replace(/\{website\}/gi, val('website'))
+      .replace(/\{phone\}/gi, val('phone'))
+      .replace(/\{category\}/gi, val('category'))
+      .replace(/\{industry\}/gi, val('industry'))
+      .replace(/\{location\}/gi, val('location'))
+      .replace(/\{rating\}/gi, val('rating'))
+      .replace(/\{reviews\}/gi, val('reviews'));
+  };
+  window.getEsMessage = function(contact){
+    if (!Array.isArray(esTemplates) || !esTemplates.length) return '';
+    const mode = q('es-rotation-mode')?.value || 'rotate';
+    let tpl;
+    if (mode === 'selected') {
+      const idx = Math.max(0, parseInt(q('es-selected-template')?.value || '0', 10));
+      tpl = esTemplates[idx] || esTemplates[0];
+    } else if (mode === 'first') tpl = esTemplates[0];
+    else if (mode === 'random') tpl = esTemplates[Math.floor(Math.random() * esTemplates.length)];
+    else { tpl = esTemplates[esRotationIndex % esTemplates.length]; esRotationIndex++; }
+    return personaliseEsMsg(tpl.message, contact);
+  };
+
+  function normEmailV39(email){ return String(email || '').trim().toLowerCase().replace(/^mailto:/,'').replace(/[;,.)\]]+$/g,''); }
+  function verifyNoEmailToPending(){
+    if (!Array.isArray(businesses)) return;
+    businesses.forEach(b => {
+      const e = normEmailV39(b.email || (Array.isArray(b.emails) ? b.emails[0] : ''));
+      if (!e && b.status !== 'contacted' && b.status !== 'replied' && b.status !== 'closed' && b.status !== 'no_email') b.status = 'pending';
+    });
+  }
+  const oldVerifyQueue = window.sv36VerifyQueue;
+  window.sv36VerifyQueue = function(){
+    if (typeof oldVerifyQueue === 'function') oldVerifyQueue();
+    verifyNoEmailToPending();
+    if (typeof save === 'function') save();
+    if (typeof renderQueue === 'function') renderQueue();
+    if (typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab();
+  };
+  const oldRenderVerify = window.sv36RenderVerifySendTab;
+  window.sv36RenderVerifySendTab = function(){
+    if (typeof oldRenderVerify === 'function') oldRenderVerify();
+    const intro = q('sv36-verify-status');
+    if (intro) intro.textContent = 'No-email records are kept out of active send verification and moved to Pending for Auto-Scout. After Auto-Scout fails, they appear under No Email for deletion.';
+    const table = q('sv36-results-table');
+    if (table && Array.isArray(businesses)) {
+      const rows = businesses
+        .map(b => ({ biz:b, v:b.emailVerification || (typeof verifyBiz === 'function' ? verifyBiz(b,0) : null) }))
+        .filter(r => r.v && r.v.email)
+        .slice(0, 100);
+      table.innerHTML = `
+        <tr style="position:sticky;top:0;background:var(--card2);z-index:1">
+          <th style="text-align:left;padding:8px;color:var(--muted)">Business</th><th style="text-align:left;padding:8px;color:var(--muted)">Email</th><th style="text-align:left;padding:8px;color:var(--muted)">Category</th><th style="text-align:left;padding:8px;color:var(--muted)">Status</th><th style="text-align:left;padding:8px;color:var(--muted)">Score</th><th style="text-align:left;padding:8px;color:var(--muted)">Reason</th>
+        </tr>
+        ${rows.map(({biz,v}) => `<tr><td style="padding:8px;border-top:1px solid var(--border);color:var(--text)">${esc(cleanBizName ? cleanBizName(biz.name || '') : (biz.name || ''))}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--green)">${esc(v.email || '')}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--muted)">${esc(biz.category || biz.industry || '')}</td><td style="padding:8px;border-top:1px solid var(--border);font-weight:700;color:${v.ready ? 'var(--green)' : v.status==='REVIEW' ? 'var(--amber)' : 'var(--red)'}">${v.status}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--text)">${v.score}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--muted)">${esc(v.reasons || '')}</td></tr>`).join('')}
+      `;
+    }
+  };
+
+  const oldSendReady = window.sv36SendReadyToEmailScout;
+  window.sv36SendReadyToEmailScout = function(){
+    if (!Array.isArray(businesses)) return;
+    if (!Array.isArray(esContacts)) window.esContacts = esContacts = [];
+    const limit = Math.max(1, parseInt(q('sv36-batch-limit')?.value || '200', 10));
+    const already = new Set((esContacts || []).map(c => normEmailV39(c.email)));
+    const ready = businesses
+      .filter(b => (b.emailVerification && b.emailVerification.ready) || (b.email && b.status === 'found'))
+      .filter(b => normEmailV39(b.email || (Array.isArray(b.emails) ? b.emails[0] : '')))
+      .filter(b => !already.has(normEmailV39(b.email || (Array.isArray(b.emails) ? b.emails[0] : ''))))
+      .slice(0, limit);
+    ready.forEach(b => {
+      const email = normEmailV39(b.email || (Array.isArray(b.emails) ? b.emails[0] : ''));
+      esContacts.push({
+        name: cleanBizName ? cleanBizName(b.name || '') : (b.name || ''), email,
+        website: b.website || '', phone: b.phone || (Array.isArray(b.phones) ? b.phones[0] : '') || '',
+        category: b.category || b.industry || '', industry: b.industry || b.category || '', location: b.location || b.address || '',
+        rating: b.rating || '', reviews: b.reviews || '', sourceType: b.sourceType || b.source || ''
+      });
+      already.add(email);
+    });
+    if (typeof renderEsPreview === 'function') renderEsPreview();
+    if (typeof updateEsSendStats === 'function') updateEsSendStats();
+    const msg = `Added ${ready.length} active verified contacts to Email Scout.`;
+    const out = q('sv36-batch-result'); if (out) out.textContent = msg;
+    if (typeof toast === 'function') toast(msg, 'ok');
+    showContentTab('email-scout-content', q('tab-emailscout'));
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      const logo = q('topbar-logo'); const title = q('topbar-title');
+      if (logo) logo.textContent = '🧭 Scout App';
+      if (title) title.textContent = SCOUT_APP_VERSION + ' — Business Scouting System';
+      simplifyEmailScoutUpload();
+      if (typeof renderEsTemplates === 'function') renderEsTemplates();
+    } catch(e) { console.warn('Scout v39 init warning', e); }
   });
 })();
 
