@@ -7317,7 +7317,7 @@ function manualPollReplies() {
 
 <script>
 // ---------------------------------------------------------------
-// v51 — Gmail API automatic Send Message mode
+// v52 — Gmail API automatic Send Message mode
 // ---------------------------------------------------------------
 (function(){
   const VERSION = 'v51';
@@ -7491,9 +7491,240 @@ function manualPollReplies() {
   }
   window.startEsSend = function(){ sendAutomaticBatch(); };
   window.sendNextEs = function(){ sendAutomaticBatch(); };
-  function rename(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='v51 — Gmail API Auto Send'; }
+  function rename(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='v52 — Gmail API Auto Send'; }
   function init(){ addApiControls(); rename(); setInterval(refreshGmailAccountSelect, 5000); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+
+
+<script>
+/* Scout App v52 Gmail Connection Fix
+   - No false "connected" toast before backend token exchange succeeds
+   - Persistent connection error/status panel
+   - Backend diagnostic check
+   - Dynamic redirect URI matching current app URL
+*/
+(function(){
+  const VERSION='v52';
+  function q(id){ return document.getElementById(id); }
+  function safeJsonParse(s, fallback){ try { return JSON.parse(s); } catch(e){ return fallback; } }
+  function getSettings(){
+    const obj = {};
+    try {
+      for (let i=0;i<localStorage.length;i++) {
+        const k=localStorage.key(i);
+        if (!k) continue;
+        obj[k]=localStorage.getItem(k);
+      }
+    } catch(e) {}
+    return obj;
+  }
+  function getBackendUrl(){
+    try {
+      const direct = (q('backend-url-input') && q('backend-url-input').value || '').trim();
+      const saved = (window.settings && window.settings.backendUrl) || localStorage.getItem('backendUrl') || localStorage.getItem('scoutBackendUrl') || '';
+      return String(direct || saved || '').trim().replace(/\/$/, '');
+    } catch(e){ return ''; }
+  }
+  function getClientId(){
+    try {
+      const direct = (q('oauth-client-id') && q('oauth-client-id').value || '').trim();
+      const saved = (window.settings && window.settings.oauthClientId) || localStorage.getItem('oauthClientId') || '';
+      return String(direct || saved || '').trim();
+    } catch(e){ return ''; }
+  }
+  function getRedirectUri(){
+    // Google redirect URI must match exactly in Cloud Console.
+    // For your deployed app this should be https://scout-app-oyeola.vercel.app/
+    return window.location.origin + window.location.pathname;
+  }
+  function setOAuthStatus(message, type='info'){
+    const color = type==='ok' ? 'var(--green)' : type==='err' ? 'var(--red)' : type==='warn' ? 'var(--amber)' : 'var(--muted)';
+    const box = q('v52-gmail-status-box');
+    const el = q('oauth-status');
+    const html = String(message || '').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    if (box) { box.innerHTML = html; box.style.color=color; box.style.display='block'; }
+    if (el) { el.innerHTML = html; el.style.color=color; }
+    try { localStorage.setItem('scout_last_oauth_status', JSON.stringify({ message, type, at:new Date().toISOString() })); } catch(e) {}
+    try { if (typeof toast === 'function') toast(message.split('\n')[0], type==='err'?'err':'ok'); } catch(e) {}
+  }
+  function tokenMap(){ return safeJsonParse(localStorage.getItem('scout_gmail_tokens') || '{}', {}) || {}; }
+  function saveTokenMap(m){
+    localStorage.setItem('scout_gmail_tokens', JSON.stringify(m || {}));
+    try { window.gmailTokens = m || {}; } catch(e) {}
+  }
+  function tokenList(){ return Object.values(tokenMap()).filter(t => t && (t.email || t.access_token || t.refresh_token)); }
+  function renderStatusPanel(){
+    const oauthStatus = q('oauth-status');
+    if (!oauthStatus || q('v52-gmail-status-panel')) return;
+    const panel = document.createElement('div');
+    panel.id='v52-gmail-status-panel';
+    panel.style.cssText='margin-top:12px;border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12px;line-height:1.6';
+    panel.innerHTML = `
+      <div style="font-weight:800;color:var(--text);margin-bottom:6px">Gmail connection status</div>
+      <div id="v52-gmail-status-box" style="color:var(--muted);margin-bottom:10px">No Gmail connection checked yet.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <button type="button" class="topbar-btn" id="v52-refresh-gmail-status">Refresh Gmail status</button>
+        <button type="button" class="topbar-btn" id="v52-test-gmail-backend">Test Gmail backend</button>
+        <button type="button" class="topbar-btn" id="v52-clear-oauth-pending">Clear stuck OAuth state</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">Redirect URI to add in Google Cloud: <code style="background:var(--card2);padding:2px 5px;border-radius:4px" id="v52-redirect-uri"></code></div>
+    `;
+    oauthStatus.insertAdjacentElement('afterend', panel);
+    const r = q('v52-redirect-uri'); if (r) r.textContent = getRedirectUri();
+    q('v52-refresh-gmail-status').onclick = refreshGmailConnectionStatus;
+    q('v52-test-gmail-backend').onclick = testGmailBackend;
+    q('v52-clear-oauth-pending').onclick = function(){ localStorage.removeItem('oauth_pending'); setOAuthStatus('Cleared pending OAuth state. Try connecting Gmail again.', 'ok'); };
+  }
+  function refreshGmailConnectionStatus(){
+    renderStatusPanel();
+    const accounts = tokenList();
+    const backend = getBackendUrl();
+    const clientId = getClientId();
+    let lines=[];
+    lines.push(`Backend URL: ${backend ? 'saved' : 'missing'}`);
+    lines.push(`OAuth Client ID: ${clientId ? 'saved' : 'missing'}`);
+    lines.push(`Connected Gmail accounts: ${accounts.length}`);
+    accounts.forEach(a=>{
+      const exp = a.expires_at ? new Date(a.expires_at).toLocaleString() : 'unknown';
+      lines.push(`• ${a.email || 'unknown'} — access token: ${a.access_token?'yes':'no'}, refresh token: ${a.refresh_token?'yes':'no'}, expires: ${exp}`);
+    });
+    if (!accounts.length) lines.push('No account is connected because no saved Gmail token was found.');
+    setOAuthStatus(lines.join('\n'), accounts.length?'ok':'warn');
+    try { if (typeof renderGmailOAuthAccounts === 'function') renderGmailOAuthAccounts(); } catch(e) {}
+    try { if (typeof refreshGmailAccountSelect === 'function') refreshGmailAccountSelect(); } catch(e) {}
+  }
+  async function testGmailBackend(){
+    const backend = getBackendUrl();
+    if (!backend) { setOAuthStatus('Backend URL is missing. Save it in Settings first.', 'err'); return; }
+    setOAuthStatus('Testing Gmail backend…', 'info');
+    try {
+      const res = await fetch(backend + '/gmail/status');
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const lines = [
+        `Backend reachable: yes`,
+        `GOOGLE_CLIENT_SECRET set: ${data.google_client_secret_set ? 'yes' : 'NO'}`,
+        `Expected redirect URI: ${getRedirectUri()}`,
+        `Gmail exchange endpoint: ${data.endpoints && data.endpoints.exchange ? 'yes' : 'unknown'}`,
+      ];
+      if (!data.google_client_secret_set) lines.push('Fix: Add GOOGLE_CLIENT_SECRET in Render Environment, then redeploy/restart.');
+      setOAuthStatus(lines.join('\n'), data.google_client_secret_set ? 'ok' : 'err');
+    } catch(err){
+      setOAuthStatus('Gmail backend test failed: ' + err.message + '\nCheck Backend URL and Render deployment.', 'err');
+    }
+  }
+  // Override old save OAuth Client ID so it persists in both settings/localStorage.
+  window.saveOAuthClientId = function(){
+    const id = getClientId();
+    if (!id) { setOAuthStatus('Enter your OAuth Client ID first.', 'err'); q('oauth-client-id')?.focus(); return; }
+    try { if (typeof saveSetting === 'function') saveSetting('oauthClientId', id); } catch(e) {}
+    localStorage.setItem('oauthClientId', id);
+    setOAuthStatus('OAuth Client ID saved. Now click “Connect a Gmail Account”.', 'ok');
+  };
+  // Override Gmail connect. Validate first. Use dynamic redirect URI.
+  window.connectGmailAccount = function(){
+    const clientId = getClientId();
+    const backend = getBackendUrl();
+    if (!clientId) { setOAuthStatus('OAuth Client ID is missing. Paste it and click Save Client ID first.', 'err'); q('oauth-client-id')?.focus(); return; }
+    if (!backend) { setOAuthStatus('Backend URL is missing. Save Backend Server URL first. Gmail cannot finish connection without backend token exchange.', 'err'); q('backend-url-input')?.focus(); return; }
+    const state = 'gmail_connect_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+    const redirectUri = getRedirectUri();
+    const scopes = [
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.modify'
+    ].join(' ');
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: scopes,
+      access_type: 'offline',
+      prompt: 'consent select_account',
+      state
+    });
+    localStorage.setItem('oauth_pending', JSON.stringify({ state, time:Date.now(), redirect_uri: redirectUri, backendUrl: backend, client_id: clientId }));
+    setOAuthStatus('Opening Google sign-in…', 'info');
+    window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+  };
+  // Override callback. Only show connected after token is saved.
+  window.handleOAuthCallback = async function(){
+    renderStatusPanel();
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    const error = url.searchParams.get('error');
+    if (!code && !error) { refreshGmailConnectionStatus(); return; }
+    window.history.replaceState({}, '', window.location.pathname);
+    if (error) { setOAuthStatus('Google returned OAuth error: ' + error, 'err'); return; }
+    const pending = safeJsonParse(localStorage.getItem('oauth_pending') || '{}', {});
+    if (!pending.state || pending.state !== state) {
+      setOAuthStatus('OAuth state mismatch. This usually means the connection was started in another tab or old state was left behind. Click “Clear stuck OAuth state” and connect again.', 'err');
+      return;
+    }
+    const backend = (pending.backendUrl || getBackendUrl() || '').replace(/\/$/, '');
+    const clientId = pending.client_id || getClientId();
+    const redirectUri = pending.redirect_uri || getRedirectUri();
+    if (!backend) { setOAuthStatus('Gmail login returned, but Backend URL is missing. Save Backend URL and reconnect Gmail.', 'err'); return; }
+    if (!clientId) { setOAuthStatus('Gmail login returned, but OAuth Client ID is missing. Save Client ID and reconnect Gmail.', 'err'); return; }
+    setOAuthStatus('Google login succeeded. Exchanging token with backend…', 'info');
+    try {
+      const res = await fetch(backend + '/gmail/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, redirect_uri: redirectUri, client_id: clientId })
+      });
+      const data = await res.json().catch(()=>({ error:'Invalid JSON response from backend' }));
+      if (!res.ok || !data.access_token) {
+        throw new Error(data.error || data.setup_instructions || 'Token exchange failed');
+      }
+      const email = data.email || 'connected@gmail.com';
+      const map = tokenMap();
+      map[email] = {
+        email,
+        access_token: data.access_token,
+        refresh_token: data.refresh_token || map[email]?.refresh_token || '',
+        expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+        scopes: data.scope || '',
+        connected_at: new Date().toISOString()
+      };
+      saveTokenMap(map);
+      localStorage.removeItem('oauth_pending');
+      setOAuthStatus(`Gmail connected successfully: ${email}\nRefresh token: ${map[email].refresh_token ? 'present' : 'missing — reconnect with consent if sending later fails'}`, 'ok');
+      try { if (typeof renderGmailOAuthAccounts === 'function') renderGmailOAuthAccounts(); } catch(e) {}
+      try { if (typeof refreshGmailAccountSelect === 'function') refreshGmailAccountSelect(); } catch(e) {}
+      try { if (typeof pollGmailReplies === 'function') pollGmailReplies(); } catch(e) {}
+    } catch(err) {
+      setOAuthStatus('Gmail connection failed after Google login:\n' + err.message + '\n\nMost common fixes:\n1. Add GOOGLE_CLIENT_SECRET to Render env vars.\n2. Save correct Backend URL in Scout Settings.\n3. Add this redirect URI in Google Cloud: ' + redirectUri + '\n4. Redeploy/restart backend after env changes.', 'err');
+    }
+  };
+  // Override accounts renderer to make connected account visible permanently.
+  window.renderGmailOAuthAccounts = function(){
+    const el = q('gmail-oauth-accounts');
+    if (!el) return;
+    const accounts = tokenList();
+    if (!accounts.length) {
+      el.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">No accounts connected yet.</div>';
+      return;
+    }
+    el.innerHTML = accounts.map(acc => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--bg);border:1px solid var(--green);border-radius:8px;padding:8px 12px;margin-bottom:6px">
+        <div>
+          <div style="font-size:12px;color:var(--green);font-weight:800">✓ ${String(acc.email||'connected Gmail').replace(/</g,'&lt;')}</div>
+          <div style="font-size:10px;color:var(--muted)">Send token: ${acc.access_token?'yes':'no'} • Refresh token: ${acc.refresh_token?'yes':'no'}</div>
+        </div>
+        <button type="button" onclick="disconnectGmailAccount('${String(acc.email||'').replace(/'/g,"\\'")}')" style="background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;font-size:11px;padding:4px 8px">Disconnect</button>
+      </div>
+    `).join('');
+  };
+  window.addEventListener('load', function(){
+    renderStatusPanel();
+    const oid=q('oauth-client-id'); if (oid && getClientId()) oid.value=getClientId();
+    refreshGmailConnectionStatus();
+  });
 })();
 </script>
 
