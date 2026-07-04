@@ -4570,7 +4570,7 @@ async function getValidToken(tokenData) {
 
 // Handle OAuth callback on page load
 window.addEventListener('load', () => {
-  handleOAuthCallback();
+  if (window.handleOAuthCallback) window.handleOAuthCallback();
   renderGmailOAuthAccounts();
   // Load OAuth client ID into input
   if (settings.oauthClientId && document.getElementById('oauth-client-id')) {
@@ -7500,7 +7500,7 @@ function manualPollReplies() {
 
 
 <script>
-/* Scout App v52 Gmail Connection Fix
+/* Scout App v53 Gmail Connection Fix
    - No false "connected" toast before backend token exchange succeeds
    - Persistent connection error/status panel
    - Backend diagnostic check
@@ -7542,7 +7542,7 @@ function manualPollReplies() {
   }
   function setOAuthStatus(message, type='info'){
     const color = type==='ok' ? 'var(--green)' : type==='err' ? 'var(--red)' : type==='warn' ? 'var(--amber)' : 'var(--muted)';
-    const box = q('v52-gmail-status-box');
+    const box = q('v53-gmail-status-box');
     const el = q('oauth-status');
     const html = String(message || '').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
     if (box) { box.innerHTML = html; box.style.color=color; box.style.display='block'; }
@@ -7556,27 +7556,76 @@ function manualPollReplies() {
     try { window.gmailTokens = m || {}; } catch(e) {}
   }
   function tokenList(){ return Object.values(tokenMap()).filter(t => t && (t.email || t.access_token || t.refresh_token)); }
+  function isUnknownGmailEmail(email){
+    const e = String(email || '').trim().toLowerCase();
+    return !e || e === 'unknown@gmail.com' || e === 'connected@gmail.com' || e === 'connected gmail' || e === 'connected-gmail-account';
+  }
+  async function resolveGmailEmailWithBackend(token){
+    const backend = getBackendUrl();
+    if (!backend || !token) return '';
+    const res = await fetch(backend + '/gmail/profile', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        access_token: token.access_token || '',
+        refresh_token: token.refresh_token || '',
+        client_id: token.client_id || getClientId()
+      })
+    });
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok || !data.email) throw new Error(data.error || 'Could not resolve Gmail profile email');
+    if (data.access_token) token.access_token = data.access_token;
+    return data.email;
+  }
+  async function fixUnknownGmailAccounts(){
+    const map = tokenMap();
+    let fixed = 0;
+    const entries = Object.entries(map);
+    for (const [key, token] of entries) {
+      if (!isUnknownGmailEmail(token && token.email) && !isUnknownGmailEmail(key)) continue;
+      try {
+        const email = await resolveGmailEmailWithBackend(token);
+        if (email && !isUnknownGmailEmail(email)) {
+          delete map[key];
+          token.email = email;
+          token.resolved_at = new Date().toISOString();
+          map[email] = token;
+          fixed++;
+        }
+      } catch(e) {
+        setOAuthStatus('Could not fix unknown Gmail identity: ' + e.message + '\nPush backend v4.6 and redeploy, then try again.', 'err');
+        return;
+      }
+    }
+    saveTokenMap(map);
+    renderGmailOAuthAccounts();
+    refreshGmailConnectionStatus();
+    setOAuthStatus(fixed ? `Fixed ${fixed} Gmail account identity. Check Send Message again.` : 'No unknown Gmail account needed fixing.', fixed ? 'ok':'info');
+  }
+  window.fixUnknownGmailAccounts = fixUnknownGmailAccounts;
   function renderStatusPanel(){
     const oauthStatus = q('oauth-status');
-    if (!oauthStatus || q('v52-gmail-status-panel')) return;
+    if (!oauthStatus || q('v53-gmail-status-panel')) return;
     const panel = document.createElement('div');
-    panel.id='v52-gmail-status-panel';
+    panel.id='v53-gmail-status-panel';
     panel.style.cssText='margin-top:12px;border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);font-size:12px;line-height:1.6';
     panel.innerHTML = `
       <div style="font-weight:800;color:var(--text);margin-bottom:6px">Gmail connection status</div>
-      <div id="v52-gmail-status-box" style="color:var(--muted);margin-bottom:10px">No Gmail connection checked yet.</div>
+      <div id="v53-gmail-status-box" style="color:var(--muted);margin-bottom:10px">No Gmail connection checked yet.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-        <button type="button" class="topbar-btn" id="v52-refresh-gmail-status">Refresh Gmail status</button>
-        <button type="button" class="topbar-btn" id="v52-test-gmail-backend">Test Gmail backend</button>
-        <button type="button" class="topbar-btn" id="v52-clear-oauth-pending">Clear stuck OAuth state</button>
+        <button type="button" class="topbar-btn" id="v53-refresh-gmail-status">Refresh Gmail status</button>
+        <button type="button" class="topbar-btn" id="v53-test-gmail-backend">Test Gmail backend</button>
+        <button type="button" class="topbar-btn" id="v53-fix-unknown-gmail">Fix unknown Gmail email</button>
+        <button type="button" class="topbar-btn" id="v53-clear-oauth-pending">Clear stuck OAuth state</button>
       </div>
-      <div style="font-size:11px;color:var(--muted)">Redirect URI to add in Google Cloud: <code style="background:var(--card2);padding:2px 5px;border-radius:4px" id="v52-redirect-uri"></code></div>
+      <div style="font-size:11px;color:var(--muted)">Redirect URI to add in Google Cloud: <code style="background:var(--card2);padding:2px 5px;border-radius:4px" id="v53-redirect-uri"></code></div>
     `;
     oauthStatus.insertAdjacentElement('afterend', panel);
-    const r = q('v52-redirect-uri'); if (r) r.textContent = getRedirectUri();
-    q('v52-refresh-gmail-status').onclick = refreshGmailConnectionStatus;
-    q('v52-test-gmail-backend').onclick = testGmailBackend;
-    q('v52-clear-oauth-pending').onclick = function(){ localStorage.removeItem('oauth_pending'); setOAuthStatus('Cleared pending OAuth state. Try connecting Gmail again.', 'ok'); };
+    const r = q('v53-redirect-uri'); if (r) r.textContent = getRedirectUri();
+    q('v53-refresh-gmail-status').onclick = refreshGmailConnectionStatus;
+    q('v53-test-gmail-backend').onclick = testGmailBackend;
+    const fixBtn = q('v53-fix-unknown-gmail'); if (fixBtn) fixBtn.onclick = fixUnknownGmailAccounts;
+    q('v53-clear-oauth-pending').onclick = function(){ localStorage.removeItem('oauth_pending'); setOAuthStatus('Cleared pending OAuth state. Try connecting Gmail again.', 'ok'); };
   }
   function refreshGmailConnectionStatus(){
     renderStatusPanel();
@@ -7613,7 +7662,10 @@ function manualPollReplies() {
       if (!data.google_client_secret_set) lines.push('Fix: Add GOOGLE_CLIENT_SECRET in Render Environment, then redeploy/restart.');
       setOAuthStatus(lines.join('\n'), data.google_client_secret_set ? 'ok' : 'err');
     } catch(err){
-      setOAuthStatus('Gmail backend test failed: ' + err.message + '\nCheck Backend URL and Render deployment.', 'err');
+      const extra = String(err.message||'').includes('404')
+        ? '\nHTTP 404 means this backend does not have /gmail/status yet. Push backend v4.6/v4.5 to Render or check that Backend URL points to your Scout backend, not the Vercel frontend.'
+        : '';
+      setOAuthStatus('Gmail backend test failed: ' + err.message + extra + '\nCheck Backend URL and Render deployment.', 'err');
     }
   }
   // Override old save OAuth Client ID so it persists in both settings/localStorage.
@@ -7681,15 +7733,25 @@ function manualPollReplies() {
       if (!res.ok || !data.access_token) {
         throw new Error(data.error || data.setup_instructions || 'Token exchange failed');
       }
-      const email = data.email || 'connected@gmail.com';
-      const map = tokenMap();
-      map[email] = {
-        email,
+      let email = data.email || '';
+      const newToken = {
+        email: email || 'resolving@gmail.com',
         access_token: data.access_token,
-        refresh_token: data.refresh_token || map[email]?.refresh_token || '',
+        refresh_token: data.refresh_token || '',
         expires_at: Date.now() + (data.expires_in || 3600) * 1000,
         scopes: data.scope || '',
         connected_at: new Date().toISOString()
+      };
+      if (isUnknownGmailEmail(email)) {
+        setOAuthStatus('Token received. Resolving actual Gmail address…', 'info');
+        email = await resolveGmailEmailWithBackend(newToken);
+      }
+      if (isUnknownGmailEmail(email)) throw new Error('Scout could not resolve the real Gmail address. Backend must support /gmail/profile.');
+      newToken.email = email;
+      const map = tokenMap();
+      map[email] = {
+        ...newToken,
+        refresh_token: newToken.refresh_token || map[email]?.refresh_token || '',
       };
       saveTokenMap(map);
       localStorage.removeItem('oauth_pending');
