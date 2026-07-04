@@ -1429,11 +1429,16 @@ function detectIndustry(bizName, profileLink) {
 // ---------------------------------------------------------------
 // DATA STORE
 // ---------------------------------------------------------------
-let businesses = JSON.parse(localStorage.getItem('sv13_businesses') || '[]');
+// Scout App v44 resource-safe data store
+// localStorage is now used only for settings + small metadata.
+// Leads/businesses are persisted in IndexedDB so large queues do not keep rewriting one huge localStorage value.
+let businesses = [];
 let settings = JSON.parse(localStorage.getItem('sv13_settings') || '{}');
 // Set defaults for new users
 if (!settings.senderName) settings.senderName = 'Olalekan Oyekunle';
-if (!settings.signature) settings.signature = 'Best regards,\nOlalekan Oyekunle\nElevate Business Solutions';
+if (!settings.signature) settings.signature = `Best regards,
+Olalekan Oyekunle
+Elevate Business Solutions`;
 if (!settings.emailSubject) settings.emailSubject = 'Quick question for {name}';
 let activeId = null;
 let queueFilter = 'all';
@@ -1443,7 +1448,84 @@ let autoScoutStats = { done: 0, found: 0 };
 let isPaused = false;
 let batchApprovals = {}; // id -> {approved, skipped, message}
 
-function save() { localStorage.setItem('sv13_businesses', JSON.stringify(businesses)); }
+const SCOUT_DB_NAME = 'scout_app_local_db_v43';
+const SCOUT_DB_VERSION = 1;
+const SCOUT_LEADS_STORE = 'leads';
+let scoutDb = null;
+let scoutDbReady = false;
+let scoutSaveTimer = null;
+let scoutLastSavePromise = Promise.resolve();
+let scoutStorageMode = 'loading';
+
+function scoutOpenDb() {
+  return new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) { reject(new Error('IndexedDB not available')); return; }
+    const req = indexedDB.open(SCOUT_DB_NAME, SCOUT_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(SCOUT_LEADS_STORE)) {
+        const store = db.createObjectStore(SCOUT_LEADS_STORE, { keyPath: 'id' });
+        store.createIndex('status', 'status', { unique: false });
+        store.createIndex('email', 'email', { unique: false });
+        store.createIndex('source', 'source', { unique: false });
+        store.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+  });
+}
+
+function scoutDbGetAllLeads() {
+  return new Promise((resolve, reject) => {
+    const tx = scoutDb.transaction([SCOUT_LEADS_STORE], 'readonly');
+    const req = tx.objectStore(SCOUT_LEADS_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error || new Error('IndexedDB read failed'));
+  });
+}
+
+function scoutDbPutLead(lead) {
+  if (!scoutDbReady || !scoutDb || !lead || !lead.id) return;
+  try {
+    const tx = scoutDb.transaction([SCOUT_LEADS_STORE], 'readwrite');
+    tx.objectStore(SCOUT_LEADS_STORE).put(lead);
+  } catch (e) { console.warn('Scout IndexedDB put warning', e); }
+}
+
+function scoutDbSaveAllImmediate() {
+  if (!scoutDbReady || !scoutDb) return Promise.resolve();
+  const payload = Array.isArray(businesses) ? businesses.slice() : [];
+  scoutLastSavePromise = scoutLastSavePromise.then(() => new Promise((resolve, reject) => {
+    try {
+      const tx = scoutDb.transaction([SCOUT_LEADS_STORE], 'readwrite');
+      const store = tx.objectStore(SCOUT_LEADS_STORE);
+      store.clear();
+      payload.forEach(b => { if (b && b.id) store.put(b); });
+      tx.oncomplete = () => {
+        localStorage.setItem('sv13_businesses_meta', JSON.stringify({ count: payload.length, updatedAt: new Date().toISOString(), storage: 'indexeddb' }));
+        try { localStorage.removeItem('sv13_businesses'); } catch(e) {}
+        scoutStorageMode = 'indexeddb';
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error || new Error('IndexedDB save failed'));
+    } catch (e) { reject(e); }
+  })).catch(e => { console.warn('Scout IndexedDB save warning', e); });
+  return scoutLastSavePromise;
+}
+
+function scoutScheduleFullSave(delayMs = 900) {
+  clearTimeout(scoutSaveTimer);
+  scoutSaveTimer = setTimeout(() => scoutDbSaveAllImmediate(), delayMs);
+}
+
+function save() {
+  // Never write the full businesses array to localStorage.
+  // This prevents browser freezes when queues reach thousands of leads.
+  localStorage.setItem('sv13_businesses_meta', JSON.stringify({ count: businesses.length, updatedAt: new Date().toISOString(), storage: scoutDbReady ? 'indexeddb' : 'memory' }));
+  if (scoutDbReady) scoutScheduleFullSave();
+}
+
 function saveSetting(k, v) { settings[k] = v; localStorage.setItem('sv13_settings', JSON.stringify(settings)); }
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function now() { return new Date().toISOString(); }
@@ -1454,7 +1536,47 @@ function updateBiz(id, changes) {
   const i = businesses.findIndex(b => b.id === id);
   if (i < 0) return;
   businesses[i] = { ...businesses[i], ...changes, updatedAt: now() };
+  scoutDbPutLead(businesses[i]);
   save();
+}
+
+async function scoutBootInit(initFn) {
+  const legacyRaw = localStorage.getItem('sv13_businesses');
+  let legacyBusinesses = [];
+  if (legacyRaw) {
+    try { legacyBusinesses = JSON.parse(legacyRaw || '[]') || []; } catch(e) { legacyBusinesses = []; }
+  }
+  try {
+    scoutDb = await scoutOpenDb();
+    scoutDbReady = true;
+    const saved = await scoutDbGetAllLeads();
+    if (saved && saved.length) {
+      businesses = saved.sort((a,b) => String(b.updatedAt || b.addedAt || '').localeCompare(String(a.updatedAt || a.addedAt || '')));
+      scoutStorageMode = 'indexeddb';
+    } else if (legacyBusinesses.length) {
+      businesses = legacyBusinesses;
+      await scoutDbSaveAllImmediate();
+      scoutStorageMode = 'migrated-indexeddb';
+    } else {
+      businesses = [];
+      scoutStorageMode = 'indexeddb-empty';
+    }
+  } catch (e) {
+    // Fallback keeps the app usable, but large queues may be slower until IndexedDB is available.
+    console.warn('Scout IndexedDB unavailable; using localStorage fallback', e);
+    businesses = legacyBusinesses;
+    scoutStorageMode = 'localStorage-fallback';
+    window.__SCOUT_LOCALSTORAGE_FALLBACK__ = true;
+  }
+  if (typeof initFn === 'function') initFn();
+  setTimeout(() => {
+    try {
+      if (typeof toast === 'function') {
+        const label = scoutStorageMode.includes('indexeddb') ? 'IndexedDB lead storage active' : 'Storage fallback active';
+        toast(`${label} — ${businesses.length.toLocaleString()} leads loaded`, scoutStorageMode.includes('fallback') ? 'err' : 'ok');
+      }
+    } catch(e) {}
+  }, 800);
 }
 
 // ---------------------------------------------------------------
@@ -3607,7 +3729,7 @@ window.addEventListener('ElevateScoutDorkLead', (e) => {
   }
 }
 
-init();
+scoutBootInit(init);
 // ---------------------------------------------------------------
 // EMAIL SCOUT
 // ---------------------------------------------------------------
@@ -5845,6 +5967,415 @@ function manualPollReplies() {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initV42); else initV42();
 })();
 
+
+// ---------------------------------------------------------------
+// SCOUT APP v44 RESOURCE-SAFE PATCH
+// IndexedDB storage, paginated queue rendering, and batch-friendly saves.
+// ---------------------------------------------------------------
+(function(){
+  const VERSION = 'Scout App v44';
+  const PAGE_SIZE = 30;
+  window.scoutQueueLimit = window.scoutQueueLimit || PAGE_SIZE;
+  const q = id => document.getElementById(id);
+  const safeArr = v => Array.isArray(v) ? v : [];
+  const html = v => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  function cleanName(b){ try { return typeof cleanBizName === 'function' ? cleanBizName(b.name || '') : (b.name || 'Unknown'); } catch(e) { return b.name || 'Unknown'; } }
+  function normStatus(s){ return String(s || '').toLowerCase(); }
+  function leadHasEmail(b){ return !!(b && (b.email || (Array.isArray(b.emails) && b.emails[0]))); }
+  function followUps(){ try { return typeof getFollowUpsDue === 'function' ? getFollowUpsDue() : []; } catch(e) { return []; } }
+  function passesQueueFilter(b, search){
+    const s = normStatus(b.status);
+    if (queueFilter === 'followup') return followUps().some(d => d.id === b.id);
+    if (queueFilter === 'blocked') return !!b.blockedByDedup;
+    if (queueFilter === 'dorking') return b.source === 'dorking';
+    if (queueFilter === 'maps') return b.source !== 'dorking';
+    if (queueFilter !== 'all' && s !== queueFilter) return false;
+    const needle = String(search || '').toLowerCase();
+    if (needle) {
+      const hay = [b.name, b.email, b.website, b.domain, b.industry, b.category, b.location, b.address].join(' ').toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  }
+  function statusLabel(sc){
+    return ({ pending:'Pending', scanning:'Scanning…', found:'Email Found', ready:'Ready to Send', review:'Review', risky:'Risky', invalid:'Invalid', duplicate:'Duplicate', contacted:'Contacted', replied:'Replied', closed:'Closed', no_email:'No Email' })[sc] || sc;
+  }
+  function renderStorageBadge(){
+    let bar = q('scout-storage-badge');
+    if (!bar) {
+      const host = q('qp-head');
+      if (!host) return;
+      bar = document.createElement('div');
+      bar.id = 'scout-storage-badge';
+      bar.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);background:rgba(91,110,245,.08);border:1px solid rgba(91,110,245,.18);border-radius:7px;padding:4px 7px;margin-top:4px;line-height:1.3';
+      host.appendChild(bar);
+    }
+    const mode = window.__SCOUT_LOCALSTORAGE_FALLBACK__ ? 'localStorage fallback' : 'IndexedDB';
+    bar.innerHTML = `💾 ${mode} storage • ${safeArr(businesses).length.toLocaleString()} leads • queue renders ${PAGE_SIZE} at a time`;
+  }
+  function buildStats(){
+    const stats = {};
+    safeArr(businesses).forEach(b => { const s = normStatus(b.status || 'pending'); stats[s] = (stats[s] || 0) + 1; });
+    return stats;
+  }
+  window.renderQueue = function(){
+    try { if (typeof renderFollowUpBanner === 'function') renderFollowUpBanner(); } catch(e) {}
+    renderStorageBadge();
+    const search = q('qp-search')?.value || '';
+    const renderKey = `${queueFilter || 'all'}::${String(search || '').toLowerCase()}`;
+    if (window.__scoutLastQueueRenderKey !== renderKey) {
+      window.__scoutLastQueueRenderKey = renderKey;
+      window.scoutQueueLimit = PAGE_SIZE;
+    }
+    const all = safeArr(businesses);
+    const list = all.filter(b => passesQueueFilter(b, search));
+    const stats = buildStats();
+    const statDef = [
+      { key:'pending', color:'var(--pending)', label:'Pending' },
+      { key:'scanning', color:'var(--scanning)', label:'Scanning' },
+      { key:'found', color:'var(--found)', label:'Email Found' },
+      { key:'ready', color:'var(--green)', label:'Ready to Send' },
+      { key:'review', color:'var(--blue)', label:'Review' },
+      { key:'risky', color:'var(--amber)', label:'Risky' },
+      { key:'invalid', color:'var(--red)', label:'Invalid' },
+      { key:'duplicate', color:'var(--purple)', label:'Duplicate' },
+      { key:'contacted', color:'var(--contacted)', label:'Contacted' },
+      { key:'replied', color:'var(--replied)', label:'Replied' },
+      { key:'no_email', color:'var(--red)', label:'No Email' }
+    ];
+    const statsEl = q('qp-stats');
+    if (statsEl) statsEl.innerHTML = statDef.filter(s => stats[s.key]).map(s => `<div class="qp-stat"><div class="qp-stat-dot" style="background:${s.color}"></div><span class="qp-stat-count">${(stats[s.key] || 0).toLocaleString()}</span><span class="qp-stat-label">${s.label}</span></div>`).join('');
+    const container = q('queue-list');
+    if (!container) return;
+    if (!list.length) {
+      container.innerHTML = `<div id="queue-empty"><div class="icon">${all.length ? '🔍' : '📋'}</div><p>${all.length ? 'No matches for this filter' : 'Upload a CSV to load businesses'}</p></div>`;
+      return;
+    }
+    const limit = Math.min(window.scoutQueueLimit || PAGE_SIZE, list.length);
+    const visible = list.slice(0, limit);
+    container.innerHTML = visible.map(b => {
+      const sc = normStatus(b.status || 'pending');
+      const isScanning = sc === 'scanning';
+      return `<div class="qi${b.id === activeId ? ' active' : ''}" onclick="selectBiz('${b.id}')">
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
+          <div class="qi-name" style="margin:0;flex:1">${html(cleanName(b))}</div>
+          ${b.source === 'dorking' ? '<span style="font-size:9px;background:rgba(99,102,241,.2);color:var(--accent);padding:1px 5px;border-radius:4px;flex-shrink:0">WEB</span>' : ''}
+        </div>
+        <div class="qi-meta">
+          ${isScanning ? '<span class="qi-scanning-pulse"></span>' : ''}
+          <span class="qi-status s-${sc}">${statusLabel(sc)}</span>
+          ${b.rating ? `<span class="rating-star">★</span><span>${html(b.rating)}</span>` : ''}
+          ${b.reviews ? `<span>${html(b.reviews)} reviews</span>` : ''}
+        </div>
+        ${leadHasEmail(b) ? `<div class="qi-email">✉ ${html(b.email || (b.emails || [])[0])}</div>` : ''}
+        ${b.website || b.domain ? `<div class="qi-profile-link">🌐 ${html(b.website || b.domain)}</div>` : ''}
+        ${b.status === 'contacted' && !b.theirReply && b.contactedAt && (Date.now()-new Date(b.contactedAt).getTime())>86400000 ? `<div style="font-size:10px;margin-top:2px;color:var(--amber)">⏰ Follow-up due</div>` : ''}
+        ${b.theirReply && b.status === 'replied' ? `<div style="font-size:10px;margin-top:2px;color:var(--accent)">💬 Replied</div>` : ''}
+        ${b.blockedByDedup ? `<div style="font-size:10px;margin-top:2px;color:var(--amber)">🚫 Already scouted by team</div>` : ''}
+        <button onclick="event.stopPropagation();deleteBiz('${b.id}')" style="position:absolute;top:6px;right:6px;background:transparent;border:none;color:var(--faint);font-size:13px;cursor:pointer;padding:2px 5px;border-radius:4px;line-height:1" title="Delete">✕</button>
+      </div>`;
+    }).join('') + (limit < list.length ? `<button class="qp-action" style="margin:8px auto 12px;display:block;padding:8px 14px" onclick="window.scoutQueueLimit = Math.min((window.scoutQueueLimit || ${PAGE_SIZE}) + ${PAGE_SIZE}, ${list.length}); renderQueue();">Load 30 more — showing ${limit.toLocaleString()} of ${list.length.toLocaleString()}</button>` : `<div style="font-size:10px;color:var(--muted);text-align:center;padding:8px">Showing ${limit.toLocaleString()} of ${list.length.toLocaleString()} matching leads</div>`);
+  };
+  const oldSetFilter = typeof setFilter === 'function' ? setFilter : null;
+  window.setFilter = function(f, el){
+    queueFilter = f;
+    window.scoutQueueLimit = PAGE_SIZE;
+    document.querySelectorAll('.qp-action').forEach(e => e.classList.remove('active'));
+    if (el) el.classList.add('active');
+    renderQueue();
+  };
+  const search = q('qp-search');
+  if (search && !search.__v44_patched) {
+    search.__v44_patched = true;
+    search.addEventListener('input', () => { window.scoutQueueLimit = PAGE_SIZE; window.__scoutLastQueueRenderKey = ''; setTimeout(renderQueue, 0); });
+  }
+  // Make import/backup operations resource safe.
+  const oldExportJson = typeof exportJson === 'function' ? exportJson : null;
+  window.exportJson = function(){
+    const data = JSON.stringify({ businesses: safeArr(businesses), settings, exportedAt: new Date().toISOString(), storage: 'indexeddb-v44' }, null, 2);
+    const blob = new Blob([data], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `scout-app-backup-${new Date().toISOString().slice(0,10)}.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1200);
+    try { toast(`Exported ${(businesses || []).length.toLocaleString()} leads`, 'ok'); } catch(e) {}
+  };
+  function initV43(){
+    const logo = q('topbar-logo'), title = q('topbar-title');
+    if (logo) logo.textContent = '🧭 Scout App';
+    if (title) title.textContent = VERSION + ' — Resource-Safe Workflow';
+    renderStorageBadge();
+    if (typeof renderQueue === 'function') renderQueue();
+    try { if (typeof updateAsStats === 'function') updateAsStats(); } catch(e) {}
+    try { if (typeof updateBatchBtn === 'function') updateBatchBtn(); } catch(e) {}
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initV43); else initV43();
+})();
+
 </script>
+
+<script>
+// ---------------------------------------------------------------
+// SCOUT APP v45 - Manual Review -> Ready to Send approval.
+// Keeps v43 IndexedDB + v44 30-at-a-time Load More.
+// Adds selection controls in Review filter and Verify & Send tab.
+// ---------------------------------------------------------------
+(function(){
+  const VERSION = 'Scout App v45';
+  const PAGE_SIZE = 30;
+  const q = id => document.getElementById(id);
+  const safeArr = v => Array.isArray(v) ? v : [];
+  const html = v => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const normEmail = email => String(email || '').trim().toLowerCase().replace(/^mailto:/,'').replace(/[;,.)\]]+$/g,'').replace(/^[\[(]+/g,'');
+  const emailOf = b => normEmail((b && (b.email || (Array.isArray(b.emails) ? b.emails[0] : ''))) || '');
+  const normStatus = s => String(s || 'pending').toLowerCase();
+  const cleanName = b => { try { return typeof cleanBizName === 'function' ? cleanBizName(b.name || '') : (b.name || 'Unknown'); } catch(e) { return b.name || 'Unknown'; } };
+  const followUps = () => { try { return typeof getFollowUpsDue === 'function' ? getFollowUpsDue() : []; } catch(e) { return []; } };
+  window.scoutSelectedReviewIds = window.scoutSelectedReviewIds || new Set();
+
+  function saveNow(){ try { if (typeof save === 'function') save(); } catch(e) {} }
+  function toastNow(msg,type){ try { if (typeof toast === 'function') toast(msg,type || 'ok'); } catch(e) {} }
+  function rerender(){ try { if (typeof renderQueue === 'function') renderQueue(); } catch(e) {} try { if (typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab(); } catch(e) {} try { if (typeof updateAsStats === 'function') updateAsStats(); } catch(e) {} }
+  function isProtectedStatus(status){ return ['contacted','replied','closed'].includes(normStatus(status)); }
+
+  function statusLabel(sc){
+    return ({ pending:'Pending', scanning:'Scanning…', found:'Email Found', ready:'Ready to Send', ready_to_send:'Ready to Send', review:'Review', risky:'Risky', invalid:'Invalid', duplicate:'Duplicate', contacted:'Contacted', replied:'Replied', closed:'Closed', no_email:'No Email' })[normStatus(sc)] || sc;
+  }
+  function statusClass(sc){ return 's-' + (normStatus(sc) === 'ready' ? 'ready_to_send' : normStatus(sc)); }
+  function leadHasEmail(b){ return !!emailOf(b); }
+  function passesQueueFilter(b, search){
+    const s = normStatus(b.status);
+    const f = window.queueFilter || queueFilter || 'all';
+    if (f === 'followup') return followUps().some(d => d.id === b.id);
+    if (f === 'blocked') return !!b.blockedByDedup;
+    if (f === 'dorking') return b.source === 'dorking';
+    if (f === 'maps') return b.source !== 'dorking';
+    if (f !== 'all' && s !== f) return false;
+    const needle = String(search || '').toLowerCase();
+    if (needle) {
+      const hay = [b.name, b.email, b.website, b.domain, b.industry, b.category, b.location, b.address].join(' ').toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  }
+  function buildStats(){
+    const stats = {};
+    safeArr(window.businesses || businesses).forEach(b => { const s = normStatus(b.status || 'pending'); stats[s] = (stats[s] || 0) + 1; });
+    return stats;
+  }
+  function markReviewReady(b){
+    if (!b || isProtectedStatus(b.status)) return false;
+    const email = emailOf(b);
+    if (!email || normStatus(b.status) !== 'review') return false;
+    b.status = 'ready_to_send';
+    b.readyToSend = true;
+    b.readyToEmailScout = true;
+    b.needsVerification = false;
+    const existing = b.emailVerification || {};
+    b.emailVerification = {
+      ...existing,
+      email,
+      status: 'READY',
+      ready: true,
+      manuallyApproved: true,
+      score: Math.max(80, Number(existing.score || 0)),
+      reasons: ((existing.reasons || existing.reason || 'Review lead') + '; manually approved from Review').replace(/^;\s*/, '')
+    };
+    b.reviewApprovedAt = new Date().toISOString();
+    b.verifiedAt = b.verifiedAt || new Date().toISOString();
+    b.updatedAt = (typeof now === 'function') ? now() : new Date().toISOString();
+    return true;
+  }
+
+  window.sv45ToggleReviewSelect = function(id, checked){
+    if (!window.scoutSelectedReviewIds) window.scoutSelectedReviewIds = new Set();
+    if (checked) window.scoutSelectedReviewIds.add(id); else window.scoutSelectedReviewIds.delete(id);
+    const count = q('sv45-selected-review-count');
+    if (count) count.textContent = window.scoutSelectedReviewIds.size.toLocaleString();
+  };
+
+  window.sv45ClearReviewSelection = function(){
+    window.scoutSelectedReviewIds = new Set();
+    document.querySelectorAll('.sv45-review-check').forEach(cb => cb.checked = false);
+    const count = q('sv45-selected-review-count'); if (count) count.textContent = '0';
+  };
+
+  window.sv45SelectVisibleReviews = function(){
+    if (!window.scoutSelectedReviewIds) window.scoutSelectedReviewIds = new Set();
+    document.querySelectorAll('.sv45-review-check').forEach(cb => { cb.checked = true; window.scoutSelectedReviewIds.add(cb.value); });
+    const count = q('sv45-selected-review-count'); if (count) count.textContent = window.scoutSelectedReviewIds.size.toLocaleString();
+  };
+
+  window.sv45ApproveReviewToReady = function(mode){
+    const all = safeArr(window.businesses || businesses);
+    let candidates = [];
+    if (mode === 'visible') {
+      candidates = [...document.querySelectorAll('.sv45-review-check')].map(cb => all.find(b => b.id === cb.value)).filter(Boolean);
+    } else if (mode === 'all') {
+      candidates = all.filter(b => normStatus(b.status) === 'review' && emailOf(b));
+    } else {
+      const ids = window.scoutSelectedReviewIds || new Set();
+      candidates = [...ids].map(id => all.find(b => b.id === id)).filter(Boolean);
+    }
+    let moved = 0;
+    candidates.forEach(b => { if (markReviewReady(b)) moved++; });
+    window.scoutSelectedReviewIds = new Set();
+    saveNow(); rerender();
+    const msg = `Moved ${moved} Review lead${moved === 1 ? '' : 's'} to Ready to Send.`;
+    const out = q('sv45-review-action-result'); if (out) out.textContent = msg;
+    toastNow(msg, moved ? 'ok' : 'err');
+    return moved;
+  };
+
+  function renderStorageBadge(){
+    let bar = q('scout-storage-badge');
+    if (!bar) {
+      const host = q('qp-head'); if (!host) return;
+      bar = document.createElement('div'); bar.id = 'scout-storage-badge';
+      bar.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);background:rgba(91,110,245,.08);border:1px solid rgba(91,110,245,.18);border-radius:7px;padding:4px 7px;margin-top:4px;line-height:1.3';
+      host.appendChild(bar);
+    }
+    const mode = window.__SCOUT_LOCALSTORAGE_FALLBACK__ ? 'localStorage fallback' : 'IndexedDB';
+    bar.innerHTML = `💾 ${mode} storage • ${safeArr(window.businesses || businesses).length.toLocaleString()} leads • queue renders ${PAGE_SIZE} at a time`;
+  }
+
+  window.renderQueue = function(){
+    try { if (typeof renderFollowUpBanner === 'function') renderFollowUpBanner(); } catch(e) {}
+    renderStorageBadge();
+    const search = q('qp-search')?.value || '';
+    const f = window.queueFilter || queueFilter || 'all';
+    const renderKey = `${f}::${String(search || '').toLowerCase()}`;
+    if (window.__scoutLastQueueRenderKey !== renderKey) { window.__scoutLastQueueRenderKey = renderKey; window.scoutQueueLimit = PAGE_SIZE; }
+    const all = safeArr(window.businesses || businesses);
+    const list = all.filter(b => passesQueueFilter(b, search));
+    const stats = buildStats();
+    const statDef = [
+      { key:'pending', color:'var(--pending)', label:'Pending' },
+      { key:'scanning', color:'var(--scanning)', label:'Scanning' },
+      { key:'found', color:'var(--found)', label:'Email Found' },
+      { key:'ready_to_send', color:'var(--green)', label:'Ready to Send' },
+      { key:'review', color:'var(--blue)', label:'Review' },
+      { key:'risky', color:'var(--amber)', label:'Risky' },
+      { key:'invalid', color:'var(--red)', label:'Invalid' },
+      { key:'duplicate', color:'var(--purple)', label:'Duplicate' },
+      { key:'contacted', color:'var(--contacted)', label:'Contacted' },
+      { key:'replied', color:'var(--replied)', label:'Replied' },
+      { key:'no_email', color:'var(--red)', label:'No Email' }
+    ];
+    const statsEl = q('qp-stats');
+    if (statsEl) statsEl.innerHTML = statDef.filter(s => stats[s.key]).map(s => `<div class="qp-stat"><div class="qp-stat-dot" style="background:${s.color}"></div><span class="qp-stat-count">${(stats[s.key] || 0).toLocaleString()}</span><span class="qp-stat-label">${s.label}</span></div>`).join('');
+    const container = q('queue-list'); if (!container) return;
+    if (!list.length) {
+      container.innerHTML = `<div id="queue-empty"><div class="icon">${all.length ? '🔍' : '📋'}</div><p>${all.length ? 'No matches for this filter' : 'Upload a CSV to load businesses'}</p></div>`;
+      return;
+    }
+    const limit = Math.min(window.scoutQueueLimit || PAGE_SIZE, list.length);
+    const visible = list.slice(0, limit);
+    let reviewActionBar = '';
+    if (f === 'review') {
+      reviewActionBar = `<div style="position:sticky;top:0;z-index:3;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px;margin:0 0 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <strong style="font-size:11px;color:var(--text)">Review actions</strong>
+        <button class="qp-action" onclick="event.stopPropagation();sv45SelectVisibleReviews()">Select visible 30</button>
+        <button class="qp-action" onclick="event.stopPropagation();sv45ApproveReviewToReady('selected')">Move selected to Ready</button>
+        <button class="qp-action" onclick="event.stopPropagation();sv45ApproveReviewToReady('visible')">Move visible to Ready</button>
+        <button class="qp-action" onclick="event.stopPropagation();sv45ClearReviewSelection()">Clear</button>
+        <span style="font-size:11px;color:var(--muted)">Selected: <span id="sv45-selected-review-count">${(window.scoutSelectedReviewIds?.size || 0).toLocaleString()}</span></span>
+      </div>`;
+    }
+    container.innerHTML = reviewActionBar + visible.map(b => {
+      const sc = normStatus(b.status || 'pending');
+      const isReview = sc === 'review';
+      const isScanning = sc === 'scanning';
+      const email = emailOf(b);
+      return `<div class="qi${b.id === activeId ? ' active' : ''}" onclick="selectBiz('${b.id}')">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+          ${isReview ? `<input class="sv45-review-check" type="checkbox" value="${html(b.id)}" ${window.scoutSelectedReviewIds?.has(b.id) ? 'checked' : ''} onclick="event.stopPropagation()" onchange="sv45ToggleReviewSelect('${html(b.id)}', this.checked)" title="Select Review lead">` : ''}
+          <div class="qi-name" style="margin:0;flex:1">${html(cleanName(b))}</div>
+          ${b.source === 'dorking' ? '<span style="font-size:9px;background:rgba(99,102,241,.2);color:var(--accent);padding:1px 5px;border-radius:4px;flex-shrink:0">WEB</span>' : ''}
+        </div>
+        <div class="qi-meta">
+          ${isScanning ? '<span class="qi-scanning-pulse"></span>' : ''}
+          <span class="qi-status ${statusClass(sc)}">${statusLabel(sc)}</span>
+          ${b.emailVerification && email ? `<span style="font-size:10px;color:var(--muted)">${html(b.emailVerification.status || '')} · ${html(b.emailVerification.score || 0)}</span>` : ''}
+          ${b.rating ? `<span class="rating-star">★</span><span>${html(b.rating)}</span>` : ''}
+          ${b.reviews ? `<span>${html(b.reviews)} reviews</span>` : ''}
+        </div>
+        ${email ? `<div class="qi-email">✉ ${html(email)}${sc === 'found' ? ' · needs verification' : ''}</div>` : ''}
+        ${b.website || b.domain ? `<div class="qi-profile-link">🌐 ${html(b.website || b.domain)}</div>` : ''}
+        ${isReview ? `<div style="margin-top:6px"><button class="qp-action" onclick="event.stopPropagation(); window.scoutSelectedReviewIds = new Set(['${html(b.id)}']); sv45ApproveReviewToReady('selected')">Move this to Ready</button></div>` : ''}
+        ${b.status === 'contacted' && !b.theirReply && b.contactedAt && (Date.now()-new Date(b.contactedAt).getTime())>86400000 ? `<div style="font-size:10px;margin-top:2px;color:var(--amber)">⏰ Follow-up due</div>` : ''}
+        ${b.theirReply && b.status === 'replied' ? `<div style="font-size:10px;margin-top:2px;color:var(--accent)">💬 Replied</div>` : ''}
+        ${b.blockedByDedup ? `<div style="font-size:10px;margin-top:2px;color:var(--amber)">🚫 Already scouted by team</div>` : ''}
+        <button onclick="event.stopPropagation();deleteBiz('${b.id}')" style="position:absolute;top:6px;right:6px;background:transparent;border:none;color:var(--faint);font-size:13px;cursor:pointer;padding:2px 5px;border-radius:4px;line-height:1" title="Delete">✕</button>
+      </div>`;
+    }).join('') + (limit < list.length ? `<button class="qp-action" style="margin:8px auto 12px;display:block;padding:8px 14px" onclick="window.scoutQueueLimit = Math.min((window.scoutQueueLimit || ${PAGE_SIZE}) + ${PAGE_SIZE}, ${list.length}); renderQueue();">Load 30 more — showing ${limit.toLocaleString()} of ${list.length.toLocaleString()}</button>` : `<div style="font-size:10px;color:var(--muted);text-align:center;padding:8px">Showing ${limit.toLocaleString()} of ${list.length.toLocaleString()} matching leads</div>`);
+  };
+
+  const oldSetFilter = typeof window.setFilter === 'function' ? window.setFilter : null;
+  window.setFilter = function(f, el){
+    queueFilter = f; window.queueFilter = f;
+    window.scoutQueueLimit = PAGE_SIZE;
+    document.querySelectorAll('.qp-action').forEach(e => e.classList.remove('active'));
+    if (el) el.classList.add('active');
+    renderQueue();
+  };
+
+  function installReviewMovePanel(){
+    const host = q('verify-send-panel');
+    if (!host || q('sv45-review-panel')) return;
+    const card = document.createElement('div');
+    card.className = 'as-card';
+    card.id = 'sv45-review-panel';
+    card.style.marginBottom = '14px';
+    card.innerHTML = `<h3>Manual Review → Ready to Send</h3>
+      <p style="font-size:12px;color:var(--muted);line-height:1.6">Review emails are usable but weaker. Inspect them in the Review filter, select the ones you trust, then move them manually to Ready to Send. Risky emails stay blocked.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="topbar-btn" onclick="setFilter('review', document.getElementById('sv41-review-filter') || document.querySelector('#qp-actions .qp-action'))">Open Review filter</button>
+        <button class="topbar-btn primary" onclick="sv45ApproveReviewToReady('selected')">Move selected Review to Ready</button>
+        <button class="topbar-btn" onclick="sv45ApproveReviewToReady('all')">Move all Review to Ready</button>
+        <button class="topbar-btn" onclick="sv45ClearReviewSelection()">Clear selection</button>
+        <span id="sv45-review-action-result" style="font-size:12px;color:var(--muted)"></span>
+      </div>`;
+    const first = host.querySelector('.as-card');
+    if (first && first.nextSibling) host.insertBefore(card, first.nextSibling); else host.appendChild(card);
+  }
+
+  const previousRenderVerify = typeof window.sv36RenderVerifySendTab === 'function' ? window.sv36RenderVerifySendTab : null;
+  window.sv36RenderVerifySendTab = function(){
+    if (previousRenderVerify) previousRenderVerify();
+    installReviewMovePanel();
+    const box = q('sv36-summary');
+    if (box) {
+      const stats = buildStats();
+      box.innerHTML = [
+        ['Email Found', stats.found || 0, 'var(--found)'],
+        ['Ready to Send', stats.ready_to_send || 0, 'var(--green)'],
+        ['Review', stats.review || 0, 'var(--blue)'],
+        ['Risky/Invalid/Dup', (stats.risky || 0) + (stats.invalid || 0) + (stats.duplicate || 0), 'var(--red)'],
+        ['Pending/No Email', (stats.pending || 0) + (stats.no_email || 0), 'var(--muted)']
+      ].map(([label,val,color]) => `<div style="background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:900;color:${color}">${Number(val).toLocaleString()}</div><div style="font-size:11px;color:var(--muted)">${label}</div></div>`).join('');
+    }
+  };
+
+  function installStyle(){
+    if (q('sv45-style')) return;
+    const s = document.createElement('style'); s.id='sv45-style';
+    s.textContent = `.sv45-review-check{accent-color:var(--accent);width:14px;height:14px;flex-shrink:0}.s-ready_to_send{background:rgba(16,201,128,.22);color:#34d399;border:1px solid rgba(16,201,128,.42)}.s-review{background:rgba(59,130,246,.16);color:#93c5fd;border:1px solid rgba(59,130,246,.32)}`;
+    document.head.appendChild(s);
+  }
+
+  function init(){
+    installStyle(); installReviewMovePanel();
+    const logo = q('topbar-logo'), title = q('topbar-title');
+    if (logo) logo.textContent = '🧭 Scout App';
+    if (title) title.textContent = VERSION + ' — Resource-Safe Workflow';
+    const search = q('qp-search');
+    if (search && !search.__v45_patched) { search.__v45_patched = true; search.addEventListener('input', () => { window.scoutQueueLimit = PAGE_SIZE; window.__scoutLastQueueRenderKey=''; setTimeout(renderQueue,0); }); }
+    rerender();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
 </body>
 </html>
