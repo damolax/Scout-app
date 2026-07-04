@@ -365,7 +365,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 <!-- TOP BAR -->
 <div id="topbar">
   <span id="topbar-logo">🧭 Scout App</span>
-  <span id="topbar-title">v47 — Selective Transfer Export</span>
+  <span id="topbar-title">v48 — Message Subjects Clean Workflow</span>
   <button class="topbar-btn" onclick="showTab('upload')">📁 Upload List</button>
   <button class="topbar-btn" onclick="showTab('verify')">🧪 Verify & Send</button>
   <button class="topbar-btn" onclick="showTab('autoscout')">🤖 Auto-Scout</button>
@@ -497,29 +497,16 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
           <p style="font-size:12px;color:var(--muted)">Upload a list of businesses with emails, write up to 20 personalised message templates using <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{name}</code> as a placeholder, and send them one by one.</p>
         </div>
 
-        <!-- Upload section -->
-        <div class="as-card" style="margin-bottom:14px">
-          <h3>1. Upload Business List</h3>
-          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">CSV or Excel file. Best columns: <strong>Business</strong>/<strong>Name</strong> and <strong>Email</strong>. Also supports email1/email2/email3, validatedEmail1/2/3, domain, phone1, website, socials.</p>
-          <div id="es-dropzone" style="border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;transition:.12s" onclick="document.getElementById('es-file-input').click()" ondragover="event.preventDefault();this.style.borderColor='var(--accent)'" ondragleave="this.style.borderColor='var(--border)'" ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleEsFile(event.dataTransfer.files[0])">
-            <div style="font-size:24px;margin-bottom:6px">📂</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text)">Click or drag file here</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:4px">.csv or .xlsx</div>
-          </div>
-          <input type="file" id="es-file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleEsFile(this.files[0])">
-          <div id="es-upload-status" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
-          <div id="es-preview" style="margin-top:12px;display:none">
-            <div style="font-size:12px;font-weight:700;margin-bottom:6px;color:var(--text)">Preview (<span id="es-count">0</span> contacts):</div>
-            <div style="overflow-x:auto;max-height:160px;overflow-y:auto">
-              <table style="width:100%;font-size:11px;border-collapse:collapse" id="es-preview-table"></table>
-            </div>
-          </div>
+        <!-- Contacts source notice -->
+        <div class="as-card" style="margin-bottom:14px;border-color:rgba(16,201,128,.35);background:rgba(16,201,128,.045)">
+          <h3>1. Contacts Source</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:0;line-height:1.7">No upload happens here. Contacts must come from <strong>Upload List → Verify &amp; Send → Ready to Send</strong>. This tab is only for choosing the message, subject, signature, delay, and sending the approved batch.</p>
         </div>
 
         <!-- Message templates -->
         <div class="as-card" style="margin-bottom:14px">
           <h3>2. Message Templates</h3>
-          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Write up to 20 messages. Use <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{name}</code> to insert the business name, <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{email}</code> for their email. One message is picked per send (rotates or you select).</p>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Write up to 20 messages. <strong>Each message has its own subject and body.</strong> Use <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{name}</code>, <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{email}</code>, <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{category}</code>, and other shortcodes for personalization. One message is picked per send (rotates or you select).</p>
           
           <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
             <button class="topbar-btn" onclick="addEsTemplate()">+ Add Message</button>
@@ -536,11 +523,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         <!-- Send settings -->
         <div class="as-card" style="margin-bottom:14px">
           <h3>3. Send Settings</h3>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-            <div>
-              <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Subject line</label>
-              <input type="text" id="es-subject" class="as-input" value="Quick question for {name}" placeholder="Subject with {name}">
-            </div>
+          <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px;background:rgba(91,110,245,.08);border:1px solid rgba(91,110,245,.18);border-radius:8px;padding:10px 12px">
+            Subject lines are controlled only inside each message template above. There is no separate general subject here, so the selected message and its subject always match.
+          </div>
+          <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:12px">
             <div>
               <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Delay between sends</label>
               <select id="es-delay" style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text);font-size:12px;width:100%">
@@ -559,7 +545,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
         <!-- Send control -->
         <div class="as-card">
-          <h3>4. Send</h3>
+          <h3>4. Send Message</h3>
           <div id="es-send-stats" style="font-size:12px;color:var(--muted);margin-bottom:10px">No contacts loaded yet.</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="as-big-btn as-start" onclick="startEsSend()" id="es-start-btn">📧 Start Sending</button>
@@ -803,11 +789,7 @@ John Smith
 Elevate Business Solutions
 +44 7700 000000" style="resize:vertical;min-height:80px"></textarea>
           </div>
-          <div class="settings-field" style="margin-top:10px">
-            <label>Email subject line</label>
-            <input type="text" class="settings-input" id="subject-input" placeholder="Quick question for [Business]">
-            <div style="font-size:11px;color:var(--muted);margin-top:4px">[Business] is replaced with the business name automatically</div>
-          </div>
+          <input type="hidden" id="subject-input" value="Quick question for {name}">
           <button class="settings-btn" onclick="saveSenderSettings()">Save Settings</button>
         </div>
 
@@ -3366,13 +3348,13 @@ function saveScoutUrl() {
 }
 
 function saveSenderSettings() {
-  const name = document.getElementById('sender-name-input').value.trim();
-  const signature = document.getElementById('signature-input').value;
-  const subject = document.getElementById('subject-input').value.trim();
+  const name = document.getElementById('sender-name-input')?.value.trim() || '';
+  const signature = document.getElementById('signature-input')?.value || '';
   if (name) saveSetting('senderName', name);
   saveSetting('signature', signature);
-  saveSetting('emailSubject', subject || 'Quick question for [Business]');
-  toast('Settings saved', 'ok');
+  // v48: subjects live only on Send Message templates. Keep a hidden legacy fallback for old flows only.
+  if (!settings.emailSubject) saveSetting('emailSubject', 'Quick question for {name}');
+  toast('Sender name and signature saved', 'ok');
 }
 
 function saveGmailAccounts() {
@@ -3891,7 +3873,7 @@ function sendNextEs() {
   const contact = esContacts[esCurrentIndex];
   const message = getEsMessage(contact);
   const signature = document.getElementById('es-signature')?.value || settings.signature || '';
-  const subjectTpl = document.getElementById('es-subject')?.value || 'Quick question for {name}';
+  const subjectTpl = (selectedTemplate && selectedTemplate(contact)?.subject) || getSettings().emailSubject || 'Quick question for {name}';
   const subject = personaliseEsMsg(subjectTpl, contact);
   const body = message + (signature ? '\n\n' + signature : '');
 
@@ -6380,11 +6362,11 @@ function manualPollReplies() {
 
 <script>
 // ---------------------------------------------------------------
-// SCOUT APP v47 — Selective transfer export + message subjects
+// SCOUT APP v48 — single subject source per message + selective transfer
 // ---------------------------------------------------------------
 (function(){
   'use strict';
-  const VERSION = 'v47';
+  const VERSION = 'v48';
   const q = id => document.getElementById(id);
   const safeArr = v => Array.isArray(v) ? v : [];
   const nowIso = () => new Date().toISOString();
@@ -6487,7 +6469,7 @@ function manualPollReplies() {
 
   window.getEsSubject = function(contact){
     const tpl = selectedTemplate(contact);
-    const fallback = q('es-subject')?.value || getSettings().emailSubject || 'Quick question for {name}';
+    const fallback = getSettings().emailSubject || 'Quick question for {name}';
     return personaliseEsMsg((tpl && tpl.subject) || fallback, contact);
   };
 
@@ -6542,7 +6524,7 @@ function manualPollReplies() {
     const contact = esContacts[esCurrentIndex];
     const tpl = selectedTemplate(contact);
     const signature = q('es-signature')?.value || getSettings().signature || '';
-    const subject = personaliseEsMsg((tpl && tpl.subject) || q('es-subject')?.value || getSettings().emailSubject || 'Quick question for {name}', contact);
+    const subject = personaliseEsMsg((tpl && tpl.subject) || getSettings().emailSubject || 'Quick question for {name}', contact);
     const message = personaliseEsMsg((tpl && tpl.message) || '', contact);
     const body = message + (signature ? '\n\n' + signature : '');
     const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contact.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -6802,7 +6784,7 @@ function manualPollReplies() {
     });
     const logo = q('topbar-logo'), title = q('topbar-title');
     if (logo) logo.textContent = '🧭 Scout App';
-    if (title) title.textContent = VERSION + ' — Selective Transfer Export';
+    if (title) title.textContent = VERSION + ' — Message Subjects Clean Workflow';
     const h2 = document.querySelector('#email-scout-content h2'); if (h2) h2.textContent = '📧 Send Message';
     const uploadStatus = q('es-upload-status'); if (uploadStatus) uploadStatus.textContent = 'No upload here. Upload leads in Upload List, verify them, then send from this tab.';
   }
@@ -6824,6 +6806,243 @@ function manualPollReplies() {
     renderEsTemplates();
     setTimeout(()=>{ hideSettingsMessages(); installTransferCard(); renameUi(); renderEsTemplates(); }, 600);
   }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+
+<script>
+// ---------------------------------------------------------------
+// SCOUT APP v49 — clean category/industry shortcodes.
+// Fixes imported categories like [], ["Web Design"], mainCategories,
+// and makes {category}/{industry} render clean readable text in Send Message.
+// ---------------------------------------------------------------
+(function(){
+  'use strict';
+  const VERSION = 'v49';
+  const q = id => document.getElementById(id);
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+
+  function decodeCategoryValue(value){
+    if (value === undefined || value === null) return '';
+    if (Array.isArray(value)) return value.map(decodeCategoryValue).filter(Boolean).join(', ');
+    if (typeof value === 'object') {
+      if (value.name) return decodeCategoryValue(value.name);
+      if (value.label) return decodeCategoryValue(value.label);
+      return '';
+    }
+    let s = String(value).trim();
+    if (!s) return '';
+    const lower = s.toLowerCase();
+    if (['[]','[ ]','null','undefined','none','n/a','na','unknown','general'].includes(lower)) return '';
+
+    // Try JSON arrays/objects first: ["Hotel"], [{"name":"Hotel"}], etc.
+    if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('{') && s.endsWith('}'))) {
+      try {
+        const parsed = JSON.parse(s);
+        const cleanParsed = decodeCategoryValue(parsed);
+        if (cleanParsed) return cleanParsed;
+      } catch(e) {}
+    }
+
+    // Clean simple bracket/string-array formats that were not valid JSON.
+    s = s
+      .replace(/^\s*\[\s*|\s*\]\s*$/g, '')
+      .replace(/^\s*\{\s*|\s*\}\s*$/g, '')
+      .replace(/^["']+|["']+$/g, '')
+      .replace(/["']/g, '')
+      .replace(/\s*,\s*/g, ', ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!s || ['[]','null','undefined','none','n/a','na','unknown','general'].includes(s.toLowerCase())) return '';
+    if (s === ',') return '';
+    return s;
+  }
+
+  function playbookLabel(value){
+    const key = String(value || '').trim();
+    try {
+      if (key && window.PLAYBOOK && PLAYBOOK[key] && PLAYBOOK[key].label) return PLAYBOOK[key].label;
+    } catch(e) {}
+    return '';
+  }
+
+  function bestCategory(obj){
+    const o = obj || {};
+    const candidates = [
+      o.category,
+      o.mainCategory,
+      o.mainCategories,
+      o.main_categories,
+      o.categories,
+      o.niche,
+      o.industry,
+      o.businessCategory,
+      o.sourceCategory
+    ];
+    for (const c of candidates) {
+      const cleaned = decodeCategoryValue(c);
+      if (cleaned) return playbookLabel(cleaned) || cleaned;
+    }
+    const label = playbookLabel(o.industry);
+    if (label) return label;
+    return '';
+  }
+
+  function bestLocation(obj){
+    const o = obj || {};
+    return decodeCategoryValue(o.location || o.address || o.city || o.country || o.region || '');
+  }
+
+  function normEmail(v){ return String(v || '').trim().toLowerCase(); }
+  function emailOf(b){ return normEmail(b && (b.email || (Array.isArray(b.emails) ? b.emails[0] : ''))); }
+  function cleanName(b){
+    try { if (typeof window.cleanName === 'function') return window.cleanName(b); } catch(e) {}
+    return String((b && b.name) || (b && b.business_name) || '').trim();
+  }
+
+  function normalizeBusinessCategories(){
+    try {
+      if (!Array.isArray(window.businesses || businesses)) return;
+      const list = window.businesses || businesses;
+      let changed = 0;
+      list.forEach(b => {
+        if (!b) return;
+        const raw = b.category || b.mainCategory || b.mainCategories || b.main_categories || b.categories || b.industry;
+        const cleaned = bestCategory(b);
+        if (cleaned) {
+          if (b.category !== cleaned) { b.category = cleaned; changed++; }
+          if (!b.mainCategory) b.mainCategory = cleaned;
+          // If industry is a broken array like [] or a raw JSON array, replace it with readable text.
+          const indClean = decodeCategoryValue(b.industry);
+          if (!indClean || /^\[/.test(String(b.industry || '').trim())) b.industry = cleaned;
+        } else if (String(raw || '').trim() === '[]') {
+          if (b.category) { b.category = ''; changed++; }
+          if (b.industry === '[]') { b.industry = ''; changed++; }
+        }
+      });
+      if (changed && typeof save === 'function') save();
+    } catch(e) { console.warn('v49 category normalization skipped', e); }
+  }
+
+  // Future imports: make BootLeads mainCategories/category columns clean before saving.
+  const oldSmartIndustry = window.smartIndustryV38;
+  window.smartIndustryV38 = function(row, fallbackName, profileLink){
+    try {
+      const raw = (typeof getRowValue === 'function')
+        ? getRowValue(row, ['mainCategories','main_categories','category','categories','industry','niche','business_category'])
+        : '';
+      const cleaned = decodeCategoryValue(raw);
+      if (cleaned) return cleaned;
+    } catch(e) {}
+    try {
+      const v = oldSmartIndustry ? oldSmartIndustry(row, fallbackName, profileLink) : '';
+      const cleaned = decodeCategoryValue(v);
+      if (cleaned) return playbookLabel(cleaned) || cleaned;
+    } catch(e) {}
+    try { return typeof detectIndustry === 'function' ? detectIndustry(fallbackName || '', profileLink || '') : ''; } catch(e) { return ''; }
+  };
+
+  // Send Message shortcode renderer: category and industry always use clean text.
+  window.personaliseEsMsg = function(template, contact){
+    const c = contact || {};
+    const cat = bestCategory(c);
+    const industry = cat || playbookLabel(c.industry) || decodeCategoryValue(c.industry) || '';
+    const get = key => decodeCategoryValue(c[key]);
+    return String(template || '')
+      .replace(/\{name\}/gi, get('name'))
+      .replace(/\{fullname\}/gi, get('fullname') || get('name'))
+      .replace(/\{email\}/gi, get('email'))
+      .replace(/\{website\}/gi, get('website') || get('domain'))
+      .replace(/\{domain\}/gi, get('domain') || get('website'))
+      .replace(/\{phone\}/gi, get('phone'))
+      .replace(/\{category\}/gi, cat)
+      .replace(/\{industry\}/gi, industry)
+      .replace(/\{location\}/gi, bestLocation(c))
+      .replace(/\{address\}/gi, get('address'))
+      .replace(/\{rating\}/gi, get('rating'))
+      .replace(/\{reviews\}/gi, get('reviews'));
+  };
+
+  // When moving Ready to Send into Send Message, carry clean category/location fields.
+  const oldMoveReady = window.sv36SendReadyToEmailScout;
+  window.sv36SendReadyToEmailScout = function(){
+    if (typeof oldMoveReady === 'function') oldMoveReady.apply(this, arguments);
+    try {
+      const list = window.businesses || businesses || [];
+      const byEmail = new Map(list.map(b => [emailOf(b), b]).filter(x => x[0]));
+      if (Array.isArray(window.esContacts || esContacts)) {
+        const contacts = window.esContacts || esContacts;
+        contacts.forEach(c => {
+          const b = byEmail.get(normEmail(c.email));
+          const cat = bestCategory(c) || bestCategory(b);
+          if (cat) { c.category = cat; c.industry = cat; }
+          c.location = bestLocation(c) || bestLocation(b);
+          if (b) {
+            c.rating = c.rating || b.rating || '';
+            c.reviews = c.reviews || b.reviews || '';
+            c.website = c.website || b.website || b.domain || '';
+            c.phone = c.phone || b.phone || (Array.isArray(b.phones) ? b.phones[0] : '') || '';
+          }
+        });
+      }
+      if (typeof renderEsPreview === 'function') renderEsPreview();
+      if (typeof renderEsTemplates === 'function') renderEsTemplates();
+    } catch(e) { console.warn('v49 ready contact category normalization skipped', e); }
+  };
+
+  // Also patch contact preview if contacts were already loaded before this build.
+  function normalizeSendContacts(){
+    try {
+      const contacts = window.esContacts || (typeof esContacts !== 'undefined' ? esContacts : []);
+      const list = window.businesses || businesses || [];
+      const byEmail = new Map(list.map(b => [emailOf(b), b]).filter(x => x[0]));
+      if (!Array.isArray(contacts)) return;
+      contacts.forEach(c => {
+        const b = byEmail.get(normEmail(c.email));
+        const cat = bestCategory(c) || bestCategory(b);
+        if (cat) { c.category = cat; c.industry = cat; }
+        else {
+          c.category = decodeCategoryValue(c.category);
+          c.industry = decodeCategoryValue(c.industry);
+        }
+        c.location = bestLocation(c) || bestLocation(b);
+      });
+    } catch(e) {}
+  }
+
+  function addCategoryHint(){
+    const host = q('email-scout-content');
+    if (!host || q('v49-category-hint')) return;
+    const inner = host.querySelector('div[style*="max-width:860px"]') || host.firstElementChild;
+    if (!inner) return;
+    const card = document.createElement('div');
+    card.className = 'as-card';
+    card.id = 'v49-category-hint';
+    card.style.marginBottom = '14px';
+    card.innerHTML = `<h3>Category shortcodes fixed</h3><p style="font-size:12px;color:var(--muted);line-height:1.6">{category} and {industry} now use clean readable category text from Upload List fields such as <strong>mainCategories</strong>, category, industry, or niche. Empty arrays like <code>[]</code> are ignored.</p>`;
+    inner.insertBefore(card, inner.children[1] || null);
+  }
+
+  function renameVersion(){
+    const logo = q('topbar-logo'), title = q('topbar-title');
+    if (logo) logo.textContent = '🧭 Scout App';
+    if (title) title.textContent = VERSION + ' — Category Shortcode Fix';
+  }
+
+  function init(){
+    normalizeBusinessCategories();
+    normalizeSendContacts();
+    addCategoryHint();
+    renameVersion();
+    try { if (typeof renderQueue === 'function') renderQueue(); } catch(e) {}
+    try { if (typeof renderEsPreview === 'function') renderEsPreview(); } catch(e) {}
+    try { if (typeof renderEsTemplates === 'function') renderEsTemplates(); } catch(e) {}
+    setTimeout(() => { normalizeBusinessCategories(); normalizeSendContacts(); renameVersion(); }, 800);
+  }
+  window.scoutCleanCategoryV49 = decodeCategoryValue;
+  window.scoutBestCategoryV49 = bestCategory;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 </script>
