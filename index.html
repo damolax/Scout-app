@@ -7320,7 +7320,7 @@ function manualPollReplies() {
 // v52 — Gmail API automatic Send Message mode
 // ---------------------------------------------------------------
 (function(){
-  const VERSION = 'v51';
+  const VERSION = 'v55';
   const q = id => document.getElementById(id);
   const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const norm = v => String(v || '').trim().toLowerCase();
@@ -7366,9 +7366,17 @@ function manualPollReplies() {
     if (mode === 'random') return ts[Math.floor(Math.random() * ts.length)] || ts[0];
     return ts[idx % ts.length] || ts[0];
   }
+  function isAlreadySentContact(c){
+    if (!c) return false;
+    const s = norm(c.status || '');
+    if (c.sentAt || c.contactedAt || ['contacted','replied','closed'].includes(s)) return true;
+    const b = getBusinessForContact(c);
+    const bs = norm(b && b.status);
+    return !!(b && (b.sentAt || b.contactedAt || ['contacted','replied','closed'].includes(bs)));
+  }
   function buildSendRows(limit){
     const sig = q('es-signature')?.value || settingsSafe().signature || '';
-    return safeArr(contacts()).slice(0, limit).map((c, i) => {
+    return safeArr(contacts()).filter(c => !isAlreadySentContact(c)).slice(0, limit).map((c, i) => {
       const tpl = pickTemplateForBatch(c, i) || { name:'Message', subject:'Quick question for {name}', message:'' };
       const subject = personalise(tpl.subject || 'Quick question for {name}', c);
       const message = personalise(tpl.message || '', c) + (sig ? '\n\n' + sig : '');
@@ -7386,7 +7394,7 @@ function manualPollReplies() {
   function log(msg){ if (typeof esLog === 'function') esLog(msg); else console.log(msg); }
   function markSent(row, result, senderEmail){
     const c = safeArr(contacts()).find(x => norm(x.email) === norm(row.email));
-    if (c) { c.sentAt = nowIso(); c.sentBy = senderEmail; c.sentSubject = row.subject; c.gmailMessageId = result.gmailMessageId || ''; }
+    if (c) { c.sentAt = nowIso(); c.contactedAt = nowIso(); c.status = 'contacted'; c.sentBy = senderEmail; c.sentSubject = row.subject; c.gmailMessageId = result.gmailMessageId || ''; c.gmailThreadId = result.gmailThreadId || ''; }
     const b = getBusinessForContact(row) || getBusinessForContact(c || row);
     if (b) {
       const patch = {
@@ -7471,7 +7479,8 @@ function manualPollReplies() {
       });
       saveAndRender();
       setProgress(sent || skipped, rows.length, dryRun ? `Dry run complete: ${skipped} checked` : `Sent ${sent}, failed ${failed}, skipped ${skipped}`);
-      toastSafe(dryRun ? `Dry run complete: ${skipped} checked.` : `Gmail API send complete: ${sent} sent, ${failed} failed.`, failed ? 'warn' : 'ok');
+      if (!dryRun && sent) log(`✓ ${sent} lead(s) moved to Contacted. Reply tracking can now detect responses and follow-ups.`);
+      toastSafe(dryRun ? `Dry run complete: ${skipped} checked.` : `Gmail API send complete: ${sent} sent, ${failed} failed. Sent leads moved to Contacted.`, failed ? 'warn' : 'ok');
     } catch(err) {
       log(`✗ Gmail API send error: ${err.message}`);
       if (/insufficient|scope|permission/i.test(err.message)) log('Reconnect Gmail in Settings so the token includes https://www.googleapis.com/auth/gmail.send');
@@ -7491,7 +7500,7 @@ function manualPollReplies() {
   }
   window.startEsSend = function(){ sendAutomaticBatch(); };
   window.sendNextEs = function(){ sendAutomaticBatch(); };
-  function rename(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='v52 — Gmail API Auto Send'; }
+  function rename(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='v55 — Gmail API Auto Send + Contacted Tracking'; }
   function init(){ addApiControls(); rename(); setInterval(refreshGmailAccountSelect, 5000); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
