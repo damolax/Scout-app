@@ -4232,6 +4232,7 @@ let gmailTokens = JSON.parse(localStorage.getItem('scout_gmail_tokens') || '{}')
 // Structure: { 'email@gmail.com': { access_token, refresh_token, expires_at, email } }
 
 const GMAIL_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.modify',
 ].join(' ');
@@ -7043,6 +7044,455 @@ function manualPollReplies() {
   }
   window.scoutCleanCategoryV49 = decodeCategoryValue;
   window.scoutBestCategoryV49 = bestCategory;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+
+
+<script>
+// ---------------------------------------------------------------
+// SCOUT APP v50 - MANUAL GMAIL COMPOSE SAFETY
+// Fixes false "sent" logs: opening Gmail compose is NOT the same as sending.
+// Send Message now opens one compose at a time and only marks sent after manual confirmation.
+// ---------------------------------------------------------------
+(function(){
+  const VERSION = 'v50';
+  let v50WaitingForConfirm = false;
+  let v50CurrentItem = null;
+  let v50ConfirmedSent = 0;
+  let v50OpenedCount = 0;
+
+  function q(id){ return document.getElementById(id); }
+  function escText(v){
+    return String(v ?? '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[ch]));
+  }
+  function toastSafe(msg, type){ if (typeof toast === 'function') toast(msg, type); else console.log(msg); }
+  function nowIso(){ return (typeof now === 'function') ? now() : new Date().toISOString(); }
+  function normEmail(v){ return String(v || '').trim().toLowerCase(); }
+  function contacts(){ return (window.esContacts || (typeof esContacts !== 'undefined' ? esContacts : [])); }
+  function templates(){ return (window.esTemplates || (typeof esTemplates !== 'undefined' ? esTemplates : [])); }
+  function settingsSafe(){ return (typeof getSettings === 'function') ? getSettings() : (window.settings || settings || {}); }
+  function getBusinesses(){ return (window.businesses || (typeof businesses !== 'undefined' ? businesses : [])); }
+  function getBusinessForContact(contact){
+    const e = normEmail(contact && contact.email);
+    if (!e) return null;
+    return getBusinesses().find(b => normEmail(b && (b.email || (Array.isArray(b.emails) ? b.emails[0] : ''))) === e) || null;
+  }
+  function cleanDisplayName(contact){
+    const n = contact && (contact.name || contact.business || contact.company || contact.domain || contact.website || contact.email);
+    return String(n || 'contact');
+  }
+  function personalise(template, contact){
+    if (typeof personaliseEsMsg === 'function') return personaliseEsMsg(template, contact);
+    const c = contact || {};
+    return String(template || '')
+      .replace(/\{name\}/gi, c.name || '')
+      .replace(/\{email\}/gi, c.email || '')
+      .replace(/\{website\}/gi, c.website || c.domain || '')
+      .replace(/\{category\}/gi, c.category || c.industry || '')
+      .replace(/\{industry\}/gi, c.industry || c.category || '')
+      .replace(/\{location\}/gi, c.location || c.address || '')
+      .replace(/\{phone\}/gi, c.phone || '')
+      .replace(/\{rating\}/gi, c.rating || '')
+      .replace(/\{reviews\}/gi, c.reviews || '');
+  }
+  function pickTemplate(contact){
+    const ts = templates();
+    if (!ts.length) return null;
+    const mode = q('es-rotation-mode')?.value || 'rotate';
+    if (mode === 'selected') {
+      const idx = Math.max(0, parseInt(q('es-selected-template')?.value || '0', 10));
+      return ts[idx] || ts[0];
+    }
+    if (mode === 'first') return ts[0];
+    if (mode === 'random') return ts[Math.floor(Math.random() * ts.length)] || ts[0];
+    const idx = (window.esRotationIndex || 0) % ts.length;
+    window.esRotationIndex = (window.esRotationIndex || 0) + 1;
+    if (typeof esRotationIndex !== 'undefined') esRotationIndex = window.esRotationIndex;
+    return ts[idx] || ts[0];
+  }
+  function buildCurrentItem(contact){
+    const tpl = pickTemplate(contact) || { name:'Message', subject:'Quick question for {name}', message:'' };
+    const sig = q('es-signature')?.value || settingsSafe().signature || '';
+    const subject = personalise(tpl.subject || 'Quick question for {name}', contact);
+    const body = personalise(tpl.message || '', contact) + (sig ? '\n\n' + sig : '');
+    return { contact, tpl, subject, body };
+  }
+  function log(msg){
+    if (typeof esLog === 'function') esLog(msg);
+    else console.log(msg);
+  }
+  function setProgress(){
+    const total = contacts().length || 1;
+    const pct = ((v50ConfirmedSent + (v50WaitingForConfirm ? 0.25 : 0)) / total) * 100;
+    const fillEl = q('es-progress-fill');
+    const textEl = q('es-progress-text');
+    if (fillEl) fillEl.style.width = Math.min(100, pct) + '%';
+    if (textEl) textEl.textContent = `${v50ConfirmedSent} confirmed sent • ${v50OpenedCount} compose opened • ${contacts().length - esCurrentIndex} remaining`;
+  }
+  function ensureControls(){
+    const nextBtn = q('es-next-btn');
+    if (nextBtn) {
+      nextBtn.textContent = 'I sent it — open next';
+      nextBtn.title = 'Click only after you manually press Send in Gmail';
+      nextBtn.style.display = v50WaitingForConfirm ? '' : 'none';
+    }
+    let skipBtn = q('es-skip-btn');
+    if (!skipBtn && nextBtn) {
+      skipBtn = document.createElement('button');
+      skipBtn.id = 'es-skip-btn';
+      skipBtn.className = 'topbar-btn';
+      skipBtn.type = 'button';
+      skipBtn.textContent = 'Skip / not sent → next';
+      skipBtn.onclick = window.skipEsSend;
+      nextBtn.insertAdjacentElement('afterend', skipBtn);
+    }
+    if (skipBtn) skipBtn.style.display = v50WaitingForConfirm ? '' : 'none';
+  }
+  function addSafetyNotice(){
+    const startBtn = q('es-start-btn');
+    if (!startBtn || q('v50-send-safety-note')) return;
+    const note = document.createElement('div');
+    note.id = 'v50-send-safety-note';
+    note.style.cssText = 'margin-top:10px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);border-radius:8px;padding:10px 12px;font-size:11px;color:var(--muted);line-height:1.6';
+    note.innerHTML = '<strong style="color:var(--amber)">Manual Gmail compose mode:</strong> Scout opens one Gmail compose at a time. It does <strong>not</strong> click Gmail Send for you. A contact is marked Contacted only after you click <strong>I sent it — open next</strong>.';
+    const parent = startBtn.parentElement;
+    if (parent) parent.insertAdjacentElement('afterend', note);
+    const delay = q('es-delay');
+    if (delay) {
+      delay.value = '0';
+      delay.disabled = true;
+      delay.title = 'Delay is disabled in safe manual compose mode. Gmail only sends after you manually click Send.';
+    }
+  }
+  function markCurrentAsSent(){
+    if (!v50CurrentItem) return false;
+    const { contact, subject, body, tpl } = v50CurrentItem;
+    contact.sentConfirmedAt = nowIso();
+    contact.openedComposeAt = contact.openedComposeAt || nowIso();
+    contact.sentSubject = subject;
+    contact.sentTemplateName = tpl && (tpl.name || tpl.id || 'Message');
+    const b = getBusinessForContact(contact);
+    if (b) {
+      const patch = {
+        status: 'contacted',
+        contactedAt: nowIso(),
+        sentAt: nowIso(),
+        messageSent: body,
+        subjectSent: subject,
+        sentTemplateName: contact.sentTemplateName,
+        gmailUsed: settingsSafe().activeGmail || settingsSafe().gmailUsed || 'manual-gmail-compose'
+      };
+      if (typeof updateBiz === 'function') updateBiz(b.id, patch);
+      else Object.assign(b, patch);
+    }
+    try { if (typeof save === 'function') save(); } catch(e) {}
+    try { if (typeof renderQueue === 'function') renderQueue(); } catch(e) {}
+    v50ConfirmedSent++;
+    log(`✓ Confirmed sent for ${cleanDisplayName(contact)} (${subject})`);
+    return true;
+  }
+  function openComposeForCurrent(){
+    const list = contacts();
+    if (!esRunning || esCurrentIndex >= list.length) {
+      window.stopEsSend(true);
+      return;
+    }
+    const contact = list[esCurrentIndex];
+    if (!contact || !contact.email) {
+      log(`⚠ Skipped contact ${esCurrentIndex + 1}: no email`);
+      esCurrentIndex++;
+      openComposeForCurrent();
+      return;
+    }
+    v50CurrentItem = buildCurrentItem(contact);
+    const { subject, body, tpl } = v50CurrentItem;
+    const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contact.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const win = window.open(url, '_blank');
+    if (!win) {
+      log(`⚠ Popup blocked for ${cleanDisplayName(contact)}. Allow popups, then click Start again.`);
+      toastSafe('Gmail popup was blocked. Allow popups for Scout App.', 'err');
+      window.stopEsSend(false);
+      return;
+    }
+    contact.openedComposeAt = nowIso();
+    contact.openedSubject = subject;
+    v50OpenedCount++;
+    v50WaitingForConfirm = true;
+    log(`↗ Opened Gmail compose for ${cleanDisplayName(contact)} using ${tpl?.name || 'message'} (${subject}). Not marked sent yet.`);
+    setProgress();
+    ensureControls();
+  }
+
+  window.startEsSend = function(){
+    const list = contacts();
+    if (!list.length) { toastSafe('No contacts loaded. Move Ready to Send leads into Send Message first.', 'err'); return; }
+    if (!templates().length) { toastSafe('Add at least one message template first', 'err'); return; }
+    esCurrentIndex = 0;
+    window.esRotationIndex = 0;
+    if (typeof esRotationIndex !== 'undefined') esRotationIndex = 0;
+    esRunning = true;
+    v50WaitingForConfirm = false;
+    v50CurrentItem = null;
+    v50ConfirmedSent = 0;
+    v50OpenedCount = 0;
+    const startBtn = q('es-start-btn'), stopBtn = q('es-stop-btn'), logEl = q('es-log');
+    if (startBtn) startBtn.style.display = 'none';
+    if (stopBtn) stopBtn.style.display = '';
+    if (logEl) { logEl.style.display = ''; logEl.innerHTML = ''; }
+    log(`Starting manual Gmail compose for ${list.length} contacts…`);
+    log('Important: Scout opens Gmail compose only. Click Gmail Send manually, then return and click “I sent it — open next”.');
+    addSafetyNotice();
+    openComposeForCurrent();
+  };
+
+  window.nextEsSend = function(){
+    if (!esRunning) return;
+    if (v50WaitingForConfirm) {
+      markCurrentAsSent();
+      v50WaitingForConfirm = false;
+      esCurrentIndex++;
+      setProgress();
+      ensureControls();
+      if (esCurrentIndex >= contacts().length) { window.stopEsSend(true); return; }
+      openComposeForCurrent();
+    } else {
+      openComposeForCurrent();
+    }
+  };
+
+  window.skipEsSend = function(){
+    if (!esRunning) return;
+    const item = v50CurrentItem;
+    if (item && item.contact) {
+      item.contact.skippedAt = nowIso();
+      log(`↷ Skipped without marking sent: ${cleanDisplayName(item.contact)}`);
+    }
+    v50WaitingForConfirm = false;
+    v50CurrentItem = null;
+    esCurrentIndex++;
+    setProgress();
+    ensureControls();
+    if (esCurrentIndex >= contacts().length) { window.stopEsSend(true); return; }
+    openComposeForCurrent();
+  };
+
+  window.sendNextEs = function(){
+    // Preserve old button compatibility, but route through the safer manual flow.
+    if (!esRunning) return;
+    if (v50WaitingForConfirm) window.nextEsSend();
+    else openComposeForCurrent();
+  };
+
+  window.stopEsSend = function(completed){
+    esRunning = false;
+    const startBtn = q('es-start-btn'), stopBtn = q('es-stop-btn'), nextBtn = q('es-next-btn'), skipBtn = q('es-skip-btn');
+    if (startBtn) startBtn.style.display = '';
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (nextBtn) nextBtn.style.display = 'none';
+    if (skipBtn) skipBtn.style.display = 'none';
+    v50WaitingForConfirm = false;
+    v50CurrentItem = null;
+    setProgress();
+    if (completed) {
+      log(`✓ Finished. ${v50ConfirmedSent} confirmed sent. ${v50OpenedCount} Gmail compose window(s) opened.`);
+      toastSafe(`Finished: ${v50ConfirmedSent} confirmed sent.`, 'ok');
+    } else {
+      log(`Stopped. ${v50ConfirmedSent} confirmed sent. ${v50OpenedCount} compose window(s) opened.`);
+      toastSafe('Send stopped. Opened drafts were not marked sent unless confirmed.', 'warn');
+    }
+  };
+
+  function renameVersion(){
+    const logo = q('topbar-logo'), title = q('topbar-title');
+    if (logo) logo.textContent = '🧭 Scout App';
+    if (title) title.textContent = VERSION + ' — Safe Manual Gmail Sending';
+  }
+  function init(){ addSafetyNotice(); renameVersion(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+
+<script>
+// ---------------------------------------------------------------
+// v51 — Gmail API automatic Send Message mode
+// ---------------------------------------------------------------
+(function(){
+  const VERSION = 'v51';
+  const q = id => document.getElementById(id);
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const norm = v => String(v || '').trim().toLowerCase();
+  const safeArr = v => Array.isArray(v) ? v : [];
+  const toastSafe = (m,t) => { try { if (typeof toast === 'function') toast(m,t||'ok'); else alert(m); } catch(e) { console.log(m); } };
+  const nowIso = () => (typeof now === 'function') ? now() : new Date().toISOString();
+  function settingsSafe(){ try { return (typeof getSettings === 'function') ? getSettings() : (window.settings || settings || JSON.parse(localStorage.getItem('sv13_settings') || '{}')); } catch(e) { return {}; } }
+  function contacts(){ return window.esContacts || (typeof esContacts !== 'undefined' ? esContacts : []); }
+  function templates(){ return window.esTemplates || (typeof esTemplates !== 'undefined' ? esTemplates : []); }
+  function gmailTokensMap(){ try { return JSON.parse(localStorage.getItem('scout_gmail_tokens') || '{}') || {}; } catch(e){ return {}; } }
+  function gmailAccounts(){ return Object.values(gmailTokensMap()).filter(t => t && (t.email || t.access_token || t.refresh_token)); }
+  function getSelectedGmail(){ const sel=q('v51-gmail-account'); const email=sel && sel.value; return gmailAccounts().find(a => (a.email || '') === email) || gmailAccounts()[0] || null; }
+  function getBackendUrl(){ const s=settingsSafe(); return String(s.backendUrl || localStorage.getItem('backendUrl') || localStorage.getItem('scoutBackendUrl') || '').replace(/\/+$/,''); }
+  function getBusinessForContact(contact){
+    const e = norm(contact && contact.email);
+    const list = window.businesses || (typeof businesses !== 'undefined' ? businesses : []);
+    return safeArr(list).find(b => norm(b && (b.email || (Array.isArray(b.emails) ? b.emails[0] : ''))) === e) || null;
+  }
+  function personalise(template, contact){
+    if (typeof personaliseEsMsg === 'function') return personaliseEsMsg(template, contact);
+    const c = contact || {};
+    return String(template || '')
+      .replace(/\{name\}/gi, c.name || '')
+      .replace(/\{email\}/gi, c.email || '')
+      .replace(/\{website\}/gi, c.website || c.domain || '')
+      .replace(/\{domain\}/gi, c.domain || c.website || '')
+      .replace(/\{category\}/gi, c.category || c.industry || '')
+      .replace(/\{industry\}/gi, c.industry || c.category || '')
+      .replace(/\{location\}/gi, c.location || c.address || '')
+      .replace(/\{phone\}/gi, c.phone || '')
+      .replace(/\{rating\}/gi, c.rating || '')
+      .replace(/\{reviews\}/gi, c.reviews || '');
+  }
+  function pickTemplateForBatch(contact, idx){
+    const ts = safeArr(templates());
+    if (!ts.length) return null;
+    const mode = q('es-rotation-mode')?.value || 'rotate';
+    if (mode === 'selected') {
+      const selected = Math.max(0, parseInt(q('es-selected-template')?.value || '0', 10));
+      return ts[selected] || ts[0];
+    }
+    if (mode === 'first') return ts[0];
+    if (mode === 'random') return ts[Math.floor(Math.random() * ts.length)] || ts[0];
+    return ts[idx % ts.length] || ts[0];
+  }
+  function buildSendRows(limit){
+    const sig = q('es-signature')?.value || settingsSafe().signature || '';
+    return safeArr(contacts()).slice(0, limit).map((c, i) => {
+      const tpl = pickTemplateForBatch(c, i) || { name:'Message', subject:'Quick question for {name}', message:'' };
+      const subject = personalise(tpl.subject || 'Quick question for {name}', c);
+      const message = personalise(tpl.message || '', c) + (sig ? '\n\n' + sig : '');
+      const b = getBusinessForContact(c);
+      return {
+        id: c.id || c.businessId || c.leadId || (b && b.id) || ('contact_' + i),
+        name: c.name || c.business || c.company || (b && b.name) || c.email,
+        email: c.email,
+        subject,
+        message,
+        templateName: tpl.name || ('Message ' + (i+1))
+      };
+    }).filter(r => r.email && r.subject && r.message);
+  }
+  function log(msg){ if (typeof esLog === 'function') esLog(msg); else console.log(msg); }
+  function markSent(row, result, senderEmail){
+    const c = safeArr(contacts()).find(x => norm(x.email) === norm(row.email));
+    if (c) { c.sentAt = nowIso(); c.sentBy = senderEmail; c.sentSubject = row.subject; c.gmailMessageId = result.gmailMessageId || ''; }
+    const b = getBusinessForContact(row) || getBusinessForContact(c || row);
+    if (b) {
+      const patch = {
+        status: 'contacted', contactedAt: nowIso(), sentAt: nowIso(), messageSent: row.message, subjectSent: row.subject,
+        sentTemplateName: row.templateName, gmailUsed: senderEmail || 'gmail-api', gmailMessageId: result.gmailMessageId || '', gmailThreadId: result.gmailThreadId || ''
+      };
+      try { if (typeof updateBiz === 'function') updateBiz(b.id, patch); else Object.assign(b, patch); } catch(e) { Object.assign(b, patch); }
+    }
+  }
+  function saveAndRender(){ try { if (typeof save === 'function') save(); } catch(e){} try { if (typeof renderQueue === 'function') renderQueue(); } catch(e){} try { if (typeof updateEsSendStats === 'function') updateEsSendStats(); } catch(e){} }
+  function setProgress(sent, total, label){
+    const fill=q('es-progress-fill'), text=q('es-progress-text');
+    if (fill) fill.style.width = total ? Math.min(100, (sent/total)*100) + '%' : '0%';
+    if (text) text.textContent = label || `${sent} / ${total}`;
+  }
+  function addApiControls(){
+    const startBtn = q('es-start-btn');
+    if (!startBtn || q('v51-gmail-api-panel')) return;
+    startBtn.textContent = '🚀 Send Automatically with Gmail API';
+    const oldNote = q('v50-send-safety-note'); if (oldNote) oldNote.remove();
+    const panel = document.createElement('div');
+    panel.id = 'v51-gmail-api-panel';
+    panel.style.cssText = 'margin:10px 0 12px;background:rgba(16,201,128,.08);border:1px solid rgba(16,201,128,.28);border-radius:10px;padding:12px;font-size:12px;color:var(--muted);line-height:1.6';
+    panel.innerHTML = `
+      <div style="font-weight:800;color:var(--green);margin-bottom:8px">Connected Gmail automatic sending</div>
+      <div style="display:grid;grid-template-columns:1.3fr 110px 130px 110px;gap:8px;align-items:end">
+        <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Gmail account</label><select id="v51-gmail-account" class="as-input" style="width:100%"></select></div>
+        <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Batch limit</label><input id="v51-send-limit" class="as-input" type="number" min="1" max="500" value="50"></div>
+        <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Delay</label><select id="v51-send-delay" class="as-input"><option value="0">No delay</option><option value="1500" selected>1.5 seconds</option><option value="5000">5 seconds</option><option value="10000">10 seconds</option></select></div>
+        <label style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted);padding-bottom:8px"><input id="v51-dry-run" type="checkbox"> Dry run</label>
+      </div>
+      <div id="v51-gmail-api-status" style="margin-top:8px;color:var(--muted)">Choose a connected Gmail account. If sending fails with insufficient permission, reconnect Gmail because v51 requires the gmail.send scope.</div>
+      <button type="button" id="v51-open-manual-compose" class="topbar-btn" style="margin-top:8px">Fallback: open Gmail compose manually</button>
+    `;
+    startBtn.parentElement.insertAdjacentElement('beforebegin', panel);
+    q('v51-open-manual-compose').onclick = function(){ openManualComposeFallback(); };
+    refreshGmailAccountSelect();
+  }
+  function refreshGmailAccountSelect(){
+    const sel=q('v51-gmail-account'), status=q('v51-gmail-api-status');
+    if (!sel) return;
+    const accounts = gmailAccounts();
+    sel.innerHTML = accounts.length ? accounts.map(a => `<option value="${esc(a.email || '')}">${esc(a.email || 'connected Gmail')}</option>`).join('') : '<option value="">No Gmail connected</option>';
+    if (status) status.textContent = accounts.length ? `${accounts.length} Gmail account(s) connected. Automatic send uses Gmail API, not browser compose.` : 'No Gmail account connected. Go to Settings → Gmail Accounts and connect Gmail first.';
+  }
+  async function sendAutomaticBatch(){
+    const backendUrl = getBackendUrl();
+    if (!backendUrl) { toastSafe('Backend URL is required for automatic Gmail sending.', 'err'); return; }
+    const account = getSelectedGmail();
+    if (!account) { toastSafe('Connect a Gmail account first in Settings.', 'err'); return; }
+    const limit = Math.max(1, Math.min(500, parseInt(q('v51-send-limit')?.value || '50', 10) || 50));
+    const rows = buildSendRows(limit);
+    if (!rows.length) { toastSafe('No sendable contacts loaded. Move Ready to Send leads into Send Message first.', 'err'); return; }
+    const delayMs = parseInt(q('v51-send-delay')?.value || '1500', 10) || 0;
+    const dryRun = !!q('v51-dry-run')?.checked;
+    const clientId = settingsSafe().oauthClientId || '';
+    if (!account.access_token && !account.refresh_token) { toastSafe('Selected Gmail account has no token. Reconnect it.', 'err'); return; }
+    const startBtn=q('es-start-btn'), stopBtn=q('es-stop-btn'), logEl=q('es-log');
+    if (startBtn) startBtn.disabled = true;
+    if (stopBtn) stopBtn.style.display = '';
+    if (logEl) { logEl.style.display = ''; logEl.innerHTML = ''; }
+    log(`${dryRun ? 'Dry run' : 'Automatic Gmail API send'} starting for ${rows.length} contact(s) from ${account.email || 'connected Gmail'}…`);
+    setProgress(0, rows.length, 'Sending through Gmail API…');
+    try {
+      const res = await fetch(backendUrl + '/email-scout/send-selected-batch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contacts: rows, limit: rows.length, delayMs, dryRun,
+          senderEmail: account.email || '', access_token: account.access_token || '', refresh_token: account.refresh_token || '',
+          expires_at: account.expires_at || 0, client_id: clientId
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) throw new Error(data.error || 'Gmail API send failed');
+      let sent = 0, failed = 0, skipped = 0;
+      safeArr(data.results).forEach((r, idx) => {
+        const row = rows.find(x => String(x.id) === String(r.id) || norm(x.email) === norm(r.email)) || rows[idx];
+        if (r.status === 'sent') { sent++; markSent(row, r, data.senderEmail || account.email); log(`✓ Sent to ${row.name || row.email} (${row.subject})`); }
+        else if (r.status === 'dry_run') { skipped++; log(`• Dry run: ${row.name || row.email} (${row.subject})`); }
+        else if (r.status === 'skipped') { skipped++; log(`↷ Skipped ${row.email}: ${r.reason || 'missing data'}`); }
+        else { failed++; log(`✗ Failed ${row.email}: ${r.reason || 'unknown error'}`); }
+      });
+      saveAndRender();
+      setProgress(sent || skipped, rows.length, dryRun ? `Dry run complete: ${skipped} checked` : `Sent ${sent}, failed ${failed}, skipped ${skipped}`);
+      toastSafe(dryRun ? `Dry run complete: ${skipped} checked.` : `Gmail API send complete: ${sent} sent, ${failed} failed.`, failed ? 'warn' : 'ok');
+    } catch(err) {
+      log(`✗ Gmail API send error: ${err.message}`);
+      if (/insufficient|scope|permission/i.test(err.message)) log('Reconnect Gmail in Settings so the token includes https://www.googleapis.com/auth/gmail.send');
+      toastSafe('Automatic send failed: ' + err.message, 'err');
+    } finally {
+      if (startBtn) startBtn.disabled = false;
+      if (stopBtn) stopBtn.style.display = 'none';
+    }
+  }
+  function openManualComposeFallback(){
+    const rows = buildSendRows(1);
+    if (!rows.length) { toastSafe('No contact available for manual compose.', 'err'); return; }
+    const row = rows[0];
+    const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(row.email)}&su=${encodeURIComponent(row.subject)}&body=${encodeURIComponent(row.message)}`;
+    window.open(url, '_blank');
+    log(`↗ Opened Gmail compose fallback for ${row.name || row.email}. This does not mark it sent.`);
+  }
+  window.startEsSend = function(){ sendAutomaticBatch(); };
+  window.sendNextEs = function(){ sendAutomaticBatch(); };
+  function rename(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='v51 — Gmail API Auto Send'; }
+  function init(){ addApiControls(); rename(); setInterval(refreshGmailAccountSelect, 5000); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 </script>
