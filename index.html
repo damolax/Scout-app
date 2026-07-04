@@ -700,7 +700,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
         <div class="as-card">
           <h3>Auto-Scout Control</h3>
-          <p>Processes each business in your queue: finds their website email, generates a personalized message using your industry playbook, then queues for batch approval.</p>
+          <p>Processes each business in your queue: researches pending businesses, finds possible website emails, and moves found emails to Email Found for verification. Messages are created later in Send Message after verification.</p>
           <div style="margin:8px 0 0 0;padding:8px 12px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:8px;font-size:12px;color:var(--muted)">
             💡 <strong>No website?</strong> Use <button class="topbar-btn" style="padding:2px 8px;font-size:11px" onclick="enrichAllFromMaps()">⚡ Enrich from Google Maps</button> to fetch websites &amp; emails via Place IDs (requires backend + Google Maps API key).
           </div>
@@ -2898,7 +2898,7 @@ function renderBatch() {
   if (!panel) return;
   const entries = Object.entries(batchApprovals);
   if (!entries.length) {
-    panel.innerHTML = `<div class="batch-empty">No messages ready yet.<br>Run Auto-Scout or generate messages from individual businesses.</div>`;
+    panel.innerHTML = `<div class="batch-empty">No messages ready yet.<br>Verify emails first, then move Ready to Send leads into Send Message.</div>`;
     document.getElementById('send-approved-btn').style.display = 'none';
     return;
   }
@@ -5109,7 +5109,7 @@ function manualPollReplies() {
 
 
 // ---------------------------------------------------------------
-// Scout App v41 - Email Found batch source for Verify & Send
+// Scout App v42 - Email Found batch source for Verify & Send
 // Keeps Upload as the only upload point. Adds source selection so
 // users can send 200 contacts from Email Found / current queue filter.
 // ---------------------------------------------------------------
@@ -5235,24 +5235,24 @@ function manualPollReplies() {
     try {
       const logo = q('topbar-logo'); const title = q('topbar-title');
       if (logo) logo.textContent = '🧭 Scout App';
-      if (title) title.textContent = 'Scout App v41 — Business Scouting System';
+      if (title) title.textContent = 'Scout App v42 — Business Scouting System';
       injectBatchSourceControls();
       const p = q('sv36-batch-result');
       if (p) p.textContent = 'To send 200 from Email Found: set Source = Email Found tab, Batch limit = 200, then Send Ready Batch → Email Scout.';
-    } catch(e) { console.warn('Scout App v41 init warning', e); }
+    } catch(e) { console.warn('Scout App v42 init warning', e); }
   });
 })();
 
 
 // ---------------------------------------------------------------
-// Scout App v41 - Correct Email Verification Workflow
+// Scout App v42 - Correct Email Verification Workflow
 // Pending = not researched yet.
 // Email Found = found/imported email, not verified yet.
 // Ready to Send = verified READY only.
 // Auto-Scout researches Pending only. No Email is terminal until user deletes/reimports.
 // ---------------------------------------------------------------
 (function(){
-  const VERSION = 'Scout App v41';
+  const VERSION = 'Scout App v42';
   function q(id){ return document.getElementById(id); }
   function escLocal(v){ try { return typeof esc === 'function' ? esc(v || '') : String(v || '').replace(/[&<>\"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); } catch(e){ return String(v || ''); } }
   function cleanName(b){
@@ -5595,6 +5595,254 @@ function manualPollReplies() {
     if (typeof updateAsStats === 'function') updateAsStats();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initV41); else initV41();
+})();
+
+
+// ---------------------------------------------------------------
+// Scout App v42 - Auto-Scout must not push emails to Batch Approve.
+// Final rule:
+// Pending -> Scanning -> Email Found -> Verify -> Ready to Send -> Send Message.
+// Batch Approve/Send Message only receives verified Ready to Send records.
+// ---------------------------------------------------------------
+(function(){
+  const VERSION = 'Scout App v42';
+  function q(id){ return document.getElementById(id); }
+  function safeArr(v){ return Array.isArray(v) ? v : []; }
+  function normEmail(email){ return String(email || '').trim().toLowerCase().replace(/^mailto:/,'').replace(/[;,.)\]]+$/g,'').replace(/^[\[(]+/g,''); }
+  function emailOf(b){ return normEmail((b && (b.email || (Array.isArray(b.emails) ? b.emails[0] : ''))) || ''); }
+  function hasResearchTarget(b){ return !!(b && (b.website || b.domain || b.url || b.site || b.profileLink || b.place_id)); }
+  function isVerifiedReady(b){ return !!(b && b.status === 'ready_to_send' && b.emailVerification && b.emailVerification.status === 'READY' && emailOf(b)); }
+  function saveIfPossible(){ try { if (typeof save === 'function') save(); } catch(e) {} }
+  function toastIfPossible(msg, type){ try { if (typeof toast === 'function') toast(msg, type || 'ok'); } catch(e) {} }
+  function logIfPossible(type, msg){ try { if (typeof addLog === 'function') addLog(type, msg); } catch(e) {} }
+  function markFoundState(b){
+    if (!b || !emailOf(b)) return;
+    if (['contacted','replied','closed'].includes(b.status)) return;
+    b.status = 'found';
+    b.needsVerification = true;
+    b.readyToSend = false;
+    b.readyToEmailScout = false;
+    b.emailVerification = null;
+    if (b.generatedMessage && !b.manuallyGeneratedMessage) b.generatedMessage = null;
+    b.updatedAt = (typeof now === 'function') ? now() : new Date().toISOString();
+  }
+
+  function cleanupOldAutoBatch(reason){
+    try {
+      if (!Array.isArray(businesses)) return {fixed:0, removedBatch:0};
+      let fixed = 0;
+      businesses.forEach(b => {
+        const e = emailOf(b);
+        if (e) {
+          // Old builds used "ready" and/or Batch Approve immediately after Auto-Scout.
+          // Without verification, those are only Email Found.
+          const v = b.emailVerification;
+          if ((b.status === 'ready' || b.status === 'ready_to_send') && !(v && v.status === 'READY')) {
+            markFoundState(b); fixed++;
+          }
+          if (b.status === 'found') {
+            b.needsVerification = true;
+            b.readyToSend = false;
+            b.readyToEmailScout = false;
+          }
+        } else if (['found','ready','ready_to_send','review','risky','invalid','duplicate'].includes(b.status)) {
+          b.status = hasResearchTarget(b) ? 'pending' : 'no_email';
+          b.needsVerification = false;
+          b.readyToSend = false;
+          b.readyToEmailScout = false;
+          b.emailVerification = null;
+          fixed++;
+        }
+      });
+
+      let removedBatch = 0;
+      const approvals = (typeof batchApprovals !== 'undefined' && batchApprovals) ? batchApprovals : (window.batchApprovals || {});
+      Object.keys(approvals || {}).forEach(id => {
+        let b = null;
+        try { b = typeof getBiz === 'function' ? getBiz(id) : businesses.find(x => x.id === id); } catch(e) {}
+        if (!isVerifiedReady(b)) { delete approvals[id]; removedBatch++; }
+      });
+      if (window.batchApprovals && window.batchApprovals !== approvals) window.batchApprovals = approvals;
+      if (fixed || removedBatch) {
+        saveIfPossible();
+        logIfPossible('warn', `${VERSION}: cleaned ${fixed} unverified status records and removed ${removedBatch} unverified Batch Approve items${reason ? ' after ' + reason : ''}.`);
+      }
+      return {fixed, removedBatch};
+    } catch(e) { console.warn('v42 cleanup warning', e); return {fixed:0, removedBatch:0}; }
+  }
+
+  // Patch updateBiz so every newly found email becomes Email Found / Needs Verification, never Ready/Batch.
+  const originalUpdateBiz = (typeof updateBiz === 'function') ? updateBiz : window.updateBiz;
+  if (originalUpdateBiz && !window.__SCOUT_V42_UPDATE_PATCHED__) {
+    window.__SCOUT_V42_UPDATE_PATCHED__ = true;
+    window.updateBiz = function(id, updates){
+      const patched = Object.assign({}, updates || {});
+      const incomingEmail = patched.email || (Array.isArray(patched.emails) ? patched.emails[0] : '');
+      if (incomingEmail && ['found','ready','ready_to_send'].includes(patched.status || 'found')) {
+        patched.email = normEmail(incomingEmail);
+        patched.status = 'found';
+        patched.needsVerification = true;
+        patched.readyToSend = false;
+        patched.readyToEmailScout = false;
+        patched.emailVerification = null;
+        if (!patched.manuallyGeneratedMessage) patched.generatedMessage = null;
+      }
+      const res = originalUpdateBiz.call(this, id, patched);
+      try {
+        const b = typeof getBiz === 'function' ? getBiz(id) : null;
+        if (b && patched.status === 'found' && emailOf(b)) markFoundState(b);
+      } catch(e) {}
+      return res;
+    };
+  }
+
+  // Patch message generation: do not generate/send messages for raw Email Found.
+  const originalGenerateMessage = (typeof generateMessage === 'function') ? generateMessage : window.generateMessage;
+  if (originalGenerateMessage && !window.__SCOUT_V42_GENERATE_PATCHED__) {
+    window.__SCOUT_V42_GENERATE_PATCHED__ = true;
+    window.generateMessage = async function(bizId, stageIdx){
+      let b = null;
+      try { b = typeof getBiz === 'function' ? getBiz(bizId) : null; } catch(e) {}
+      if (b && emailOf(b) && !isVerifiedReady(b)) {
+        b.generatedMessage = null;
+        b.needsVerification = true;
+        if (!['contacted','replied','closed'].includes(b.status)) b.status = 'found';
+        saveIfPossible();
+        if (activeId === bizId && typeof renderDetail === 'function') renderDetail();
+        toastIfPossible('Email found, but it must be verified before creating/sending a message.', 'err');
+        return null;
+      }
+      return originalGenerateMessage.apply(this, arguments);
+    };
+  }
+
+  // Patch updateBatchBtn so it never auto-adds found emails/messages.
+  window.updateBatchBtn = function(){
+    cleanupOldAutoBatch('batch refresh');
+    const approvals = (typeof batchApprovals !== 'undefined' && batchApprovals) ? batchApprovals : (window.batchApprovals || {});
+    const count = Object.keys(approvals || {}).length;
+    const btn = q('batch-btn');
+    const countEl = q('batch-count');
+    if (btn) btn.style.display = count > 0 ? '' : 'none';
+    if (countEl) countEl.textContent = count;
+    try { if (typeof renderBatch === 'function') renderBatch(); } catch(e) {}
+  };
+
+  // Manual add-to-batch is allowed only for verified Ready to Send.
+  window.addToBatch = function(bizId){
+    const b = (typeof getBiz === 'function') ? getBiz(bizId) : safeArr(businesses).find(x => x.id === bizId);
+    if (!b) return;
+    if (!isVerifiedReady(b)) {
+      toastIfPossible('This lead is not Ready to Send yet. Verify the email first.', 'err');
+      if (typeof showContentTab === 'function') showContentTab('verify-send-content', q('tab-verify-send'));
+      return;
+    }
+    if (!b.generatedMessage) {
+      toastIfPossible('Choose or generate a message in Send Message first.', 'err');
+      return;
+    }
+    const approvals = (typeof batchApprovals !== 'undefined' && batchApprovals) ? batchApprovals : (window.batchApprovals || (window.batchApprovals = {}));
+    approvals[bizId] = { approved:false, skipped:false, message:b.generatedMessage };
+    if (typeof updateBatchBtn === 'function') updateBatchBtn();
+    toastIfPossible('Added verified lead to Batch Approve.', 'ok');
+  };
+
+  // Backend Auto-Scout: Pending -> Scanning -> Email Found or No Email. No message generation.
+  window.runAutoScoutViaBackend = async function(queue){
+    const backendUrl = (window.settings && settings.backendUrl) || '';
+    for (let i = 0; i < queue.length; i++) {
+      if (typeof isPaused !== 'undefined' && isPaused) { await new Promise(r => setTimeout(r, 500)); i--; continue; }
+      const biz = queue[i];
+      updateBiz(biz.id, { status:'scanning' });
+      if (typeof updateAutoScoutUI === 'function') updateAutoScoutUI(i + 1, queue.length);
+      if (typeof renderQueue === 'function') renderQueue();
+      logIfPossible('info', `Researching ${biz.name}…`);
+      try {
+        let data = null;
+        if (biz.place_id) {
+          try {
+            const r = await fetch(`${backendUrl}/enrich-place`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ place_id:biz.place_id, maps_url:biz.profileLink, business_name:biz.name }) });
+            const d = await r.json();
+            if (d && d.success) data = d;
+          } catch(e) {}
+        }
+        if (!(data && data.emails && data.emails.length) && biz.website) {
+          try {
+            const r = await fetch(`${backendUrl}/find-email`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ website:biz.website, business_name:biz.name }) });
+            data = await r.json();
+          } catch(e) {}
+        }
+        const email = data && data.emails && data.emails[0] ? normEmail(data.emails[0]) : '';
+        if (email) {
+          updateBiz(biz.id, { status:'found', email, emails:data.emails || [email], phones:data.phones || [], website:data.website || biz.website || '', phone:data.phone || '' });
+          autoScoutStats.done++; autoScoutStats.found++;
+          logIfPossible('ok', `${biz.name} — email found: ${email}. Waiting for verification.`);
+        } else {
+          updateBiz(biz.id, { status:'no_email', emails:[], email:'' });
+          autoScoutStats.done++;
+          logIfPossible('warn', `${biz.name} — no email found`);
+        }
+      } catch(e) {
+        updateBiz(biz.id, { status:'no_email' });
+        autoScoutStats.done++;
+        logIfPossible('err', `${biz.name} — research error`);
+      }
+      if (typeof updateAsStats === 'function') updateAsStats();
+      if (typeof renderQueue === 'function') renderQueue();
+      await new Promise(r => setTimeout(r, 600));
+    }
+    q('scout-status-bar')?.classList.remove('active');
+    if (q('as-start-btn')) q('as-start-btn').style.display = '';
+    if (q('as-pause-btn')) q('as-pause-btn').style.display = 'none';
+    if (q('as-stop-btn')) q('as-stop-btn').style.display = 'none';
+    toastIfPossible(`Auto-Scout complete — ${autoScoutStats.found} emails moved to Email Found for verification.`, 'ok');
+    cleanupOldAutoBatch('auto-scout complete');
+    if (typeof updateBatchBtn === 'function') updateBatchBtn();
+    if (typeof renderQueue === 'function') renderQueue();
+  };
+
+  // Re-confirm the start rule: only Pending gets researched.
+  window.startAutoScout = async function(){
+    if (!Array.isArray(businesses)) return;
+    cleanupOldAutoBatch('auto-scout start');
+    const pending = businesses.filter(b => b.status === 'pending');
+    if (!pending.length) { toastIfPossible('No Pending businesses to research.', 'err'); return; }
+    autoScoutStats = { done:0, found:0 };
+    window.autoScoutStats = autoScoutStats;
+    if (typeof updateAsStats === 'function') updateAsStats();
+    const queue = pending.map(b => ({ id:b.id, name:b.name, website:b.website || b.domain || '', profileLink:b.profileLink || '', place_id:b.place_id || null }));
+    q('scout-status-bar')?.classList.add('active');
+    if (q('as-start-btn')) q('as-start-btn').style.display = 'none';
+    if (q('as-pause-btn')) q('as-pause-btn').style.display = '';
+    if (q('as-stop-btn')) q('as-stop-btn').style.display = '';
+    if (typeof updateAutoScoutUI === 'function') updateAutoScoutUI(0, queue.length);
+    if (window.extAvailable || (typeof extAvailable !== 'undefined' && extAvailable)) {
+      logIfPossible('info', `Starting Auto-Scout for ${queue.length} Pending businesses via extension.`);
+      if (typeof sendToExt === 'function') return sendToExt({ type:'START_AUTO_SCOUT', businesses:queue });
+    }
+    if (settings && settings.backendUrl) {
+      logIfPossible('info', `Starting Auto-Scout for ${queue.length} Pending businesses via backend.`);
+      return window.runAutoScoutViaBackend(queue);
+    }
+    toastIfPossible('No extension or backend server available. Set up one first.', 'err');
+  };
+
+  // Refresh UI labels to make the workflow obvious.
+  function initV42(){
+    cleanupOldAutoBatch('page load');
+    const logo = q('topbar-logo'), title = q('topbar-title');
+    if (logo) logo.textContent = '🧭 Scout App';
+    if (title) title.textContent = VERSION + ' — Correct Workflow';
+    const autoCard = Array.from(document.querySelectorAll('#autoscout-panel .as-card p')).find(p => /Processes each business|researches pending businesses/i.test(p.textContent || ''));
+    if (autoCard) autoCard.textContent = 'Auto-Scout only researches Pending businesses. If an email is found, the lead moves to Email Found and must be verified before Ready to Send.';
+    const batchBtn = q('batch-btn');
+    if (batchBtn) batchBtn.title = 'Only verified Ready to Send leads should appear here.';
+    if (typeof updateAsStats === 'function') updateAsStats();
+    if (typeof renderQueue === 'function') renderQueue();
+    if (typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab();
+    if (typeof updateBatchBtn === 'function') updateBatchBtn();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initV42); else initV42();
 })();
 
 </script>
