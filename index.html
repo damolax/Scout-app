@@ -9059,7 +9059,7 @@ function manualPollReplies() {
 // ---------------------------------------------------------------
 (function(){
   'use strict';
-  const VERSION = 'v62 — Scheduling + Analytics';
+  const VERSION = 'v63 — Live Send Log + Dashboard Updates';
   const SCHEDULE_KEY = 'scout_scheduled_batches_v62';
   const q = id => document.getElementById(id);
   const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -9484,6 +9484,705 @@ function manualPollReplies() {
 </script>
 
 <!-- v62: Analytics + follow-up integrity + local batch scheduling. Backend remains v5.4. -->
+
+<script>
+/* Scout App v63 — live Gmail send log + real-time dashboard updates.
+   Backend remains v5.4. This overrides only the sending runner and schedule runner.
+   It sends one Gmail API request per contact so Scout App can update the UI after every email. */
+(function(){
+  const VERSION = 'v63 — Live Send Log + Dashboard Updates';
+  const LOG_KEY = 'scout_send_activity_log_v63';
+  const SCHEDULE_KEY = 'scout_scheduled_batches_v62';
+  let v63SendBusy = false;
+  let v63ScheduleBusy = false;
+  let v63RunnerInstalled = false;
+
+  function q(id){ return document.getElementById(id); }
+  function esc(v){ return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+  function norm(v){ return String(v || '').trim().toLowerCase(); }
+  function nowIso(){ return new Date().toISOString(); }
+  function safeJson(str, fallback){ try { return JSON.parse(str || ''); } catch(e){ return fallback; } }
+  function safeArr(x){ return Array.isArray(x) ? x : []; }
+  function sleep(ms){ return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0)))); }
+
+  function toastSafe(msg, type){ try { if (typeof toast === 'function') return toast(msg, type || 'ok'); } catch(e){} console.log('[Scout]', msg); }
+  function settingsSafe(){ try { return (typeof getSettings === 'function') ? getSettings() : (typeof settings !== 'undefined' ? settings : safeJson(localStorage.getItem('sv13_settings'), {})); } catch(e){ return safeJson(localStorage.getItem('sv13_settings'), {}); } }
+  function getBackendUrl(){ const st = settingsSafe(); return String((q('backend-url-input') && q('backend-url-input').value) || st.backendUrl || localStorage.getItem('backendUrl') || localStorage.getItem('scoutBackendUrl') || '').trim().replace(/\/+$/,''); }
+  function getClientId(){ const st = settingsSafe(); return String((q('oauth-client-id') && q('oauth-client-id').value) || st.oauthClientId || localStorage.getItem('oauthClientId') || '').trim(); }
+  function businessesSafe(){ try { return businesses || []; } catch(e){ return window.businesses || []; } }
+  function saveNow(){ try { if (typeof save === 'function') save(); } catch(e){} }
+  function refreshNow(){
+    try { if (typeof renderQueue === 'function') renderQueue(); } catch(e){}
+    try { if (typeof updateEsSendStats === 'function') updateEsSendStats(); } catch(e){}
+    try { if (window.renderScoutDashboard) window.renderScoutDashboard(); } catch(e){}
+    try { if (window.v63RenderLiveSendLog) window.v63RenderLiveSendLog(); } catch(e){}
+  }
+
+  function tokenMap(){ return safeJson(localStorage.getItem('scout_gmail_tokens'), {}) || {}; }
+  function saveTokenMap(m){ try { localStorage.setItem('scout_gmail_tokens', JSON.stringify(m || {})); } catch(e){} }
+  function gmailEntries(){
+    const map = tokenMap();
+    return Object.entries(map).map(([key, val], idx) => {
+      const v = val || {};
+      const email = norm(v.email || v.emailAddress || v.gmail || v.senderEmail || (/@/.test(key) ? key : ''));
+      return { key, index:idx, label: email || key || ('Gmail account ' + (idx+1)), email, token:{...v, email: email || v.email || key} };
+    }).filter(e => e.token && (e.token.access_token || e.token.refresh_token));
+  }
+  function selectedGmail(selectorId, fallbackEmail){
+    const entries = gmailEntries();
+    if (!entries.length) return null;
+    const selected = String((selectorId && q(selectorId) && q(selectorId).value) || fallbackEmail || localStorage.getItem('scout_selected_gmail_key') || '').trim();
+    return entries.find(e => e.key === selected) || entries.find(e => norm(e.email) === norm(selected)) || entries[0] || null;
+  }
+  function updateStoredAccessToken(entry, accessToken){
+    if (!entry || !accessToken) return;
+    const map = tokenMap();
+    if (map[entry.key]) { map[entry.key].access_token = accessToken; map[entry.key].updatedAt = nowIso(); }
+    else if (entry.email && map[entry.email]) { map[entry.email].access_token = accessToken; map[entry.email].updatedAt = nowIso(); }
+    saveTokenMap(map);
+  }
+
+  function emailOf(b){
+    if (!b) return '';
+    const vals = [b.email,b.best_email,b.validatedEmail1,b.validatedEmail2,b.validatedEmail3,b.email1,b.email2,b.email3,b.emailAddress,b.contactEmail];
+    if (Array.isArray(b.emails)) vals.push(...b.emails);
+    return String(vals.find(v => /@/.test(String(v||''))) || '').replace(/^mailto:/i,'').trim();
+  }
+  function nameOf(b){ return String((b && (b.name || b.business || b.businessName || b.company || b.title || b.domain || b.website)) || ''); }
+  function statusOf(b){ const s = norm(b && (b.status || b.emailStatus)); return s === 'ready' ? 'ready_to_send' : s; }
+  function isAlreadySent(b){ const s = statusOf(b); return !!(b && (b.sentAt || b.contactedAt || b.gmailMessageId || b.gmailThreadId || ['contacted','replied','closed'].includes(s))); }
+  function isReady(b){ const s = statusOf(b); return s === 'ready_to_send' && /@/.test(emailOf(b)) && !isAlreadySent(b); }
+  function cleanText(v){
+    if (Array.isArray(v)) return v.filter(Boolean).join(', ');
+    const s = String(v || '').trim();
+    if (!s || s === '[]') return '';
+    if (/^\[.*\]$/.test(s)) { const arr = safeJson(s, null); if (Array.isArray(arr)) return arr.filter(Boolean).join(', '); }
+    return s;
+  }
+  function domainFromUrl(url){ try { const u = String(url || '').trim(); if (!u) return ''; return new URL(/^https?:\/\//i.test(u) ? u : 'https://' + u).hostname.replace(/^www\./i,''); } catch(e){ return String(url||'').replace(/^https?:\/\//i,'').replace(/^www\./i,'').split('/')[0]; } }
+  function contactFromBiz(b){
+    const website = b.website || b.url || b.domain || b.site || '';
+    return {
+      id:b.id || b.businessId || b.leadId || emailOf(b), businessId:b.id || b.businessId || b.leadId || '',
+      name:nameOf(b), email:emailOf(b), website, domain:b.domain || domainFromUrl(website),
+      category:cleanText(b.mainCategories || b.category || b.categories || b.industry || b.niche),
+      industry:cleanText(b.industry || b.mainCategories || b.category || b.categories || b.niche),
+      location:cleanText(b.location || b.address || b.city || b.country), address:cleanText(b.address || b.location),
+      phone:b.phone || b.phone1 || '', rating:b.rating || '', reviews:b.reviews || ''
+    };
+  }
+  function templatesSafe(){
+    const keys = ['scout_send_message_templates','sv13_es_templates','esTemplates','scout_custom_templates'];
+    for (const k of keys) {
+      const arr = safeJson(localStorage.getItem(k), null);
+      if (Array.isArray(arr) && arr.length) return arr;
+    }
+    try { if (typeof esTemplates !== 'undefined' && Array.isArray(esTemplates) && esTemplates.length) return esTemplates; } catch(e){}
+    try { if (window.esTemplates && Array.isArray(window.esTemplates) && window.esTemplates.length) return window.esTemplates; } catch(e){}
+    return [{ id:'default', name:'Default Template', subject:'Quick question for {name}', body:'Hi {name},\n\nI wanted to quickly reach out about your business.\n\nBest regards' }];
+  }
+  function pickTemplate(idx, mode){
+    const ts = templatesSafe();
+    const m = String(mode || q('v62-template-choice')?.value || q('es-rotation-mode')?.value || 'rotate');
+    const m2 = /^template:(\d+)/.exec(m);
+    if (m2) return ts[Math.min(ts.length - 1, Math.max(0, parseInt(m2[1],10)))] || ts[0];
+    if (m === 'first' || m === 'current') return ts[0] || {};
+    if (m === 'random') return ts[Math.floor(Math.random() * ts.length)] || ts[0] || {};
+    return ts[idx % Math.max(1, ts.length)] || {};
+  }
+  function personalise(t, c){ return String(t || '').replace(/\{(name|email|website|domain|category|industry|location|address|phone|rating|reviews)\}/gi, (_, k) => c[norm(k)] || ''); }
+  function buildRows(limit, templateMode){
+    const sig = q('es-signature')?.value || settingsSafe().signature || '';
+    return businessesSafe().filter(isReady).slice(0, Math.max(1, parseInt(limit || 1, 10))).map((b, idx) => {
+      const c = contactFromBiz(b); const tpl = pickTemplate(idx, templateMode);
+      const list = templatesSafe(); const ti = list.indexOf(tpl);
+      const tplId = tpl.id || tpl.key || ('template_' + (ti >= 0 ? ti : idx));
+      const tplName = tpl.name || tpl.title || ('Template ' + ((ti >= 0 ? ti : idx) + 1));
+      const subject = personalise(tpl.subject || tpl.messageSubject || 'Quick question for {name}', c).trim();
+      const body = personalise(tpl.body || tpl.message || tpl.text || '', c).trim();
+      return { id:b.id || c.email, businessId:b.id || '', name:c.name, email:c.email, subject, message:body + (sig ? '\n\n' + sig : ''), templateId:tplId, templateName:tplName, templateIndex:ti >= 0 ? ti : idx };
+    }).filter(r => r.email && r.subject && r.message);
+  }
+  function findBiz(row){ return businessesSafe().find(b => String(b.id || '') === String(row.businessId || row.id || '') || norm(emailOf(b)) === norm(row.email)); }
+  function markSent(row, result, senderEmail, meta){
+    const b = findBiz(row); if (!b) return;
+    const patch = {
+      status:'contacted', contactedAt:nowIso(), sentAt:nowIso(), gmailUsed:senderEmail || '', sentBy:senderEmail || '',
+      subjectSent:row.subject, sentSubject:row.subject, messageSent:row.message,
+      sentTemplateId:row.templateId || '', sentTemplateName:row.templateName || '', sentTemplateIndex:row.templateIndex,
+      gmailMessageId:result.gmailMessageId || result.messageId || '', gmailThreadId:result.gmailThreadId || result.threadId || '',
+      scheduledBatchId:meta && meta.scheduleId || '', lastSendMode: meta && meta.scheduled ? 'scheduled' : 'manual'
+    };
+    try { if (typeof updateBiz === 'function') updateBiz(b.id, patch); else Object.assign(b, patch); } catch(e){ Object.assign(b, patch); }
+  }
+
+  function loadActivity(){ return safeJson(localStorage.getItem(LOG_KEY), []) || []; }
+  function saveActivity(list){ localStorage.setItem(LOG_KEY, JSON.stringify(safeArr(list).slice(-700))); }
+  function addActivity(type, data){
+    const entry = { at:nowIso(), type, ...(data || {}) };
+    const list = loadActivity(); list.push(entry); saveActivity(list);
+    renderLiveSendLog(); injectDashboardActivity();
+    return entry;
+  }
+  function colorForType(type){ return type === 'sent' ? 'var(--green)' : type === 'failed' || type === 'error' ? 'var(--red)' : type === 'dry_run' ? 'var(--blue)' : type === 'skipped' ? 'var(--amber)' : 'var(--muted)'; }
+  function ensureLiveSendPanel(){
+    let log = q('v63-send-log');
+    if (log) return log;
+    const anchor = q('es-log') || q('es-progress-text') || q('es-start-btn');
+    if (!anchor) return null;
+    const card = document.createElement('div');
+    card.className = 'as-card';
+    card.id = 'v63-live-send-card';
+    card.style.marginTop = '14px';
+    card.innerHTML = `
+      <h3>Live Send Log</h3>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Shows each Gmail API send while it is happening. Dashboard updates after every confirmed sent email.</p>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px;background:var(--bg);border-radius:6px;height:8px;overflow:hidden"><div id="v63-send-progress-fill" style="height:100%;width:0%;background:var(--green);transition:.25s"></div></div>
+        <span id="v63-send-progress-text" style="font-size:12px;color:var(--muted);white-space:nowrap">Idle</span>
+        <button class="topbar-btn" onclick="window.v63ClearSendLog && window.v63ClearSendLog()" style="font-size:11px;padding:5px 9px">Clear log</button>
+      </div>
+      <div id="v63-send-log" class="as-log" style="max-height:260px;overflow-y:auto;font-size:11px;font-family:monospace;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px;display:flex;flex-direction:column;gap:5px"></div>`;
+    const sendCard = anchor.closest('.as-card') || anchor.parentElement;
+    if (sendCard && sendCard.parentElement) sendCard.insertAdjacentElement('afterend', card); else document.querySelector('#email-scout-content > div')?.appendChild(card);
+    renderLiveSendLog();
+    return q('v63-send-log');
+  }
+  function renderLiveSendLog(){
+    const log = q('v63-send-log') || ensureLiveSendPanel(); if (!log) return;
+    const rows = loadActivity().slice(-100).reverse();
+    log.innerHTML = rows.length ? rows.map(r => {
+      const t = new Date(r.at).toLocaleTimeString();
+      const label = r.type === 'sent' ? `✓ Sent to ${r.name || r.email || ''}` : r.type === 'failed' ? `✗ Failed ${r.email || r.name || ''}: ${r.reason || ''}` : r.type === 'dry_run' ? `• Dry run ${r.name || r.email || ''}` : r.type === 'skipped' ? `↷ Skipped ${r.email || ''}: ${r.reason || ''}` : r.message || r.type;
+      const extra = [r.senderEmail ? 'from ' + r.senderEmail : '', r.templateName ? 'template: ' + r.templateName : ''].filter(Boolean).join(' · ');
+      return `<div class="log-line"><span class="log-time">${esc(t)}</span><span style="color:${colorForType(r.type)}">${esc(label)}${extra ? ' · ' + esc(extra) : ''}</span></div>`;
+    }).join('') : '<div class="log-line"><span class="log-info">No send activity yet.</span></div>';
+  }
+  window.v63RenderLiveSendLog = renderLiveSendLog;
+  window.v63ClearSendLog = function(){ localStorage.removeItem(LOG_KEY); renderLiveSendLog(); injectDashboardActivity(); };
+  function setSendProgress(done, total, text){
+    const fill = q('v63-send-progress-fill'); const label = q('v63-send-progress-text');
+    if (fill) fill.style.width = total ? Math.round((done/total)*100) + '%' : '0%';
+    if (label) label.textContent = text || (total ? `${done}/${total}` : 'Idle');
+    const fill2 = q('es-progress-fill'); if (fill2) fill2.style.width = total ? Math.round((done/total)*100) + '%' : '0%';
+    const text2 = q('es-progress-text'); if (text2) text2.textContent = text || '';
+  }
+  function logVisible(message, type){
+    ensureLiveSendPanel();
+    const old = q('es-log');
+    if (old) { old.style.display=''; const line=document.createElement('div'); line.textContent = new Date().toLocaleTimeString() + ' - ' + message; line.style.color = colorForType(type || 'info'); old.prepend(line); }
+    addActivity(type || 'info', { message });
+  }
+
+  async function sendSingle(row, entry, account, opts){
+    const backendUrl = getBackendUrl();
+    const body = {
+      contacts:[row], limit:1, delayMs:0, dryRun:!!opts.dryRun,
+      senderEmail: account.email || entry.email || entry.key || '',
+      access_token: account.access_token || '', refresh_token: account.refresh_token || '', expires_at: account.expires_at || 0,
+      client_id:getClientId()
+    };
+    const res = await fetch(backendUrl + '/email-scout/send-selected-batch', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (data && data.access_token) updateStoredAccessToken(entry, data.access_token);
+    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+    const result = safeArr(data.results)[0] || { status:data.dryRun ? 'dry_run' : (data.sent ? 'sent' : 'failed'), reason:data.error || '' };
+    return { data, result };
+  }
+
+  async function sendBatchLive(opts){
+    if (v63SendBusy) throw new Error('A send batch is already running. Wait for it to finish or reload before starting another.');
+    const options = opts || {};
+    const backendUrl = getBackendUrl(); if (!backendUrl) throw new Error('Backend URL is missing. Save your Render backend URL first.');
+    const entry = options.accountEntry || selectedGmail(options.senderSelectorId || 'v51-gmail-account', options.senderEmail);
+    if (!entry) throw new Error('No connected Gmail account selected.');
+    const account = options.account || entry.token || entry;
+    const limit = Math.max(1, Math.min(500, parseInt(options.limit || q('v51-send-limit')?.value || '50', 10) || 50));
+    const delayMs = Math.max(0, Math.min(60000, parseInt(options.delayMs ?? q('v51-send-delay')?.value ?? '1500', 10) || 0));
+    const dryRun = !!options.dryRun;
+    const rows = buildRows(limit, options.templateMode);
+    if (!rows.length) throw new Error('No Ready to Send contacts available. Verify leads first.');
+
+    v63SendBusy = true;
+    ensureLiveSendPanel();
+    setSendProgress(0, rows.length, `Starting ${dryRun ? 'dry run' : 'send'}: 0/${rows.length}`);
+    logVisible(`${dryRun ? 'Dry run' : (options.scheduled ? 'Scheduled Gmail send' : 'Gmail send')} starting for ${rows.length} contact(s) from ${entry.email || entry.key}.`, 'info');
+    const startBtn = q('es-start-btn'); const stopBtn = q('es-stop-btn');
+    if (startBtn) startBtn.disabled = true;
+    if (stopBtn) stopBtn.style.display = '';
+
+    let sent=0, failed=0, skipped=0;
+    try {
+      for (let i=0; i<rows.length; i++) {
+        const row = rows[i];
+        setSendProgress(i, rows.length, `Sending ${i+1}/${rows.length}: ${row.email}`);
+        addActivity('info', { message:`Sending ${i+1}/${rows.length} to ${row.email}`, email:row.email, name:row.name, senderEmail:entry.email || entry.key, templateName:row.templateName });
+        try {
+          const { data, result } = await sendSingle(row, entry, account, options);
+          const sender = data.senderEmail || entry.email || entry.key || '';
+          if (result.status === 'sent') {
+            sent++; markSent(row, result, sender, options);
+            addActivity('sent', { email:row.email, name:row.name, senderEmail:sender, templateName:row.templateName, subject:row.subject, gmailMessageId:result.gmailMessageId || '', gmailThreadId:result.gmailThreadId || '' });
+          } else if (result.status === 'dry_run') {
+            skipped++; addActivity('dry_run', { email:row.email, name:row.name, senderEmail:sender, templateName:row.templateName, subject:row.subject });
+          } else if (result.status === 'skipped') {
+            skipped++; addActivity('skipped', { email:row.email, name:row.name, senderEmail:sender, templateName:row.templateName, reason:result.reason || 'skipped' });
+          } else {
+            failed++; addActivity('failed', { email:row.email, name:row.name, senderEmail:sender, templateName:row.templateName, reason:result.reason || 'unknown error' });
+          }
+        } catch(e) {
+          failed++; addActivity('failed', { email:row.email, name:row.name, senderEmail:entry.email || entry.key, templateName:row.templateName, reason:e.message || String(e) });
+        }
+        saveNow(); refreshNow();
+        setSendProgress(i+1, rows.length, `${i+1}/${rows.length} done · ${sent} sent · ${failed} failed · ${skipped} skipped`);
+        if (delayMs && i < rows.length-1) await sleep(delayMs);
+      }
+      addActivity('info', { message:`Batch complete: ${sent} sent, ${failed} failed, ${skipped} skipped.`, senderEmail:entry.email || entry.key });
+      setSendProgress(rows.length, rows.length, `Complete · ${sent} sent · ${failed} failed · ${skipped} skipped`);
+      return { success:true, sent, failed, skipped, rows:rows.length, senderEmail:entry.email || entry.key };
+    } finally {
+      v63SendBusy = false;
+      if (startBtn) startBtn.disabled = false;
+      saveNow(); refreshNow();
+    }
+  }
+
+  window.scoutSendBatchV63 = sendBatchLive;
+  window.scoutSendBatchV62 = sendBatchLive;
+  window.startEsSend = async function(){
+    try {
+      const result = await sendBatchLive({
+        senderSelectorId:'v51-gmail-account',
+        limit:q('v51-send-limit')?.value || 50,
+        delayMs:q('v51-send-delay')?.value || 1500,
+        dryRun:!!q('v51-dry-run')?.checked,
+        templateMode:q('v62-template-choice')?.value || 'current'
+      });
+      toastSafe(`Gmail send complete: ${result.sent} sent, ${result.failed} failed, ${result.skipped} skipped.`, result.failed ? 'warn' : 'ok');
+    } catch(e) {
+      logVisible('Gmail API send error: ' + (e.message || e), 'error');
+      toastSafe('Automatic send failed: ' + (e.message || e), 'err');
+    }
+  };
+
+  function loadSchedules(){ return safeJson(localStorage.getItem(SCHEDULE_KEY), []) || []; }
+  function saveSchedules(list){ localStorage.setItem(SCHEDULE_KEY, JSON.stringify(safeArr(list))); }
+  function migrateSchedules(){
+    const list = loadSchedules(); let changed=false;
+    list.forEach(s => { if (s.status === 'scheduled') { s.status = 'scheduled_v63'; s.runner = 'v63'; changed=true; } });
+    if (changed) saveSchedules(list);
+  }
+  function scheduleLabel(s){ return `${new Date(s.runAt).toLocaleString()} · ${s.limit} from ${s.senderEmail || 'Gmail'}`; }
+  function refreshScheduleSelects(){
+    const sel = q('v62-schedule-sender');
+    if (sel) {
+      const before = sel.value; const entries = gmailEntries();
+      sel.innerHTML = entries.length ? entries.map(e => `<option value="${esc(e.key)}">${esc(e.label)}</option>`).join('') : '<option value="">No Gmail connected</option>';
+      if (before && [...sel.options].some(o => o.value === before)) sel.value = before;
+    }
+  }
+  window.v62CreateSchedule = function(){
+    const t = q('v62-schedule-time')?.value;
+    const entry = selectedGmail('v62-schedule-sender');
+    const limit = Math.max(1, parseInt(q('v62-schedule-limit')?.value || '50', 10));
+    const delayMs = Math.max(0, parseInt(q('v62-schedule-delay')?.value || '1500', 10));
+    const templateMode = q('v62-schedule-template')?.value || 'current';
+    if (!t) return toastSafe('Choose a schedule time.', 'err');
+    if (!entry) return toastSafe('Choose a connected Gmail sender.', 'err');
+    const runAt = new Date(t).toISOString();
+    if (new Date(runAt).getTime() < Date.now() - 60000) return toastSafe('Schedule time is already in the past.', 'err');
+    const list = loadSchedules();
+    const item = { id:'sch_v63_' + Date.now() + '_' + Math.random().toString(36).slice(2,7), runner:'v63', status:'scheduled_v63', createdAt:nowIso(), runAt, senderKey:entry.key, senderEmail:entry.email || entry.key, limit, delayMs, templateMode, sent:0, failed:0, skipped:0 };
+    list.push(item); saveSchedules(list); renderSchedulesV63();
+    toastSafe('Scheduled: ' + scheduleLabel(item), 'ok');
+  };
+  window.v62CancelSchedule = function(id){
+    const list = loadSchedules().map(s => s.id === id && ['scheduled','scheduled_v63','failed'].includes(s.status) ? {...s, status:'cancelled', cancelledAt:nowIso()} : s);
+    saveSchedules(list); renderSchedulesV63();
+  };
+  function renderSchedulesV63(){
+    refreshScheduleSelects();
+    const el = q('v62-schedule-list'); if (!el) return;
+    const list = loadSchedules().sort((a,b)=>new Date(a.runAt)-new Date(b.runAt)).slice(-40).reverse();
+    el.innerHTML = list.length ? list.map(s => {
+      const label = s.status === 'scheduled_v63' ? 'scheduled' : s.status;
+      const color = s.status === 'completed' ? 'var(--green)' : s.status === 'failed' ? 'var(--red)' : s.status === 'running' ? 'var(--amber)' : s.status === 'cancelled' ? 'var(--faint)' : 'var(--accent)';
+      return `<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-top:7px;background:var(--card2)"><div style="min-width:0"><div style="font-size:12px;font-weight:750;color:var(--text)">${esc(scheduleLabel(s))}</div><div style="font-size:11px;color:${color};margin-top:2px">${esc(label)}${s.sent ? ' · sent ' + s.sent : ''}${s.failed ? ' · failed ' + s.failed : ''}${s.error ? ' · ' + esc(s.error) : ''}</div></div>${['scheduled_v63','failed'].includes(s.status) ? `<button class="topbar-btn danger" style="font-size:11px;padding:5px 9px" onclick="v62CancelSchedule('${esc(s.id)}')">Cancel</button>` : ''}</div>`;
+    }).join('') : '<div style="font-size:12px;color:var(--muted);padding:8px 0">No scheduled batches yet.</div>';
+  }
+  window.v63RenderSchedules = renderSchedulesV63;
+  async function runDueSchedulesV63(){
+    if (v63ScheduleBusy || v63SendBusy) return;
+    migrateSchedules();
+    const due = loadSchedules().filter(s => s.status === 'scheduled_v63' && new Date(s.runAt).getTime() <= Date.now()).sort((a,b)=>new Date(a.runAt)-new Date(b.runAt));
+    if (!due.length) return;
+    v63ScheduleBusy = true;
+    for (const s of due) {
+      let list = loadSchedules(); let idx = list.findIndex(x => x.id === s.id); if (idx < 0 || list[idx].status !== 'scheduled_v63') continue;
+      list[idx] = {...list[idx], status:'running', startedAt:nowIso()}; saveSchedules(list); renderSchedulesV63();
+      try {
+        const entry = selectedGmail('', s.senderKey || s.senderEmail);
+        if (!entry) throw new Error('Scheduled Gmail account is not connected anymore: ' + (s.senderEmail || s.senderKey));
+        const res = await sendBatchLive({ accountEntry:entry, account:entry.token, senderEmail:entry.email || entry.key, limit:s.limit, delayMs:s.delayMs, templateMode:s.templateMode, scheduled:true, scheduleId:s.id, dryRun:false });
+        list = loadSchedules(); idx = list.findIndex(x => x.id === s.id);
+        if (idx >= 0) list[idx] = {...list[idx], status:'completed', completedAt:nowIso(), sent:res.sent, failed:res.failed, skipped:res.skipped, actualSender:res.senderEmail};
+        saveSchedules(list); renderSchedulesV63();
+      } catch(e) {
+        list = loadSchedules(); idx = list.findIndex(x => x.id === s.id);
+        if (idx >= 0) list[idx] = {...list[idx], status:'failed', failedAt:nowIso(), error:e.message || String(e)};
+        saveSchedules(list); renderSchedulesV63(); addActivity('failed', { message:'Scheduled batch failed: ' + (e.message || e), senderEmail:s.senderEmail || s.senderKey });
+      }
+    }
+    v63ScheduleBusy = false;
+  }
+
+  function activityRowsForDashboard(){ return loadActivity().slice(-12).reverse(); }
+  function injectDashboardActivity(){
+    const panel = q('dashboard-content'); if (!panel) return;
+    const root = panel.querySelector('div[style*="overflow-y:auto"]') || panel.firstElementChild || panel;
+    let card = q('v63-dashboard-send-log-card');
+    if (!card) {
+      card = document.createElement('div'); card.className='as-card'; card.id='v63-dashboard-send-log-card'; card.style.marginTop='14px';
+      root.appendChild(card);
+    }
+    const rows = activityRowsForDashboard();
+    card.innerHTML = `<h3>Live Send Activity</h3><p style="font-size:12px;color:var(--muted);margin-bottom:8px">Latest Gmail API send events. This updates while sending.</p><div style="overflow:auto;max-height:260px"><table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>${rows.length ? rows.map(r => `<tr><td style="padding:8px;border-bottom:1px solid var(--border);color:var(--muted);white-space:nowrap">${esc(new Date(r.at).toLocaleTimeString())}</td><td style="padding:8px;border-bottom:1px solid var(--border);color:${colorForType(r.type)}">${esc(r.type)}</td><td style="padding:8px;border-bottom:1px solid var(--border)">${esc(r.name || r.email || r.message || '')}</td><td style="padding:8px;border-bottom:1px solid var(--border);color:var(--muted)">${esc(r.senderEmail || '')}</td></tr>`).join('') : '<tr><td style="padding:12px;color:var(--muted)">No live send activity yet.</td></tr>'}</tbody></table></div>`;
+  }
+  const previousDashboard = window.renderScoutDashboard;
+  window.renderScoutDashboard = function(){ try { if (typeof previousDashboard === 'function') previousDashboard(); } catch(e){} injectDashboardActivity(); };
+
+  function patchVersion(){ const title=q('topbar-title'); if (title) title.textContent = VERSION; }
+  function init(){
+    patchVersion(); ensureLiveSendPanel(); renderLiveSendLog(); migrateSchedules(); renderSchedulesV63(); injectDashboardActivity();
+    if (!v63RunnerInstalled) {
+      v63RunnerInstalled = true;
+      setInterval(runDueSchedulesV63, 15000);
+      setInterval(renderSchedulesV63, 6000);
+      setInterval(() => { if (q('dashboard-content')?.classList.contains('active')) injectDashboardActivity(); }, 3000);
+      setTimeout(runDueSchedulesV63, 3000);
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+
+
+<script>
+/* v63 schedule guard: local schedules are limited to the next 24 hours. */
+(function(){
+  const MAX_AHEAD_MS = 24 * 60 * 60 * 1000;
+  function $(id){ return document.getElementById(id); }
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function localValue(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes()); }
+  function toast(msg, type){ if (typeof window.toast === 'function') window.toast(msg, type || ''); else alert(msg); }
+  function setBounds(){
+    const el = $('v62-schedule-time');
+    if (!el) return;
+    const now = new Date();
+    const min = new Date(now.getTime() + 2 * 60 * 1000);
+    const max = new Date(now.getTime() + MAX_AHEAD_MS);
+    el.min = localValue(min);
+    el.max = localValue(max);
+    if (!el.value) el.value = localValue(new Date(now.getTime() + 2 * 60 * 60 * 1000));
+    const card = $('v62-scheduler-card');
+    if (card && !$('v63-schedule-quick-row')) {
+      const row = document.createElement('div');
+      row.id = 'v63-schedule-quick-row';
+      row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 10px 0;align-items:center';
+      row.innerHTML = '<span style="font-size:11px;color:var(--muted);font-weight:700">Quick time:</span>' +
+        [1,2,3,6,12,24].map(h => '<button type="button" class="topbar-btn" style="font-size:11px;padding:5px 9px" data-v63-hours="'+h+'">+'+h+'h</button>').join('') +
+        '<span style="font-size:11px;color:var(--muted)">Max schedule window: 24 hours. Keep Scout App open.</span>';
+      const grid = card.querySelector('div[style*="grid-template-columns"]');
+      if (grid) grid.insertAdjacentElement('afterend', row); else card.insertBefore(row, card.firstChild.nextSibling);
+      row.querySelectorAll('[data-v63-hours]').forEach(btn => btn.addEventListener('click', () => {
+        const h = Math.min(24, Math.max(1, parseInt(btn.getAttribute('data-v63-hours'), 10) || 2));
+        $('v62-schedule-time').value = localValue(new Date(Date.now() + h * 60 * 60 * 1000));
+      }));
+    }
+  }
+  function within24(){
+    const el = $('v62-schedule-time');
+    if (!el || !el.value) return true;
+    const t = new Date(el.value).getTime();
+    if (!Number.isFinite(t)) return true;
+    const now = Date.now();
+    if (t < now - 60000) { toast('Schedule time is already in the past.', 'err'); return false; }
+    if (t > now + MAX_AHEAD_MS) { toast('Schedule must be within the next 24 hours.', 'err'); return false; }
+    return true;
+  }
+  const originalCreate = window.v62CreateSchedule;
+  window.v62CreateSchedule = function(){ setBounds(); if (!within24()) return; return originalCreate && originalCreate.apply(this, arguments); };
+  const originalRender = window.v63RenderSchedules || window.v62RenderSchedules;
+  if (originalRender) {
+    window.v63RenderSchedules = function(){ const r = originalRender.apply(this, arguments); setBounds(); return r; };
+    window.v62RenderSchedules = window.v63RenderSchedules;
+  }
+  function boot(){ setBounds(); setInterval(setBounds, 30000); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+</script>
+
+<!-- v63: Live Gmail send log + real-time dashboard updates. Backend remains v5.4. -->
+
+<script>
+/* Scout App v64 — Team Scouted Protection
+   Scope: if you or any teammate has already scouted/contacted a lead, Scout blocks it from Auto-Scout, Verify, Ready-to-Send, manual send, and scheduled send. */
+(function(){
+  'use strict';
+  const VERSION = 'v64 — Team Scouted Protection';
+  const TEAM_KEY = 'scout_team_scouted_local_v64';
+  const SCHEDULE_KEY = 'scout_scheduled_batches_v62';
+  let blockingBusy = false;
+  let sendBusy = false;
+  let scheduleBusy = false;
+  let originalBatch = window.scoutSendBatchV63 || window.scoutSendBatchV62 || null;
+  const originalStart = window.startEsSend;
+  const originalCreateSchedule = window.v62CreateSchedule;
+
+  function q(id){ return document.getElementById(id); }
+  function safeJson(s, f){ try { return JSON.parse(s || ''); } catch(e){ return f; } }
+  function safeArr(v){ return Array.isArray(v) ? v : []; }
+  function nowIso(){ return new Date().toISOString(); }
+  function norm(v){ return String(v || '').trim().toLowerCase(); }
+  function esc(v){ return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+  function toastSafe(msg, type){ try { if (typeof toast === 'function') toast(msg, type || 'ok'); else console.log(msg); } catch(e){ console.log(msg); } }
+  function saveNow(){ try { if (typeof save === 'function') save(); else if (typeof saveAll === 'function') saveAll(); } catch(e){} }
+  function refreshNow(){ try { if (typeof renderQueue === 'function') renderQueue(); } catch(e){} try { if (window.renderScoutDashboard) window.renderScoutDashboard(); } catch(e){} try { if (window.v63RenderLiveSendLog) window.v63RenderLiveSendLog(); } catch(e){} }
+  function logActivity(type, data){
+    try {
+      const key='scout_send_activity_log_v63'; const list=safeJson(localStorage.getItem(key), []) || [];
+      list.push({ at:nowIso(), type:type || 'info', ...(data || {}) });
+      localStorage.setItem(key, JSON.stringify(list.slice(-700)));
+      refreshNow();
+    } catch(e){}
+  }
+  function logVisible(message, type){
+    const old = q('es-log');
+    if (old) { old.style.display=''; const line=document.createElement('div'); line.textContent = new Date().toLocaleTimeString() + ' - ' + message; old.prepend(line); }
+    logActivity(type || 'info', { message });
+  }
+  function settingsSafe(){ try { return (typeof getSettings === 'function') ? getSettings() : (window.settings || settings || safeJson(localStorage.getItem('sv13_settings'), {}) || {}); } catch(e){ return {}; } }
+  function getBackendUrl(){
+    const s = settingsSafe();
+    return String((q('backend-url-input') && q('backend-url-input').value) || s.backendUrl || localStorage.getItem('backendUrl') || localStorage.getItem('scoutBackendUrl') || '').trim().replace(/\/+$/,'');
+  }
+  function getBusinesses(){ try { if (Array.isArray(businesses)) return businesses; } catch(e){} return Array.isArray(window.businesses) ? window.businesses : []; }
+  function getStatus(b){ const s = norm(b && (b.status || b.emailStatus || b.contactStatus)); return s === 'ready' ? 'ready_to_send' : s; }
+  function isContacted(b){ const s=getStatus(b); return !!(b && (b.sentAt || b.contactedAt || b.gmailMessageId || b.gmailThreadId || ['contacted','replied','closed'].includes(s))); }
+  function isBlocked(b){ return !!(b && (b.blockedByDedup || b.teamScoutedBlocked || getStatus(b) === 'blocked' || getStatus(b) === 'team_scouted')); }
+  function isCandidate(b){ const s=getStatus(b); return !!b && !isBlocked(b) && !['contacted','replied','closed','invalid','duplicate'].includes(s); }
+  function emailOf(b){ return norm((b && (b.email || b.best_email || b.validatedEmail || b.validatedEmail1 || (Array.isArray(b.emails) ? b.emails[0] : ''))) || '').replace(/^mailto:/,'').replace(/[;,.)\]]+$/g,'').replace(/^[<([\s]+/g,''); }
+  function domainFrom(raw){
+    let v = String(raw || '').trim().toLowerCase();
+    if (!v) return '';
+    v = v.replace(/^mailto:/,'');
+    try { v = new URL(/^https?:\/\//i.test(v) ? v : 'https://' + v).hostname; } catch(e){}
+    return v.replace(/^www\./,'').split('/')[0].split('?')[0].split('#')[0].split(':')[0].replace(/[;,.)\]]+$/g,'');
+  }
+  function linkNorm(v){
+    let raw = String(v || '').trim(); if (!raw) return '';
+    try { const u = new URL(raw); u.hash=''; return u.toString().replace(/\/+$/,'').toLowerCase(); } catch(e){ return raw.toLowerCase().replace(/\/+$/,''); }
+  }
+  function nameNorm(v){ return String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim().slice(0,120); }
+  function nameOf(b){ return String((b && (b.name || b.businessName || b.business || b.company || b.title || b.domain || b.website)) || ''); }
+  function identifiers(b){
+    const email = emailOf(b);
+    const website = b && (b.website || b.site || b.domain || b.url || b.businessWebsite || '');
+    const domain = domainFrom((b && b.domain) || website || (email.includes('@') ? email.split('@')[1] : ''));
+    const profileLink = linkNorm(b && (b.profileLink || b.profile_link || b.maps_url || b.mapsUrl || b.googleMapsUrl || b.url || ''));
+    const placeId = String((b && (b.place_id || b.placeId || b.placeID || b.googlePlaceId)) || '').trim();
+    const name = nameNorm(nameOf(b));
+    const nameDomain = name && domain ? `${name}|${domain}` : '';
+    return { id:b && (b.id || b.businessId || b.leadId || ''), name:nameOf(b), email, place_id:placeId, profileLink, website, domain, nameDomain, source:b && (b.source || '') };
+  }
+  function loadLocalRegistry(){ return { byEmail:{}, byPlaceId:{}, byDomain:{}, byProfileLink:{}, byNameDomain:{}, ...(safeJson(localStorage.getItem(TEAM_KEY), {}) || {}) }; }
+  function saveLocalRegistry(r){ localStorage.setItem(TEAM_KEY, JSON.stringify({ byEmail:r.byEmail||{}, byPlaceId:r.byPlaceId||{}, byDomain:r.byDomain||{}, byProfileLink:r.byProfileLink||{}, byNameDomain:r.byNameDomain||{}, updatedAt:nowIso() })); }
+  function addLocal(b, meta){
+    const r = loadLocalRegistry(); const ids = identifiers(b); const rec = { ...ids, actor:(meta&&meta.actor)||b.sentBy||b.gmailUsed||'', sentAt:b.sentAt||b.contactedAt||(meta&&meta.sentAt)||nowIso(), markedAt:nowIso() };
+    if (ids.email) r.byEmail[ids.email] = rec;
+    if (ids.place_id) r.byPlaceId[ids.place_id] = rec;
+    if (ids.profileLink) r.byProfileLink[ids.profileLink] = rec;
+    if (ids.domain && !['gmail.com','yahoo.com','outlook.com','hotmail.com','live.com','icloud.com','aol.com','proton.me','protonmail.com'].includes(ids.domain)) r.byDomain[ids.domain] = rec;
+    if (ids.nameDomain) r.byNameDomain[ids.nameDomain] = rec;
+    saveLocalRegistry(r);
+  }
+  function localMatch(b){
+    const ids = identifiers(b); const r = loadLocalRegistry();
+    if (ids.email && r.byEmail[ids.email]) return { blocked:true, matchedBy:'email', record:r.byEmail[ids.email] };
+    if (ids.place_id && r.byPlaceId[ids.place_id]) return { blocked:true, matchedBy:'place_id', record:r.byPlaceId[ids.place_id] };
+    if (ids.profileLink && r.byProfileLink[ids.profileLink]) return { blocked:true, matchedBy:'profile_link', record:r.byProfileLink[ids.profileLink] };
+    if (ids.domain && r.byDomain[ids.domain]) return { blocked:true, matchedBy:'domain', record:r.byDomain[ids.domain] };
+    if (ids.nameDomain && r.byNameDomain[ids.nameDomain]) return { blocked:true, matchedBy:'name_domain', record:r.byNameDomain[ids.nameDomain] };
+    return { blocked:false };
+  }
+  function patchBiz(b, patch){ try { if (typeof updateBiz === 'function' && b.id) updateBiz(b.id, patch); else Object.assign(b, patch); } catch(e){ Object.assign(b, patch); } }
+  function blockBiz(b, reason, match){
+    if (!b || isContacted(b) || isBlocked(b)) return false;
+    patchBiz(b, {
+      status:'blocked', blockedByDedup:true, teamScoutedBlocked:true, teamScoutedReason:reason || 'already_scouted_by_team',
+      teamScoutedMatchedBy:(match && match.matchedBy) || '', teamScoutedAt:nowIso(), updatedAt:nowIso()
+    });
+    return true;
+  }
+  async function remoteCheck(list){
+    const backend = getBackendUrl(); if (!backend || !list.length) return [];
+    const out=[];
+    for (let i=0;i<list.length;i+=80) {
+      const chunk=list.slice(i,i+80);
+      try {
+        const res = await fetch(backend + '/team-scouted/check', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ leads:chunk.map(identifiers) }) });
+        const data = await res.json().catch(()=>({}));
+        if (res.ok && data.success !== false) safeArr(data.results).forEach((r, idx) => out.push({ biz:chunk[idx], result:r }));
+      } catch(e){ console.warn('Team scouted check failed:', e); }
+    }
+    return out;
+  }
+  async function markRemote(list, meta){
+    const backend = getBackendUrl(); if (!backend || !list.length) return null;
+    try {
+      const res = await fetch(backend + '/team-scouted/mark', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ leads:list.map(identifiers), actor:(meta&&meta.actor)||'', senderEmail:(meta&&meta.senderEmail)||'', batchId:(meta&&meta.batchId)||'', source:(meta&&meta.source)||'scout_app' }) });
+      return await res.json().catch(()=>null);
+    } catch(e){ console.warn('Team scouted mark failed:', e); return null; }
+  }
+  async function seedRegistryFromContacted(remote){
+    const sent = getBusinesses().filter(isContacted);
+    sent.forEach(b => addLocal(b, { source:'existing_contacted' }));
+    const unmarked = sent.filter(b => !b.teamRegistryMarkedAt).slice(0, 500);
+    if (remote && unmarked.length) {
+      const out = await markRemote(unmarked, { source:'existing_contacted_sync' });
+      if (out && out.success !== false) unmarked.forEach(b => patchBiz(b, { teamRegistryMarkedAt:nowIso() }));
+    }
+  }
+  async function blockKnownScouted(options){
+    if (blockingBusy) return { blocked:0 };
+    blockingBusy = true;
+    try {
+      await seedRegistryFromContacted(false);
+      const all = getBusinesses().filter(isCandidate);
+      const list = options && options.readyOnly ? all.filter(b => getStatus(b)==='ready_to_send') : all;
+      let blocked = 0;
+      list.forEach(b => { const m=localMatch(b); if (m.blocked && blockBiz(b, 'already_scouted_locally_or_by_team', m)) blocked++; });
+      const remaining = list.filter(b => !isBlocked(b));
+      const remote = await remoteCheck(remaining);
+      remote.forEach(x => { if (x && x.result && x.result.blocked && blockBiz(x.biz, 'already_scouted_by_team', x.result)) blocked++; });
+      if (blocked) {
+        saveNow(); refreshNow();
+        showNotice(`🛡 ${blocked} lead${blocked===1?'':'s'} blocked because your team already scouted/contacted them.`, 'warn');
+        logVisible(`Team protection blocked ${blocked} already-scouted lead(s).`, 'skipped');
+      }
+      return { blocked };
+    } finally { blockingBusy = false; }
+  }
+  function showNotice(msg, type){
+    let bar=q('v64-team-notice');
+    if (!bar) {
+      bar=document.createElement('div'); bar.id='v64-team-notice';
+      bar.style.cssText='display:none;align-items:center;gap:10px;padding:8px 16px;background:rgba(109,123,255,.09);border-bottom:1px solid var(--border);font-size:12px;color:var(--text);position:relative;z-index:80';
+      const top=q('topbar'); if (top && top.parentElement) top.insertAdjacentElement('afterend', bar); else document.body.prepend(bar);
+    }
+    bar.innerHTML=`<span style="flex:1">${esc(msg)}</span><button class="topbar-btn" style="font-size:11px;padding:4px 9px" onclick="document.getElementById('v64-team-notice').style.display='none'">Hide</button>`;
+    bar.style.display='flex';
+    clearTimeout(bar._hideTimer); bar._hideTimer=setTimeout(()=>{ if(bar) bar.style.display='none'; }, 12000);
+  }
+  function selectedEntry(selectorId, wanted){
+    const map = safeJson(localStorage.getItem('scout_gmail_tokens'), {}) || {};
+    const accounts = Object.keys(map).map(k => ({ key:k, email:map[k].email || k, token:map[k], label:map[k].email || k }));
+    const val = wanted || (selectorId && q(selectorId) && q(selectorId).value) || (q('v51-gmail-account') && q('v51-gmail-account').value) || '';
+    return accounts.find(a => norm(a.key)===norm(val) || norm(a.email)===norm(val)) || accounts[0] || null;
+  }
+  async function protectedBatch(opts){
+    if (sendBusy) throw new Error('A send batch is already running.');
+    sendBusy = true;
+    try {
+      await seedRegistryFromContacted(true);
+      await blockKnownScouted({ readyOnly:true });
+      const before = new Set(getBusinesses().filter(isContacted).map(b => String(b.id || emailOf(b))));
+      const runner = originalBatch || window.scoutSendBatchV63 || window.scoutSendBatchV62;
+      if (!runner || runner === protectedBatch) throw new Error('Gmail send runner is not available. Reload Scout App.');
+      const res = await runner(opts || {});
+      const newlySent = getBusinesses().filter(b => isContacted(b) && !before.has(String(b.id || emailOf(b))));
+      newlySent.forEach(b => addLocal(b, { source:'gmail_send' }));
+      if (newlySent.length) await markRemote(newlySent, { source:(opts&&opts.scheduled)?'scheduled_gmail_send':'manual_gmail_send', senderEmail:res && res.senderEmail || (opts&&opts.senderEmail) || '', batchId:(opts&&opts.scheduleId)||'' });
+      saveNow(); refreshNow();
+      return res;
+    } finally { sendBusy = false; }
+  }
+  window.scoutTeamBlockKnown = blockKnownScouted;
+  window.scoutTeamSyncContacted = () => seedRegistryFromContacted(true).then(()=>{ saveNow(); refreshNow(); toastSafe('Team scouted registry synced.', 'ok'); });
+  window.scoutSendBatchV64 = protectedBatch;
+  window.scoutSendBatchV63 = protectedBatch;
+  window.scoutSendBatchV62 = protectedBatch;
+  window.startEsSend = async function(){
+    try {
+      const res = await protectedBatch({ senderSelectorId:'v51-gmail-account', limit:q('v51-send-limit')?.value || 50, delayMs:q('v51-send-delay')?.value || 1500, dryRun:!!q('v51-dry-run')?.checked, templateMode:q('v62-template-choice')?.value || 'current' });
+      toastSafe(`Gmail send complete: ${res.sent||0} sent, ${res.failed||0} failed, ${res.skipped||0} skipped.`, res && res.failed ? 'warn' : 'ok');
+    } catch(e) { logVisible('Gmail API send error: ' + (e.message || e), 'error'); toastSafe('Automatic send failed: ' + (e.message || e), 'err'); }
+  };
+  // Wrap upload, verify and Auto-Scout so duplicates are blocked as soon as possible.
+  const oldConfirm = window.confirmUpload;
+  if (typeof oldConfirm === 'function') window.confirmUpload = async function(){ const r = await oldConfirm.apply(this, arguments); setTimeout(()=>blockKnownScouted({}), 300); return r; };
+  const oldScout = window.startAutoScout;
+  if (typeof oldScout === 'function') window.startAutoScout = async function(){ await blockKnownScouted({}); return oldScout.apply(this, arguments); };
+  ['sv36VerifyQueue','sv41VerifyEmailFound'].forEach(fn => { const old=window[fn]; if (typeof old === 'function') window[fn] = async function(){ await blockKnownScouted({}); const r = await old.apply(this, arguments); setTimeout(()=>blockKnownScouted({}),500); return r; }; });
+
+  function loadSchedules(){ return safeJson(localStorage.getItem(SCHEDULE_KEY), []) || []; }
+  function saveSchedules(list){ localStorage.setItem(SCHEDULE_KEY, JSON.stringify(safeArr(list))); }
+  function migrateSchedules(){
+    const list=loadSchedules(); let changed=false;
+    list.forEach(s => { if (s.status === 'scheduled_v63' || s.status === 'scheduled') { s.status='scheduled_v64'; s.runner='v64'; changed=true; } });
+    if (changed) saveSchedules(list);
+  }
+  window.v62CreateSchedule = function(){
+    const before = loadSchedules().map(s => s.id).join('|');
+    const out = originalCreateSchedule ? originalCreateSchedule.apply(this, arguments) : null;
+    setTimeout(() => {
+      const list=loadSchedules(); let changed=false;
+      list.forEach(s => { if ((s.status === 'scheduled_v63' || s.status === 'scheduled') && !before.includes(s.id)) { s.status='scheduled_v64'; s.runner='v64'; changed=true; } });
+      if (changed) saveSchedules(list);
+      if (window.v63RenderSchedules) window.v63RenderSchedules();
+      showNotice('🕒 Scheduled batch protected: Scout will check Team Scouted before sending.', 'info');
+    }, 200);
+    return out;
+  };
+  async function runDueSchedulesV64(){
+    if (scheduleBusy || sendBusy) return;
+    migrateSchedules();
+    const due = loadSchedules().filter(s => s.status === 'scheduled_v64' && new Date(s.runAt).getTime() <= Date.now()).sort((a,b)=>new Date(a.runAt)-new Date(b.runAt));
+    if (!due.length) return;
+    scheduleBusy = true;
+    for (const s of due) {
+      let list=loadSchedules(); let idx=list.findIndex(x=>x.id===s.id); if (idx<0 || list[idx].status !== 'scheduled_v64') continue;
+      list[idx] = { ...list[idx], status:'running_v64', startedAt:nowIso() }; saveSchedules(list); if (window.v63RenderSchedules) window.v63RenderSchedules();
+      showNotice(`🕒 Running scheduled batch: ${s.limit} from ${s.senderEmail || s.senderKey}.`, 'info');
+      try {
+        const entry = selectedEntry('', s.senderKey || s.senderEmail);
+        if (!entry) throw new Error('Scheduled Gmail account is not connected anymore: ' + (s.senderEmail || s.senderKey));
+        const res = await protectedBatch({ accountEntry:entry, account:entry.token, senderEmail:entry.email || entry.key, limit:s.limit, delayMs:s.delayMs, templateMode:s.templateMode, scheduled:true, scheduleId:s.id, dryRun:false });
+        list=loadSchedules(); idx=list.findIndex(x=>x.id===s.id); if (idx>=0) list[idx] = { ...list[idx], status:'completed', completedAt:nowIso(), sent:res.sent||0, failed:res.failed||0, skipped:res.skipped||0, actualSender:res.senderEmail || entry.email || entry.key };
+        saveSchedules(list); if (window.v63RenderSchedules) window.v63RenderSchedules();
+      } catch(e) {
+        list=loadSchedules(); idx=list.findIndex(x=>x.id===s.id); if (idx>=0) list[idx] = { ...list[idx], status:'failed', failedAt:nowIso(), error:e.message || String(e) };
+        saveSchedules(list); if (window.v63RenderSchedules) window.v63RenderSchedules(); logVisible('Scheduled batch failed: ' + (e.message || e), 'error');
+      }
+    }
+    scheduleBusy = false;
+  }
+  function patchFilterLabel(){
+    const blockedBtn=[...document.querySelectorAll('.qp-action')].find(b => /blocked/.test(String(b.getAttribute('onclick') || '')));
+    if (blockedBtn) blockedBtn.textContent = '🛡 Team Scouted';
+  }
+  function patchVersion(){ const title=q('topbar-title'); if (title) title.textContent=VERSION; document.title='Scout App v64'; }
+  function init(){
+    patchVersion(); patchFilterLabel(); seedRegistryFromContacted(false); migrateSchedules();
+    setTimeout(()=>blockKnownScouted({}), 1500);
+    setInterval(()=>seedRegistryFromContacted(true), 10*60*1000);
+    setInterval(()=>blockKnownScouted({ readyOnly:true }), 90*1000);
+    setInterval(runDueSchedulesV64, 15000);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
 
 </body>
 </html>
