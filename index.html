@@ -9,74 +9,93 @@
 <meta name="apple-mobile-web-app-title" content="Scout App">
 <meta name="theme-color" content="#0d0f14">
 <link rel="manifest" href="manifest.json">
-<title>Scout App v36</title>
+<title>Scout App v61</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  --bg:#0d0f14;--surface:#141720;--card:#1c2030;--card2:#222843;--border:#2a3050;
-  --accent:#5b6ef5;--accent2:#7c3aed;--green:#10c980;--amber:#f59e0b;--red:#ef4444;
-  --blue:#3b82f6;--text:#f0f3ff;--muted:#9ba8c4;--faint:#4a5580;
-  --pending:#4a5580;--scanning:#f59e0b;--found:#10c980;--contacted:#5b6ef5;
-  --replied:#7c3aed;--closed:#374151;
+  --bg:#0a0b10;--surface:#111319;--card:#171a24;--card2:#1d2130;--border:#262b3d;
+  --accent:#6d7bff;--accent2:#a78bfa;--green:#22d3a5;--amber:#f5a623;--red:#f5495c;
+  --blue:#4d9bff;--text:#f4f6ff;--muted:#8b93b3;--faint:#565f80;
+  --pending:#565f80;--scanning:#f5a623;--found:#22d3a5;--contacted:#6d7bff;
+  --replied:#a78bfa;--closed:#3c4257;
+  --grad-accent:linear-gradient(135deg,#6d7bff 0%,#a78bfa 100%);
+  --grad-surface:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3);
+  --shadow-md:0 4px 16px rgba(0,0,0,.35);
+  --shadow-lg:0 16px 48px rgba(0,0,0,.5);
+  --shadow-glow:0 0 0 1px rgba(109,123,255,.25),0 8px 24px rgba(109,123,255,.15);
+  --radius-sm:8px;--radius-md:12px;--radius-lg:16px;--radius-xl:20px;
+  --ease:cubic-bezier(.16,1,.3,1);
 }
 html,body{height:100%;overflow:hidden}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;display:flex;flex-direction:column}
+body{
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  background:
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(109,123,255,.10), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 100% 0%, rgba(167,139,250,.08), transparent 55%),
+    var(--bg);
+  color:var(--text);font-size:14px;display:flex;flex-direction:column;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;letter-spacing:-.1px;
+}
 
 /* -- TOP BAR -- */
-#topbar{display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
-#topbar-logo{font-weight:900;font-size:15px;color:var(--accent);letter-spacing:-0.5px;margin-right:4px}
-#topbar-title{font-size:13px;color:var(--muted);flex:1}
-.topbar-btn{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;transition:.12s;white-space:nowrap}
-.topbar-btn:hover{border-color:var(--accent);color:var(--accent)}
-.topbar-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.topbar-btn.primary:hover{filter:brightness(1.15)}
+#topbar{display:flex;align-items:center;gap:12px;padding:12px 20px;background:rgba(17,19,25,.92);backdrop-filter:blur(16px) saturate(160%);border-bottom:1px solid var(--border);flex-shrink:0;box-shadow:var(--shadow-sm)}
+#topbar-logo{font-weight:900;font-size:15px;background:var(--grad-accent);-webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:-0.6px;margin-right:4px}
+#topbar-title{font-size:12.5px;color:var(--muted);flex:1;font-weight:500}
+.topbar-btn{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;transition:.16s var(--ease);white-space:nowrap;box-shadow:var(--shadow-sm)}
+.topbar-btn:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 12px rgba(109,123,255,.15)}
+.topbar-btn:active{transform:translateY(0)}
+.topbar-btn.primary{background:var(--grad-accent);border-color:transparent;color:#fff;box-shadow:0 4px 14px rgba(109,123,255,.3)}
+.topbar-btn.primary:hover{filter:brightness(1.1);transform:translateY(-1px);box-shadow:0 6px 18px rgba(109,123,255,.4)}
 .topbar-btn.danger{background:var(--red);border-color:var(--red);color:#fff}
-#scout-status-bar{display:none;align-items:center;gap:10px;padding:7px 16px;background:linear-gradient(90deg,#0f1520,#141c35);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px}
+#scout-status-bar{display:none;align-items:center;gap:10px;padding:8px 20px;background:linear-gradient(90deg,rgba(109,123,255,.08),rgba(167,139,250,.10));border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px}
 #scout-status-bar.active{display:flex}
-#scout-progress-fill{height:4px;border-radius:2px;background:var(--accent);transition:width .3s}
-#scout-progress-track{flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
-#scout-status-text{color:var(--muted);white-space:nowrap}
+#scout-progress-fill{height:5px;border-radius:3px;background:var(--grad-accent);transition:width .35s var(--ease);box-shadow:0 0 12px rgba(109,123,255,.5)}
+#scout-progress-track{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+#scout-status-text{color:var(--muted);white-space:nowrap;font-weight:500}
 #scout-status-count{color:var(--accent);font-weight:700;white-space:nowrap}
 
 /* -- MAIN LAYOUT -- */
 #main{display:flex;flex:1;overflow:hidden}
 
 /* -- QUEUE PANEL -- */
-#queue-panel{width:320px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
-#qp-head{padding:12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
-#qp-search{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:7px 11px;color:var(--text);font-size:13px;width:100%}
-#qp-search:focus{outline:none;border-color:var(--accent)}
+#queue-panel{width:328px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+#qp-head{padding:14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:9px}
+#qp-search{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:9px 13px;color:var(--text);font-size:13px;width:100%;transition:.15s var(--ease)}
+#qp-search:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(109,123,255,.15)}
 #qp-actions{display:flex;gap:6px;flex-wrap:wrap}
-.qp-action{background:var(--card);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;transition:.12s}
+.qp-action{background:var(--card);border:1px solid var(--border);color:var(--muted);border-radius:7px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;transition:.14s var(--ease)}
 .qp-action:hover{border-color:var(--accent);color:var(--accent)}
-.qp-action.active{background:var(--accent);border-color:var(--accent);color:#fff}
-#qp-stats{display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.qp-stat{font-size:11px;display:flex;align-items:center;gap:4px}
-.qp-stat-dot{width:7px;height:7px;border-radius:50%}
+.qp-action.active{background:var(--grad-accent);border-color:transparent;color:#fff;box-shadow:0 2px 8px rgba(109,123,255,.3)}
+#qp-stats{display:flex;gap:9px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.qp-stat{font-size:11px;display:flex;align-items:center;gap:5px}
+.qp-stat-dot{width:7px;height:7px;border-radius:50%;box-shadow:0 0 6px currentColor}
 .qp-stat-count{font-weight:700;color:var(--text)}
 .qp-stat-label{color:var(--muted)}
-#queue-list{flex:1;overflow-y:auto;padding:6px 8px;display:flex;flex-direction:column;gap:4px}
-#queue-empty{text-align:center;color:var(--muted);padding:40px 20px}
-#queue-empty .icon{font-size:32px;margin-bottom:8px}
-#queue-empty p{font-size:12px;line-height:1.6}
+#queue-list{flex:1;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:6px;-webkit-overflow-scrolling:touch}
+#queue-empty{text-align:center;color:var(--muted);padding:48px 20px}
+#queue-empty .icon{font-size:34px;margin-bottom:10px;opacity:.5}
+#queue-empty p{font-size:12px;line-height:1.7}
 
 /* -- QUEUE ITEM -- */
-.qi{border:1px solid var(--border);border-radius:8px;padding:9px 10px 7px;cursor:pointer;transition:.12s;background:var(--card);position:relative}
-.qi:hover{border-color:var(--faint)}
-.qi.active{border-color:var(--accent);background:var(--card2)}
-.qi-name{font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px;padding-right:20px;color:var(--text)}
+.qi{border:1px solid var(--border);border-radius:11px;padding:11px 12px 9px;cursor:pointer;transition:.16s var(--ease);background:var(--card);position:relative}
+.qi:hover{border-color:var(--faint);transform:translateY(-1px);box-shadow:var(--shadow-sm)}
+.qi.active{border-color:var(--accent);background:var(--card2);box-shadow:var(--shadow-glow)}
+.qi-name{font-weight:650;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px;padding-right:20px;color:var(--text)}
 .qi-meta{font-size:11px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.qi-status{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:.3px}
-.s-pending{background:rgba(74,85,128,.2);color:#8892b0}
-.s-scanning{background:rgba(245,158,11,.15);color:#f59e0b}
-.s-found{background:rgba(16,201,128,.15);color:#10c980}
-.s-contacted{background:rgba(91,110,245,.15);color:#5b6ef5}
-.s-replied{background:rgba(124,58,237,.15);color:#c4b5fd}
-.s-closed{background:rgba(55,65,81,.3);color:#6b7280}
-.s-no_email{background:rgba(239,68,68,.1);color:#fca5a5}
-.s-ready{background:rgba(16,201,128,.2);color:#059669;border:1px solid rgba(16,201,128,.4)}
+.qi-status{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:700;padding:3px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px}
+.s-pending{background:rgba(86,95,128,.2);color:#9aa2c0}
+.s-scanning{background:rgba(245,166,35,.15);color:#f5a623}
+.s-found{background:rgba(34,211,165,.15);color:#22d3a5}
+.s-contacted{background:rgba(109,123,255,.15);color:#8b96ff}
+.s-replied{background:rgba(167,139,250,.15);color:#c9b8fb}
+.s-closed{background:rgba(60,66,87,.35);color:#8790a8}
+.s-no_email{background:rgba(245,73,92,.1);color:#feb2ba}
+.s-ready{background:rgba(34,211,165,.18);color:#2fe6b8;border:1px solid rgba(34,211,165,.4)}
 .qi-email{font-size:11px;color:var(--green);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qi-scanning-pulse{width:7px;height:7px;border-radius:50%;background:var(--amber);animation:pulse 1s infinite}
+.qi-scanning-pulse{width:7px;height:7px;border-radius:50%;background:var(--amber);animation:pulse 1.1s infinite;box-shadow:0 0 8px var(--amber)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .qi-profile-link{font-size:10px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
@@ -84,9 +103,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 #content{flex:1;display:flex;flex-direction:column;overflow:hidden}
 
 /* -- TABS -- */
-#nav-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface);padding:0 16px;flex-shrink:0}
-.nav-tab{padding:10px 16px;border-bottom:2px solid transparent;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;transition:.12s;white-space:nowrap}
-.nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+#nav-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface);padding:0 20px;flex-shrink:0}
+.nav-tab{padding:12px 17px;border-bottom:2px solid transparent;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;transition:.16s var(--ease);white-space:nowrap;position:relative}
+.nav-tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.nav-tab.active::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--grad-accent);border-radius:2px}
 .nav-tab:hover:not(.active){color:var(--text)}
 
 /* -- TAB PANELS -- */
@@ -94,56 +114,54 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .tab-panel.active{display:flex}
 
 /* -- BUSINESS DETAIL -- */
-#detail-panel{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
-#detail-empty{display:flex;flex:1;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--muted)}
-#detail-empty .icon{font-size:40px;opacity:.4}
-#detail-empty p{font-size:13px;text-align:center}
+#detail-panel{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+#detail-empty{display:flex;flex:1;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:var(--muted)}
+#detail-empty .icon{font-size:42px;opacity:.35}
+#detail-empty p{font-size:13px;text-align:center;max-width:280px;line-height:1.6}
 
-.detail-header{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;overflow:hidden}
-.detail-biz-name{font-size:15px;font-weight:800;margin-bottom:6px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.detail-header{background:linear-gradient(160deg,var(--card),var(--card2));border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;overflow:hidden;box-shadow:var(--shadow-sm)}
 .detail-actions{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
 .detail-btn{flex-shrink:0}
-.detail-biz-name{font-size:18px;font-weight:800;margin-bottom:6px;line-height:1.3}
-.detail-meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center}
+.detail-biz-name{font-size:19px;font-weight:800;margin-bottom:8px;line-height:1.3;letter-spacing:-.3px;word-break:break-word}
+.detail-meta{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
 .detail-meta-item{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px}
 .rating-star{color:var(--amber)}
-.detail-actions{display:flex;gap:8px;flex-wrap:wrap}
-.detail-btn{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;transition:.12s;text-decoration:none}
-.detail-btn:hover{border-color:var(--accent);color:var(--accent)}
-.detail-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.detail-btn.primary:hover{filter:brightness(1.15)}
-.detail-btn.green{background:rgba(16,201,128,.15);border-color:var(--green);color:var(--green)}
-.detail-btn.green:hover{background:rgba(16,201,128,.25)}
-.detail-btn.purple{background:rgba(124,58,237,.15);border-color:#7c3aed;color:#c4b5fd}
+.detail-btn{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:8px 15px;font-size:12px;font-weight:600;cursor:pointer;transition:.15s var(--ease);text-decoration:none}
+.detail-btn:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px)}
+.detail-btn.primary{background:var(--grad-accent);border-color:transparent;color:#fff;box-shadow:0 4px 14px rgba(109,123,255,.3)}
+.detail-btn.primary:hover{filter:brightness(1.1)}
+.detail-btn.green{background:rgba(34,211,165,.13);border-color:var(--green);color:var(--green)}
+.detail-btn.green:hover{background:rgba(34,211,165,.22)}
+.detail-btn.purple{background:rgba(167,139,250,.13);border-color:#a78bfa;color:#d6c8fc}
 
-.detail-section{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.detail-section-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.detail-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
-.detail-section-body{padding:12px 14px}
+.detail-section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm)}
+.detail-section-head{padding:13px 17px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.detail-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)}
+.detail-section-body{padding:14px 16px}
 
 /* Email section */
-.email-found{display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(16,201,128,.08);border:1px solid rgba(16,201,128,.2);border-radius:8px;font-size:13px;font-weight:600;color:var(--green)}
+.email-found{display:flex;align-items:center;gap:8px;padding:11px 15px;background:rgba(34,211,165,.08);border:1px solid rgba(34,211,165,.22);border-radius:10px;font-size:13px;font-weight:600;color:var(--green)}
 .email-not-found{font-size:13px;color:var(--muted);font-style:italic}
 .email-find-row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-.website-input{flex:1;min-width:180px;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px 11px;color:var(--text);font-size:13px}
-.website-input:focus{outline:none;border-color:var(--accent)}
+.website-input{flex:1;min-width:180px;background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:8px 12px;color:var(--text);font-size:13px;transition:.15s var(--ease)}
+.website-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(109,123,255,.15)}
 
 /* Message section */
-.msg-tab-btn{background:transparent;border:1px solid var(--border);border-radius:8px;padding:4px 12px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;transition:.12s}
-.msg-tab-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
-.msg-stage-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-.msg-stage-pill{padding:4px 12px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;transition:.12s}
-.msg-stage-pill.active{background:var(--accent);border-color:var(--accent);color:#fff}
-.msg-textarea{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;line-height:1.65;resize:vertical;min-height:100px;font-family:inherit}
-.msg-textarea:focus{outline:none;border-color:var(--accent)}
-.msg-actions-row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
-.msg-quality{font-size:11px;margin-top:8px}
-.msg-quality-bar{height:3px;border-radius:2px;background:var(--border);overflow:hidden;margin-bottom:4px}
-.msg-quality-fill{height:100%;border-radius:2px;transition:.4s}
-.quality-checks{display:flex;flex-wrap:wrap;gap:6px;font-size:11px;color:var(--muted)}
+.msg-tab-btn{background:transparent;border:1px solid var(--border);border-radius:9px;padding:5px 13px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;transition:.14s var(--ease)}
+.msg-tab-btn.active{background:var(--grad-accent);border-color:transparent;color:#fff}
+.msg-stage-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:11px}
+.msg-stage-pill{padding:5px 13px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;transition:.14s var(--ease)}
+.msg-stage-pill.active{background:var(--grad-accent);border-color:transparent;color:#fff;box-shadow:0 2px 8px rgba(109,123,255,.3)}
+.msg-textarea{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;color:var(--text);font-size:13px;line-height:1.7;resize:vertical;min-height:100px;font-family:inherit;transition:.15s var(--ease)}
+.msg-textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(109,123,255,.15)}
+.msg-actions-row{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap;align-items:center}
+.msg-quality{font-size:11px;margin-top:9px}
+.msg-quality-bar{height:4px;border-radius:2px;background:var(--border);overflow:hidden;margin-bottom:5px}
+.msg-quality-fill{height:100%;border-radius:2px;transition:.5s var(--ease)}
+.quality-checks{display:flex;flex-wrap:wrap;gap:7px;font-size:11px;color:var(--muted)}
 .quality-check.pass{color:var(--green)}
 .quality-check.fail{color:var(--faint)}
-.industry-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:8px;background:rgba(91,110,245,.15);color:#a5b4fc;margin-bottom:8px}
+.industry-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:4px 10px;border-radius:8px;background:rgba(109,123,255,.15);color:#b3bbff;margin-bottom:9px;font-weight:600}
 .ai-loading{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;padding:12px 0}
 .ai-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:ai-bounce .8s infinite}
 .ai-dot:nth-child(2){animation-delay:.15s}
@@ -151,157 +169,181 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 @keyframes ai-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
 
 /* -- UPLOAD TAB -- */
-#upload-panel{padding:24px;overflow-y:auto}
-.upload-zone{border:2px dashed var(--border);border-radius:14px;padding:40px;text-align:center;cursor:pointer;transition:.2s;margin-bottom:20px}
-.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:rgba(91,110,245,.04)}
-.upload-zone .icon{font-size:36px;margin-bottom:10px;opacity:.6}
-.upload-zone h3{font-size:15px;font-weight:700;margin-bottom:4px}
-.upload-zone p{font-size:12px;color:var(--muted);line-height:1.6}
-.upload-preview{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px}
-.upload-preview-head{padding:12px 16px;border-bottom:1px solid var(--border);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:space-between;color:var(--muted)}
-.upload-preview-count{color:var(--accent);font-size:14px;font-weight:800}
+#upload-panel{padding:28px;overflow-y:auto}
+.upload-zone{border:2px dashed var(--border);border-radius:var(--radius-xl);padding:44px;text-align:center;cursor:pointer;transition:.2s var(--ease);margin-bottom:22px;background:var(--grad-surface)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:rgba(109,123,255,.05)}
+.upload-zone .icon{font-size:38px;margin-bottom:11px;opacity:.65}
+.upload-zone h3{font-size:16px;font-weight:700;margin-bottom:5px}
+.upload-zone p{font-size:12px;color:var(--muted);line-height:1.7}
+.upload-preview{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:18px;box-shadow:var(--shadow-sm)}
+.upload-preview-head{padding:13px 17px;border-bottom:1px solid var(--border);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:space-between;color:var(--muted)}
+.upload-preview-count{color:var(--accent);font-size:15px;font-weight:800}
 .preview-table{width:100%;font-size:12px;border-collapse:collapse}
-.preview-table th{padding:8px 12px;text-align:left;color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;border-bottom:1px solid var(--border)}
-.preview-table td{padding:8px 12px;border-bottom:1px solid var(--border);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.preview-table th{padding:9px 13px;text-align:left;color:var(--muted);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)}
+.preview-table td{padding:9px 13px;border-bottom:1px solid var(--border);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .preview-table tr:last-child td{border:none}
-.upload-options{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.preview-table tr:hover td{background:rgba(255,255,255,.02)}
+.upload-options{display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap}
 .upload-opt-label{font-size:12px;color:var(--muted)}
-.upload-opt-select{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--text);font-size:12px}
+.upload-opt-select{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:7px 11px;color:var(--text);font-size:12px}
 
 /* -- BATCH APPROVE TAB -- */
-#batch-panel{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
-.batch-empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:13px}
+#batch-panel{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:13px;-webkit-overflow-scrolling:touch}
+.batch-empty{text-align:center;color:var(--muted);padding:48px 20px;font-size:13px}
 .batch-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;flex-wrap:wrap;gap:8px}
-.batch-header h2{font-size:15px;font-weight:700}
-.batch-header-actions{display:flex;gap:8px}
-.batch-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:.12s}
-.batch-card.approved{border-color:var(--green);background:rgba(16,201,128,.04)}
+.batch-header h2{font-size:16px;font-weight:700;letter-spacing:-.2px}
+.batch-header-actions{display:flex;gap:8px;flex-wrap:wrap}
+.batch-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;transition:.16s var(--ease);box-shadow:var(--shadow-sm)}
+.batch-card:hover{border-color:var(--faint)}
+.batch-card.approved{border-color:var(--green);background:rgba(34,211,165,.04)}
 .batch-card.skipped{opacity:.5}
-.batch-card-head{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
-.batch-biz-name{font-weight:700;font-size:13px;flex:1}
-.batch-email{font-size:11px;color:var(--green);background:rgba(16,201,128,.1);padding:2px 8px;border-radius:10px}
-.batch-no-email{font-size:11px;color:var(--faint);background:rgba(74,85,128,.15);padding:2px 8px;border-radius:10px}
-.batch-card-body{padding:12px 14px}
-.batch-msg-ta{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:12px;line-height:1.6;resize:vertical;min-height:100px;font-family:inherit}
-.batch-msg-ta:focus{outline:none;border-color:var(--accent)}
-.batch-card-actions{display:flex;gap:6px;padding:10px 14px;border-top:1px solid var(--border);flex-wrap:wrap}
-.batch-approve-btn{background:rgba(16,201,128,.15);border:1px solid var(--green);color:var(--green);border-radius:7px;padding:5px 14px;font-size:11px;font-weight:700;cursor:pointer;transition:.12s}
-.batch-approve-btn:hover,.batch-approve-btn.on{background:var(--green);color:#000}
-.batch-skip-btn{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:7px;padding:5px 12px;font-size:11px;cursor:pointer;transition:.12s}
+.batch-card-head{padding:13px 15px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.batch-biz-name{font-weight:700;font-size:13px;flex:1;min-width:120px}
+.batch-email{font-size:11px;color:var(--green);background:rgba(34,211,165,.1);padding:3px 9px;border-radius:20px;font-weight:600}
+.batch-no-email{font-size:11px;color:var(--faint);background:rgba(86,95,128,.15);padding:3px 9px;border-radius:20px}
+.batch-card-body{padding:13px 15px}
+.batch-msg-ta{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:11px;color:var(--text);font-size:12px;line-height:1.65;resize:vertical;min-height:100px;font-family:inherit;transition:.15s var(--ease)}
+.batch-msg-ta:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(109,123,255,.15)}
+.batch-card-actions{display:flex;gap:6px;padding:11px 15px;border-top:1px solid var(--border);flex-wrap:wrap}
+.batch-approve-btn{background:rgba(34,211,165,.15);border:1px solid var(--green);color:var(--green);border-radius:8px;padding:6px 15px;font-size:11px;font-weight:700;cursor:pointer;transition:.15s var(--ease)}
+.batch-approve-btn:hover,.batch-approve-btn.on{background:var(--green);color:#04241c}
+.batch-skip-btn{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:6px 13px;font-size:11px;cursor:pointer;transition:.15s var(--ease)}
 .batch-skip-btn:hover{border-color:var(--red);color:var(--red)}
-.batch-open-btn{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:7px;padding:5px 12px;font-size:11px;cursor:pointer;transition:.12s}
+.batch-open-btn{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:6px 13px;font-size:11px;cursor:pointer;transition:.15s var(--ease)}
 .batch-open-btn:hover{border-color:var(--accent);color:var(--accent)}
 
 /* -- AUTO-SCOUT TAB -- */
-#autoscout-panel{padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:20px}
-.as-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
-.as-card h3{font-size:13px;font-weight:700;margin-bottom:4px;color:var(--text)}
-.as-card p{font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px}
+#autoscout-panel{padding:28px;overflow-y:auto;display:flex;flex-direction:column;gap:22px}
+.as-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;box-shadow:var(--shadow-sm)}
+.as-card h3{font-size:13.5px;font-weight:700;margin-bottom:5px;color:var(--text)}
+.as-card p{font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:13px}
 .as-controls{display:flex;gap:8px;flex-wrap:wrap}
-.as-big-btn{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 24px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;transition:.15s;border:none}
-.as-start{background:var(--accent);color:#fff}
-.as-start:hover{filter:brightness(1.15)}
-.as-pause{background:var(--amber);color:#000}
+.as-big-btn{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 26px;border-radius:11px;font-size:14px;font-weight:700;cursor:pointer;transition:.16s var(--ease);border:none}
+.as-start{background:var(--grad-accent);color:#fff;box-shadow:0 6px 20px rgba(109,123,255,.35)}
+.as-start:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.as-pause{background:var(--amber);color:#1a1200}
 .as-stop{background:var(--red);color:#fff}
-.as-stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.as-stat{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center}
-.as-stat-num{font-size:24px;font-weight:900;line-height:1}
-.as-stat-label{font-size:11px;color:var(--muted);margin-top:4px}
-.as-log{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;max-height:200px;overflow-y:auto;font-size:11px;font-family:monospace;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.as-stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:11px}
+.as-stat{background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px;text-align:center;transition:.15s var(--ease)}
+.as-stat:hover{border-color:var(--faint)}
+.as-stat-num{font-size:26px;font-weight:900;line-height:1;letter-spacing:-.5px}
+.as-stat-label{font-size:10.5px;color:var(--muted);margin-top:5px;text-transform:uppercase;letter-spacing:.3px}
+.as-log{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:13px;max-height:200px;overflow-y:auto;font-size:11px;font-family:'SF Mono',Menlo,monospace;color:var(--muted);display:flex;flex-direction:column;gap:5px}
 .log-line{display:flex;gap:8px}
 .log-time{color:var(--faint);flex-shrink:0}
 .log-ok{color:var(--green)}
 .log-warn{color:var(--amber)}
 .log-err{color:var(--red)}
 .log-info{color:var(--accent)}
-.as-settings-grid{display:flex;flex-direction:column;gap:10px}
+.as-settings-grid{display:flex;flex-direction:column;gap:11px}
 .as-field{display:flex;flex-direction:column;gap:4px}
-.as-field label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
-.as-input{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;width:100%}
-.as-input:focus{outline:none;border-color:var(--accent)}
-.as-hint{font-size:11px;color:var(--faint);margin-top:2px;line-height:1.5}
-.ext-status{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600}
-.ext-connected{background:rgba(16,201,128,.1);border:1px solid rgba(16,201,128,.3);color:var(--green)}
-.ext-disconnected{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--amber)}
-.ext-dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.as-field label{font-size:10.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.as-input{background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:9px 13px;color:var(--text);font-size:13px;width:100%;transition:.15s var(--ease)}
+.as-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(109,123,255,.15)}
+.as-hint{font-size:11px;color:var(--faint);margin-top:3px;line-height:1.6}
+.ext-status{display:flex;align-items:center;gap:8px;padding:9px 13px;border-radius:9px;font-size:12px;font-weight:600}
+.ext-connected{background:rgba(34,211,165,.1);border:1px solid rgba(34,211,165,.3);color:var(--green)}
+.ext-disconnected{background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.3);color:var(--amber)}
+.ext-dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}
 
 /* -- SETTINGS TAB -- */
-#settings-panel{padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:20px}
-.settings-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
-.settings-card h3{font-size:13px;font-weight:700;margin-bottom:4px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
-.settings-card p{font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6}
-.settings-field{margin-bottom:10px}
-.settings-field label{display:block;font-size:11px;color:var(--muted);font-weight:600;margin-bottom:4px}
-.settings-input{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;width:100%}
-.settings-input:focus{outline:none;border-color:var(--accent)}
-.settings-btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 18px;font-size:12px;font-weight:700;cursor:pointer;transition:.12s}
-.settings-btn:hover{filter:brightness(1.15)}
-.settings-btn.ghost{background:transparent;border:1px solid var(--border);color:var(--muted)}
-.settings-btn.ghost:hover{border-color:var(--accent);color:var(--accent)}
-.settings-btn.danger{background:var(--red)}
-.claude-key-note{font-size:11px;color:var(--faint);line-height:1.5;padding:8px 12px;background:rgba(91,110,245,.07);border-radius:8px;border:1px solid rgba(91,110,245,.15)}
+#settings-panel{padding:28px;overflow-y:auto;display:flex;flex-direction:column;gap:22px}
+.settings-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;box-shadow:var(--shadow-sm)}
+.settings-card h3{font-size:12.5px;font-weight:700;margin-bottom:5px;background:var(--grad-accent);-webkit-background-clip:text;background-clip:text;color:transparent;text-transform:uppercase;letter-spacing:.6px}
+.settings-card p{font-size:12px;color:var(--muted);margin-bottom:13px;line-height:1.7}
+.settings-field{margin-bottom:11px}
+.settings-field label{display:block;font-size:11px;color:var(--muted);font-weight:600;margin-bottom:5px}
+.settings-input{background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:9px 13px;color:var(--text);font-size:13px;width:100%;transition:.15s var(--ease)}
+.settings-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(109,123,255,.15)}
+.settings-btn{background:var(--grad-accent);color:#fff;border:none;border-radius:9px;padding:9px 20px;font-size:12px;font-weight:700;cursor:pointer;transition:.16s var(--ease);box-shadow:0 4px 14px rgba(109,123,255,.3)}
+.settings-btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.settings-btn.ghost{background:transparent;border:1px solid var(--border);color:var(--muted);box-shadow:none}
+.settings-btn.ghost:hover{border-color:var(--accent);color:var(--accent);transform:none}
+.settings-btn.danger{background:var(--red);box-shadow:0 4px 14px rgba(245,73,92,.3)}
+.claude-key-note{font-size:11px;color:var(--faint);line-height:1.6;padding:9px 13px;background:rgba(109,123,255,.07);border-radius:9px;border:1px solid rgba(109,123,255,.15)}
 
 /* -- TIMELINE TAB -- */
-#timeline-panel-tab{padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
-.tl-filters{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
-.tl-chip{padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;transition:.12s}
-.tl-chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
-.tl-item{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:.12s}
-.tl-item:hover{border-color:var(--faint)}
+#timeline-panel-tab{padding:18px;overflow-y:auto;display:flex;flex-direction:column;gap:9px}
+.tl-filters{display:flex;gap:6px;margin-bottom:9px;flex-wrap:wrap}
+.tl-chip{padding:6px 13px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;transition:.14s var(--ease)}
+.tl-chip.active{background:var(--grad-accent);border-color:transparent;color:#fff}
+.tl-item{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-md);padding:13px;display:flex;align-items:center;gap:13px;cursor:pointer;transition:.15s var(--ease)}
+.tl-item:hover{border-color:var(--faint);transform:translateX(2px)}
 .tl-item-info{flex:1;min-width:0}
-.tl-item-name{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tl-item-meta{font-size:11px;color:var(--muted);margin-top:2px}
-.tl-export-bar{display:flex;gap:8px;align-items:center;padding:12px;background:var(--surface);border-top:1px solid var(--border);flex-wrap:wrap}
+.tl-item-name{font-weight:650;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl-item-meta{font-size:11px;color:var(--muted);margin-top:3px}
+.tl-export-bar{display:flex;gap:8px;align-items:center;padding:13px;background:var(--surface);border-top:1px solid var(--border);flex-wrap:wrap}
 .tl-export-bar label{font-size:11px;color:var(--muted)}
-.tl-date-input{background:var(--card);border:1px solid var(--border);border-radius:7px;padding:5px 9px;color:var(--text);font-size:12px}
+.tl-date-input{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--text);font-size:12px}
 
 /* -- TOAST -- */
-#toast{position:fixed;bottom:24px;right:24px;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px 18px;font-size:13px;font-weight:500;opacity:0;transition:.2s;z-index:999;pointer-events:none;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,.4)}
-#toast.show{opacity:1}
+#toast{position:fixed;bottom:26px;right:26px;background:rgba(29,33,48,.95);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:12px;padding:12px 20px;font-size:13px;font-weight:500;opacity:0;transition:.25s var(--ease);z-index:999;pointer-events:none;max-width:320px;box-shadow:var(--shadow-lg);transform:translateY(8px)}
+#toast.show{opacity:1;transform:translateY(0)}
 #toast.toast-ok{border-color:var(--green);color:var(--green)}
 #toast.toast-err{border-color:var(--red);color:var(--red)}
 
 /* -- MODAL -- */
-#modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:500;display:none;align-items:center;justify-content:center}
+#modal-overlay{position:fixed;inset:0;background:rgba(6,7,12,.75);backdrop-filter:blur(4px);z-index:500;display:none;align-items:center;justify-content:center}
 #modal-overlay.open{display:flex}
-#modal-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;max-width:480px;width:90%;max-height:85vh;overflow-y:auto}
-#modal-box h3{font-size:15px;font-weight:700;margin-bottom:14px}
-.modal-close{float:right;background:transparent;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1}
+#modal-box{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:22px;max-width:480px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:var(--shadow-lg)}
+#modal-box h3{font-size:16px;font-weight:700;margin-bottom:16px;letter-spacing:-.2px}
+.modal-close{float:right;background:transparent;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1;transition:.15s var(--ease)}
+.modal-close:hover{color:var(--text)}
 
 /* -- SCROLLBARS -- */
-::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:var(--faint)}
 
-/* -- MOBILE RESPONSIVE -- */
+/* ================================================================
+   MOBILE RESPONSIVE — rebuilt for actual usability
+   ================================================================ */
 @media(max-width:768px){
-  #topbar{padding:8px 12px;gap:6px;flex-wrap:wrap}
-  #topbar-left{font-size:13px}
-  .topbar-btn{font-size:11px;padding:4px 8px}
+  #topbar{padding:10px 14px;gap:8px}
+  #topbar-logo{font-size:14px}
+  #topbar-title{display:none} /* redundant on small screens, saves space */
+  /* The desktop action buttons duplicate topbar-tabs + bottom nav below —
+     hide them on mobile so there's exactly one way to navigate each area. */
+  #topbar .topbar-btn{display:none}
+
   #main{flex-direction:column}
-  #queue-panel{width:100%;max-width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--border);max-height:40vh;overflow-y:auto}
-  #detail-panel{min-width:0;padding:10px}
-  .detail-header{padding:12px}
-  .nav-tabs{overflow-x:auto;flex-nowrap:nowrap;padding-bottom:2px}
-  .nav-tab{white-space:nowrap;font-size:11px;padding:6px 10px}
-  .tab-panel{padding:10px}
-  .as-grid{grid-template-columns:1fr 1fr}
-  .as-card{padding:12px}
-  .settings-card{padding:12px}
-  .msg-stage-pills{flex-wrap:wrap;gap:4px}
-  .msg-stage-pill{padding:4px 8px;font-size:11px}
-  .detail-actions{flex-wrap:wrap;gap:6px}
-  .detail-btn{font-size:11px;padding:6px 10px}
-  #qp-search{font-size:12px}
-  .qi-name{font-size:12px}
-  .qi-meta{font-size:10px}
-  .batch-card{padding:10px}
+
+  /* Queue panel: compact, always-scrollable, clearly a "list", not a huge block */
+  #queue-panel{width:100%;max-width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--border);max-height:34vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  #qp-head{padding:10px 12px;gap:7px}
+  #qp-search{font-size:14px;padding:10px 12px} /* 14px+ avoids iOS auto-zoom */
+  #qp-actions{gap:5px}
+  .qp-action{font-size:10.5px;padding:6px 10px}
+  #qp-stats{padding:8px 12px;gap:7px}
+  .qi{padding:10px 11px 8px}
+  .qi-name{font-size:13px}
+  .qi-meta{font-size:10.5px}
+
+  #detail-panel{min-width:0;padding:14px 12px;gap:10px}
+  .detail-header{padding:14px}
+  .detail-biz-name{font-size:17px}
+  .detail-btn{font-size:12px;padding:9px 13px;flex:1 1 auto;justify-content:center}
+  .detail-actions{gap:7px}
+
+  /* The old desktop tab strip (#nav-tabs) is fully replaced on mobile by
+     #topbar-tabs (top) + #mobile-nav (bottom) — hide it so tabs aren't tripled. */
+  #nav-tabs{display:none}
+
+  .tab-panel{padding:0}
+  #upload-panel,#autoscout-panel,#settings-panel{padding:16px}
+  .as-stats-grid{grid-template-columns:1fr 1fr}
+  .as-card{padding:14px}
+  .settings-card{padding:14px}
+  .msg-stage-pills{flex-wrap:wrap;gap:5px}
+  .msg-stage-pill{padding:6px 11px;font-size:11.5px}
+  .batch-card{padding:0}
+  #batch-panel{padding:12px}
   .tl-export-bar{flex-wrap:wrap;gap:8px}
-  /* Mobile bottom nav */
+  #timeline-panel-tab{padding:12px}
+
+  /* Mobile bottom nav + top tab strip are the only nav on small screens */
   #mobile-nav{display:flex}
-  /* Hide sidebar nav on mobile */
-  .nav-tabs{display:none}
   #topbar-tabs{display:flex}
 }
 @media(min-width:769px){
@@ -312,38 +354,55 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 /* Mobile bottom navigation */
 #mobile-nav{
   position:fixed;bottom:0;left:0;right:0;
-  background:var(--card);border-top:1px solid var(--border);
-  padding:8px 0 max(8px, env(safe-area-inset-bottom));
+  background:rgba(23,26,36,.97);backdrop-filter:blur(16px);border-top:1px solid var(--border);
+  padding:8px 4px max(8px, env(safe-area-inset-bottom));
   z-index:100;gap:0;justify-content:space-around;align-items:center;
+  box-shadow:0 -8px 24px rgba(0,0,0,.3);
 }
 .mob-nav-btn{
-  display:flex;flex-direction:column;align-items:center;gap:2px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
   background:transparent;border:none;color:var(--muted);cursor:pointer;
-  padding:4px 12px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;
-  transition:.12s;flex:1;
+  padding:6px 4px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+  transition:.15s var(--ease);flex:1;min-width:0;border-radius:10px;
 }
-.mob-nav-btn.active{color:var(--accent)}
-.mob-nav-btn span{font-size:20px}
+.mob-nav-btn.active{color:var(--accent);background:rgba(109,123,255,.1)}
+.mob-nav-btn span{font-size:19px;line-height:1}
 
 /* Top tabs bar for mobile */
 #topbar-tabs{
-  width:100%;overflow-x:auto;gap:0;padding:0;
+  width:100%;overflow-x:auto;gap:2px;padding:4px 6px;
   border-bottom:1px solid var(--border);background:var(--surface);
   scrollbar-width:none;-webkit-overflow-scrolling:touch;
 }
 #topbar-tabs::-webkit-scrollbar{display:none}
 .tt-btn{
   background:transparent;border:none;border-bottom:2px solid transparent;
-  color:var(--muted);padding:8px 14px;font-size:11px;font-weight:600;
-  white-space:nowrap;cursor:pointer;transition:.12s;
+  color:var(--muted);padding:9px 13px;font-size:12px;font-weight:600;border-radius:8px 8px 0 0;
+  white-space:nowrap;cursor:pointer;transition:.15s var(--ease);
 }
-.tt-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tt-btn.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(109,123,255,.08)}
 
 /* Safe area padding for notched phones */
 #main{padding-bottom:env(safe-area-inset-bottom)}
 @media(max-width:768px){
-  body{padding-bottom:60px}
+  body{padding-bottom:68px}
 }
+
+/* v61 polish: premium design kept, latest workflow labels supported */
+#topbar-title::after{content:''}
+#nav-tabs{overflow-x:auto;scrollbar-width:none}
+#nav-tabs::-webkit-scrollbar{display:none}
+.qp-action.danger{color:var(--red);border-color:rgba(245,73,92,.65);background:rgba(245,73,92,.08)}
+.s-review{background:rgba(245,166,35,.13);color:#f5a623;border:1px solid rgba(245,166,35,.25)}
+.s-risky,.s-invalid,.s-duplicate{background:rgba(245,73,92,.10);color:#feb2ba;border:1px solid rgba(245,73,92,.22)}
+@media(max-width:768px){
+  #content{min-height:0}
+  .tab-panel.active{min-height:0}
+  #queue-panel{max-height:32vh}
+  #topbar-tabs{position:relative;z-index:60}
+  .as-big-btn{width:100%}
+}
+
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -353,23 +412,24 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 <div id="topbar-tabs">
   <button class="tt-btn active" onclick="showTabMobile('detail',this)">🏠 Queue</button>
   <button class="tt-btn" onclick="showTabMobile('upload',this)">📁 Upload</button>
-  <button class="tt-btn" onclick="showTabMobile('email-scout-content',this)">📧 Email Scout</button>
+  <button class="tt-btn" onclick="showTabMobile('send',this)">📧 Send Message</button>
   <button class="tt-btn" onclick="showTabMobile('dorking',this)">🌐 Dorking</button>
-  <button class="tt-btn" onclick="showTabMobile('verify-send',this)">🧪 Verify</button>
-  <button class="tt-btn" onclick="showTabMobile('batch',this)">✅ Approve</button>
+  <button class="tt-btn" onclick="showTabMobile('verify',this)">🧪 Verify</button>
+  <button class="tt-btn" onclick="showTabMobile('batch',this)">✅ Review</button>
   <button class="tt-btn" onclick="showTabMobile('autoscout',this)">🤖 Scout</button>
   <button class="tt-btn" onclick="showTabMobile('timeline',this)">📅 Timeline</button>
+  <button class="tt-btn" onclick="showTabMobile('dashboard',this)">📊 Dashboard</button>
   <button class="tt-btn" onclick="showTabMobile('settings',this)">⚙ Settings</button>
 </div>
 
 <!-- TOP BAR -->
 <div id="topbar">
   <span id="topbar-logo">🧭 Scout App</span>
-  <span id="topbar-title">v48 — Message Subjects Clean Workflow</span>
+  <span id="topbar-title">v61 — Premium design, latest Scout workflow</span>
   <button class="topbar-btn" onclick="showTab('upload')">📁 Upload List</button>
-  <button class="topbar-btn" onclick="showTab('verify')">🧪 Verify & Send</button>
+  <button class="topbar-btn" onclick="showTab('verify')">🧪 Verify</button>
   <button class="topbar-btn" onclick="showTab('autoscout')">🤖 Auto-Scout</button>
-  <button class="topbar-btn" id="batch-btn" onclick="showTab('batch')" style="display:none">✅ Batch Approve (<span id="batch-count">0</span>)</button>
+  <button class="topbar-btn" id="batch-btn" onclick="showTab('batch')" style="display:none">✅ Review (<span id="batch-count">0</span>)</button>
   <button class="topbar-btn primary" onclick="showTab('timeline')">📅 Timeline</button>
   <button class="topbar-btn" onclick="showTab('settings')">⚙ Settings</button>
 </div>
@@ -426,10 +486,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
     <div id="nav-tabs">
       <div class="nav-tab active" onclick="showContentTab('detail',this)" id="tab-detail">Business</div>
       <div class="nav-tab" onclick="showContentTab('upload-content',this)" id="tab-upload">Upload</div>
-      <div class="nav-tab" onclick="showContentTab('email-scout-content',this)" id="tab-emailscout">📧 Email Scout</div>
+      <div class="nav-tab" onclick="showContentTab('email-scout-content',this)" id="tab-emailscout">📧 Send Message</div>
       <div class="nav-tab" onclick="showContentTab('dorking-content',this)" id="tab-dorking">🌐 Dorking</div>
-      <div class="nav-tab" onclick="showContentTab('verify-send-content',this)" id="tab-verify">🧪 Verify & Send</div>
-      <div class="nav-tab" onclick="showContentTab('batch-content',this)" id="tab-batch">Batch Approve</div>
+      <div class="nav-tab" onclick="showContentTab('verify-send-content',this)" id="tab-verify">🧪 Verify</div>
+      <div class="nav-tab" onclick="showContentTab('batch-content',this)" id="tab-batch">Review</div>
       <div class="nav-tab" onclick="showContentTab('autoscout-content',this)" id="tab-autoscout">Auto-Scout</div>
       <div class="nav-tab" onclick="showContentTab('timeline-content',this)" id="tab-timeline">Timeline</div>
       <div class="nav-tab" onclick="showContentTab('settings-content',this)" id="tab-settings">Settings</div>
@@ -477,7 +537,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
     <div class="tab-panel" id="batch-content">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;gap:8px">
         <div>
-          <h2 style="font-size:14px;font-weight:700">Batch Approve Messages</h2>
+          <h2 style="font-size:14px;font-weight:700">Review Messages</h2>
           <p style="font-size:11px;color:var(--muted);margin-top:2px">Review and edit each message, then send all at once</p>
         </div>
         <div style="display:flex;gap:8px">
@@ -493,14 +553,14 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
       <div style="padding:16px;max-width:860px;margin:0 auto">
 
         <div style="margin-bottom:20px">
-          <h2 style="font-size:16px;font-weight:800;margin-bottom:4px">📧 Email Scout</h2>
+          <h2 style="font-size:16px;font-weight:800;margin-bottom:4px">📧 Send Message</h2>
           <p style="font-size:12px;color:var(--muted)">Upload a list of businesses with emails, write up to 20 personalised message templates using <code style="background:var(--card2);padding:1px 5px;border-radius:4px">{name}</code> as a placeholder, and send them one by one.</p>
         </div>
 
         <!-- Contacts source notice -->
         <div class="as-card" style="margin-bottom:14px;border-color:rgba(16,201,128,.35);background:rgba(16,201,128,.045)">
           <h3>1. Contacts Source</h3>
-          <p style="font-size:12px;color:var(--muted);margin-bottom:0;line-height:1.7">No upload happens here. Contacts must come from <strong>Upload List → Verify &amp; Send → Ready to Send</strong>. This tab is only for choosing the message, subject, signature, delay, and sending the approved batch.</p>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:0;line-height:1.7">No upload happens here. Contacts must come from <strong>Upload List → Verify → Ready to Send</strong>. This tab is only for choosing the message, subject, signature, delay, and sending the approved batch.</p>
         </div>
 
         <!-- Message templates -->
@@ -568,7 +628,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
       <div id="dorking-panel" style="padding:16px;max-width:1040px;margin:0 auto">
         <div style="margin-bottom:20px">
           <h2 style="font-size:16px;font-weight:800;margin-bottom:4px">🌐 Bing Dorking</h2>
-          <p style="font-size:12px;color:var(--muted)">This is still Scout App. Use Bing signal queries to find web leads, then send them into the same queue, Verify &amp; Send tab, and Email Scout tab.</p>
+          <p style="font-size:12px;color:var(--muted)">This is still Scout App. Use Bing signal queries to find web leads, then send them into the same queue, Verify tab, and Send Message tab.</p>
         </div>
 
         <div class="as-card" style="margin-bottom:14px">
@@ -621,11 +681,11 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 
         <div class="as-card">
           <h3>4. Web Leads</h3>
-          <p>After dorking, web leads appear in the left queue under the <strong>Web Leads</strong> filter. Then run Verify &amp; Send to move ready contacts into Email Scout.</p>
+          <p>After dorking, web leads appear in the left queue under the <strong>Web Leads</strong> filter. Then run Verify to move ready contacts into Send Message.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
             <button class="topbar-btn" onclick="setFilter('dorking', document.querySelector('#qp-actions .qp-action[onclick*=\'dorking\']'))">Show Web Leads in Queue</button>
-            <button class="topbar-btn" onclick="showContentTab('verify-send-content', document.getElementById('tab-verify'))">Open Verify &amp; Send</button>
-            <button class="topbar-btn" onclick="showContentTab('email-scout-content', document.getElementById('tab-emailscout'))">Open Email Scout</button>
+            <button class="topbar-btn" onclick="showContentTab('verify-send-content', document.getElementById('tab-verify'))">Open Verify</button>
+            <button class="topbar-btn" onclick="showContentTab('email-scout-content', document.getElementById('tab-emailscout'))">Open Send Message</button>
           </div>
           <div id="sv37-dork-local-stats" style="font-size:12px;color:var(--muted)"></div>
         </div>
@@ -636,9 +696,9 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
     <div class="tab-panel" id="verify-send-content" style="overflow-y:auto">
       <div id="verify-send-panel" style="padding:16px;max-width:980px;margin:0 auto">
         <div style="margin-bottom:16px">
-          <h2 style="font-size:16px;font-weight:800;margin-bottom:4px">🧪 Verify & Send</h2>
+          <h2 style="font-size:16px;font-weight:800;margin-bottom:4px">🧪 Verify</h2>
           <p style="font-size:12px;color:var(--muted);line-height:1.6">
-            This is a Scout App tab, not a separate app. Upload/import leads through Upload List first, then this tab checks the businesses already in your queue, blocks invalid or duplicate emails, and moves only ready contacts into the existing Email Scout tab.
+            This is a Scout App tab, not a separate app. Upload/import leads through Upload List first, then this tab checks the businesses already in your queue, blocks invalid or duplicate emails, and moves only ready contacts into the existing Send Message tab.
           </p>
         </div>
 
@@ -655,13 +715,13 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
         </div>
 
         <div class="as-card" style="margin-bottom:14px">
-          <h3>2. Send ready contacts to Email Scout tab</h3>
-          <p>Choose how many ready contacts to move into the existing Email Scout tab. Example: if 1000 are ready, enter 200 and only 200 go into the Email Scout send list.</p>
+          <h3>2. Send ready contacts to Send Message tab</h3>
+          <p>Choose how many ready contacts to move into the existing Send Message tab. Example: if 1000 are ready, enter 200 and only 200 go into the Send Message send list.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <label style="font-size:11px;color:var(--muted)">Batch limit</label>
             <input id="sv36-batch-limit" type="number" min="1" value="200" class="as-input" style="width:110px">
-            <button class="topbar-btn primary" onclick="sv36SendReadyToEmailScout()">Send Ready Batch → Email Scout</button>
-            <button class="topbar-btn" onclick="showContentTab('email-scout-content', document.getElementById('tab-emailscout'))">Open Email Scout</button>
+            <button class="topbar-btn primary" onclick="sv36SendReadyToEmailScout()">Ready contacts auto-load in Send Message</button>
+            <button class="topbar-btn" onclick="showContentTab('email-scout-content', document.getElementById('tab-emailscout'))">Open Send Message</button>
           </div>
           <div id="sv36-batch-result" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
         </div>
@@ -3512,11 +3572,13 @@ function showContentTab(id, el) {
   if (id === 'batch-content') { renderBatch(); updateBatchBtn(); }
   if (id === 'verify-send-content' && typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab();
   if (id === 'dorking-content' && typeof sv37RenderDorkingTab === 'function') sv37RenderDorkingTab();
+  if (id === 'email-scout-content' && typeof sv59SyncSendContactsFromReady === 'function') sv59SyncSendContactsFromReady();
+  if (id === 'dashboard-content' && window.renderScoutDashboard) window.renderScoutDashboard();
 }
 
 function showTab(name) {
-  const map = { upload: 'upload-content', dorking: 'dorking-content', verify: 'verify-send-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
-  const tabElMap = { upload: 'tab-upload', dorking: 'tab-dorking', verify: 'tab-verify', autoscout: 'tab-autoscout', batch: 'tab-batch', timeline: 'tab-timeline', settings: 'tab-settings', detail: 'tab-detail' };
+  const map = { upload: 'upload-content', dorking: 'dorking-content', verify: 'verify-send-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail', send: 'email-scout-content', emailscout: 'email-scout-content', dashboard: 'dashboard-content' };
+  const tabElMap = { upload: 'tab-upload', dorking: 'tab-dorking', verify: 'tab-verify', autoscout: 'tab-autoscout', batch: 'tab-batch', timeline: 'tab-timeline', settings: 'tab-settings', detail: 'tab-detail', send: 'tab-emailscout', emailscout: 'tab-emailscout', dashboard: 'tab-dashboard' };
   showContentTab(map[name] || name, document.getElementById(tabElMap[name]));
 }
 
@@ -3675,20 +3737,60 @@ window.addEventListener('ElevateScoutDorkLead', (e) => {
 
   // Mobile tab switching
   function showTabMobile(tabId, el) {
-    // Switch main content
-    const map = { upload: 'upload-content', dorking: 'dorking-content', verify: 'verify-send-content', autoscout: 'autoscout-content', batch: 'batch-content', timeline: 'timeline-content', settings: 'settings-content', detail: 'detail' };
-    const contentId = map[tabId] || 'detail';
-    document.querySelectorAll('.tab-panel, #detail').forEach(p => p.style.display = 'none');
+    const map = {
+      upload: 'upload-content',
+      dorking: 'dorking-content',
+      verify: 'verify-send-content',
+      'verify-send': 'verify-send-content',
+      autoscout: 'autoscout-content',
+      batch: 'batch-content',
+      review: 'batch-content',
+      timeline: 'timeline-content',
+      settings: 'settings-content',
+      detail: 'detail',
+      queue: 'detail',
+      send: 'email-scout-content',
+      emailscout: 'email-scout-content',
+      'email-scout-content': 'email-scout-content',
+      dashboard: 'dashboard-content',
+      'dashboard-content': 'dashboard-content'
+    };
+    const contentId = map[tabId] || tabId || 'detail';
+    document.querySelectorAll('.tab-panel').forEach(p => {
+      p.classList.remove('active');
+      p.style.display = '';
+    });
     const panel = document.getElementById(contentId);
-    if (panel) panel.style.display = '';
+    if (panel) panel.classList.add('active');
+
     if (contentId === 'dorking-content' && typeof sv37RenderDorkingTab === 'function') sv37RenderDorkingTab();
     if (contentId === 'verify-send-content' && typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab();
-    // Update mobile nav active state
+    if (contentId === 'email-scout-content' && typeof sv59SyncSendContactsFromReady === 'function') sv59SyncSendContactsFromReady();
+    if (contentId === 'dashboard-content' && window.renderScoutDashboard) window.renderScoutDashboard();
+    if (contentId === 'timeline-content' && typeof renderTimeline === 'function') renderTimeline();
+    if (contentId === 'batch-content') { if (typeof renderBatch === 'function') renderBatch(); if (typeof updateBatchBtn === 'function') updateBatchBtn(); }
+
     document.querySelectorAll('.mob-nav-btn, .tt-btn').forEach(b => b.classList.remove('active'));
     if (el) el.classList.add('active');
-    // Sync desktop nav tabs
-    const navTab = document.getElementById('tab-' + tabId);
-    if (navTab) { document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active')); navTab.classList.add('active'); }
+
+    const reverseTabMap = {
+      'detail': 'tab-detail',
+      'upload-content': 'tab-upload',
+      'email-scout-content': 'tab-emailscout',
+      'dorking-content': 'tab-dorking',
+      'verify-send-content': 'tab-verify',
+      'batch-content': 'tab-batch',
+      'autoscout-content': 'tab-autoscout',
+      'timeline-content': 'tab-timeline',
+      'settings-content': 'tab-settings',
+      'dashboard-content': 'tab-dashboard'
+    };
+    const desktopTabId = reverseTabMap[contentId];
+    if (desktopTabId) {
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+      const navTab = document.getElementById(desktopTabId);
+      if (navTab) navTab.classList.add('active');
+    }
   }
   window.showTabMobile = showTabMobile;
 
@@ -3920,7 +4022,7 @@ function stopEsSend(completed) {
   document.getElementById('es-next-btn').style.display = 'none';
   if (completed) {
     esLog('✓ All done  -  ' + esCurrentIndex + ' emails opened');
-    toast('Email Scout complete  -  ' + esCurrentIndex + ' emails sent', 'ok');
+    toast('Send Message complete  -  ' + esCurrentIndex + ' emails sent', 'ok');
   } else {
     esLog('Stopped at ' + esCurrentIndex + ' / ' + esContacts.length);
     toast('Send stopped', 'warn');
@@ -3937,7 +4039,7 @@ function esLog(msg) {
   el.scrollTop = el.scrollHeight;
 }
 
-// Init Email Scout with one default template
+// Init Send Message with one default template
 if (!esTemplates.length) {
   esTemplates.push({ id: genId(), message: 'Hi {name},\n\nI came across your business and noticed something that caught my attention.\n\nI work with local businesses to help them streamline their operations and follow-ups using simple systems. Many of our clients have seen a significant improvement in how they manage customer relationships after working with us.\n\nWould you be open to a quick 10-minute call this week to explore if this could help you too?\n\nLooking forward to hearing from you.' });
 }
@@ -4594,7 +4696,7 @@ function manualPollReplies() {
 
 // ---------------------------------------------------------------
 // SCOUT APP v36 - VERIFY & SEND TAB
-// Minimal add-on: preserves original Scout App UI and sends ready contacts into existing Email Scout.
+// Minimal add-on: preserves original Scout App UI and sends ready contacts into existing Send Message.
 // ---------------------------------------------------------------
 (function(){
   const SCOUT_APP_VERSION = 'v36';
@@ -4753,7 +4855,7 @@ function manualPollReplies() {
     });
     if (typeof renderEsPreview === 'function') renderEsPreview();
     if (typeof updateEsSendStats === 'function') updateEsSendStats();
-    const msg = `Added ${ready.length} ready contacts to Email Scout.`;
+    const msg = `Added ${ready.length} ready contacts to Send Message.`;
     const out = document.getElementById('sv36-batch-result');
     if (out) out.textContent = msg;
     if (typeof toast === 'function') toast(msg, 'ok');
@@ -4804,7 +4906,7 @@ function manualPollReplies() {
 
 // ---------------------------------------------------------------
 // SCOUT APP v39 - SIMPLIFIED UPLOAD -> FIELD MAP -> VERIFY -> EMAIL SCOUT
-// Keeps Scout App UI. Upload is the only upload point. Email Scout sends queued contacts only.
+// Keeps Scout App UI. Upload is the only upload point. Send Message sends queued contacts only.
 // ---------------------------------------------------------------
 (function(){
   const SCOUT_APP_VERSION = 'v39';
@@ -5070,12 +5172,12 @@ function manualPollReplies() {
     if (uploadCard) {
       uploadCard.innerHTML = `
         <h3>Contacts source</h3>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Uploads now happen only in the Upload tab. Email Scout receives active contacts from Verify &amp; Send after emails are verified.</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Uploads now happen only in the Upload tab. Send Message receives active contacts from Verify after emails are verified.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="topbar-btn" onclick="showContentTab('upload-content', document.getElementById('tab-upload'))">Open Upload</button>
-          <button class="topbar-btn primary" onclick="showContentTab('verify-send-content', document.getElementById('tab-verify'))">Open Verify &amp; Send</button>
+          <button class="topbar-btn primary" onclick="showContentTab('verify-send-content', document.getElementById('tab-verify'))">Open Verify</button>
         </div>
-        <div id="es-upload-status" style="margin-top:10px;font-size:12px;color:var(--muted)">No direct upload here. Load contacts through Upload → Verify &amp; Send.</div>
+        <div id="es-upload-status" style="margin-top:10px;font-size:12px;color:var(--muted)">No direct upload here. Load contacts through Upload → Verify.</div>
         <div id="es-preview" style="margin-top:12px;display:none"><div style="font-size:12px;font-weight:700;margin-bottom:6px;color:var(--text)">Ready send list (<span id="es-count">0</span> contacts):</div><div style="overflow-x:auto;max-height:160px;overflow-y:auto"><table style="width:100%;font-size:11px;border-collapse:collapse" id="es-preview-table"></table></div></div>`;
     }
     const h3s = Array.from(document.querySelectorAll('#email-scout-content .as-card h3'));
@@ -5195,7 +5297,7 @@ function manualPollReplies() {
     });
     if (typeof renderEsPreview === 'function') renderEsPreview();
     if (typeof updateEsSendStats === 'function') updateEsSendStats();
-    const msg = `Added ${ready.length} active verified contacts to Email Scout.`;
+    const msg = `Added ${ready.length} active verified contacts to Send Message.`;
     const out = q('sv36-batch-result'); if (out) out.textContent = msg;
     if (typeof toast === 'function') toast(msg, 'ok');
     showContentTab('email-scout-content', q('tab-emailscout'));
@@ -5214,7 +5316,7 @@ function manualPollReplies() {
 
 
 // ---------------------------------------------------------------
-// Scout App v42 - Email Found batch source for Verify & Send
+// Scout App v42 - Email Found batch source for Verify
 // Keeps Upload as the only upload point. Adds source selection so
 // users can send 200 contacts from Email Found / current queue filter.
 // ---------------------------------------------------------------
@@ -5258,11 +5360,11 @@ function manualPollReplies() {
         <option value="all_with_email">All with email</option>
       </select>
       <label style="display:inline-flex;gap:5px;align-items:center;font-size:11px;color:var(--muted);white-space:nowrap">
-        <input type="checkbox" id="sv40-clear-email-scout" checked> replace Email Scout list
+        <input type="checkbox" id="sv40-clear-email-scout" checked> replace Send Message list
       </label>`;
     limit.parentNode.insertBefore(wrap, limit.nextSibling);
     const note = q('sv36-batch-result');
-    if (note) note.textContent = 'Pick Email Found tab + batch limit 200 to move 200 verified found emails into Email Scout.';
+    if (note) note.textContent = 'Pick Email Found tab + batch limit 200 to move 200 verified found emails into Send Message.';
   }
 
   const oldRender = window.sv36RenderVerifySendTab;
@@ -5330,7 +5432,7 @@ function manualPollReplies() {
     if (typeof renderEsPreview === 'function') renderEsPreview();
     if (typeof updateEsSendStats === 'function') updateEsSendStats();
     const labelMap = { verified_ready:'verified ready/review', email_found:'Email Found', current_filter:'current filter', all_with_email:'all with email' };
-    const msg = `Moved ${picked.length} contacts from ${labelMap[source] || source} to Email Scout${clearFirst ? ' (replaced previous list)' : ''}.`;
+    const msg = `Moved ${picked.length} contacts from ${labelMap[source] || source} to Send Message${clearFirst ? ' (replaced previous list)' : ''}.`;
     const out = q('sv36-batch-result'); if (out) out.textContent = msg;
     if (typeof toast === 'function') toast(msg, picked.length ? 'ok' : 'err');
     if (picked.length) showContentTab('email-scout-content', q('tab-emailscout'));
@@ -5343,7 +5445,7 @@ function manualPollReplies() {
       if (title) title.textContent = 'Scout App v42 — Business Scouting System';
       injectBatchSourceControls();
       const p = q('sv36-batch-result');
-      if (p) p.textContent = 'To send 200 from Email Found: set Source = Email Found tab, Batch limit = 200, then Send Ready Batch → Email Scout.';
+      if (p) p.textContent = 'To send 200 from Email Found: set Source = Email Found tab, Batch limit = 200, then Ready contacts auto-load in Send Message.';
     } catch(e) { console.warn('Scout App v42 init warning', e); }
   });
 })();
@@ -5682,7 +5784,7 @@ function manualPollReplies() {
     if (typeof save === 'function') save();
     if (typeof renderEsPreview === 'function') renderEsPreview();
     if (typeof updateEsSendStats === 'function') updateEsSendStats();
-    const msg = `Moved ${picked.length} Ready to Send contacts to Email Scout. ${source === 'email_found' ? 'Raw Email Found was verified first.' : ''}`;
+    const msg = `Moved ${picked.length} Ready to Send contacts to Send Message. ${source === 'email_found' ? 'Raw Email Found was verified first.' : ''}`;
     const out = q('sv36-batch-result'); if (out) out.textContent = msg;
     if (typeof toast === 'function') toast(msg, picked.length ? 'ok' : 'err');
     if (picked.length && typeof showContentTab === 'function') showContentTab('email-scout-content', q('tab-emailscout'));
@@ -5704,10 +5806,10 @@ function manualPollReplies() {
 
 
 // ---------------------------------------------------------------
-// Scout App v42 - Auto-Scout must not push emails to Batch Approve.
+// Scout App v42 - Auto-Scout must not push emails to Review.
 // Final rule:
 // Pending -> Scanning -> Email Found -> Verify -> Ready to Send -> Send Message.
-// Batch Approve/Send Message only receives verified Ready to Send records.
+// Review/Send Message only receives verified Ready to Send records.
 // ---------------------------------------------------------------
 (function(){
   const VERSION = 'Scout App v42';
@@ -5739,7 +5841,7 @@ function manualPollReplies() {
       businesses.forEach(b => {
         const e = emailOf(b);
         if (e) {
-          // Old builds used "ready" and/or Batch Approve immediately after Auto-Scout.
+          // Old builds used "ready" and/or Review immediately after Auto-Scout.
           // Without verification, those are only Email Found.
           const v = b.emailVerification;
           if ((b.status === 'ready' || b.status === 'ready_to_send') && !(v && v.status === 'READY')) {
@@ -5770,7 +5872,7 @@ function manualPollReplies() {
       if (window.batchApprovals && window.batchApprovals !== approvals) window.batchApprovals = approvals;
       if (fixed || removedBatch) {
         saveIfPossible();
-        logIfPossible('warn', `${VERSION}: cleaned ${fixed} unverified status records and removed ${removedBatch} unverified Batch Approve items${reason ? ' after ' + reason : ''}.`);
+        logIfPossible('warn', `${VERSION}: cleaned ${fixed} unverified status records and removed ${removedBatch} unverified Review items${reason ? ' after ' + reason : ''}.`);
       }
       return {fixed, removedBatch};
     } catch(e) { console.warn('v42 cleanup warning', e); return {fixed:0, removedBatch:0}; }
@@ -5849,7 +5951,7 @@ function manualPollReplies() {
     const approvals = (typeof batchApprovals !== 'undefined' && batchApprovals) ? batchApprovals : (window.batchApprovals || (window.batchApprovals = {}));
     approvals[bizId] = { approved:false, skipped:false, message:b.generatedMessage };
     if (typeof updateBatchBtn === 'function') updateBatchBtn();
-    toastIfPossible('Added verified lead to Batch Approve.', 'ok');
+    toastIfPossible('Added verified lead to Review.', 'ok');
   };
 
   // Backend Auto-Scout: Pending -> Scanning -> Email Found or No Email. No message generation.
@@ -6101,7 +6203,7 @@ function manualPollReplies() {
 // ---------------------------------------------------------------
 // SCOUT APP v45 - Manual Review -> Ready to Send approval.
 // Keeps v43 IndexedDB + v44 30-at-a-time Load More.
-// Adds selection controls in Review filter and Verify & Send tab.
+// Adds selection controls in Review filter and Verify tab.
 // ---------------------------------------------------------------
 (function(){
   const VERSION = 'Scout App v45';
@@ -6773,7 +6875,7 @@ function manualPollReplies() {
 
   function renameUi(){
     const replacements = [
-      ['📧 Email Scout','📧 Send Message'], ['Email Scout','Send Message'], ['email scout','send message'], ['Email scout','Send message']
+      ['📧 Send Message','📧 Send Message'], ['Send Message','Send Message'], ['email scout','send message'], ['Email scout','Send message']
     ];
     const nodes = document.querySelectorAll('button, .nav-tab, h2, h3, p, span, label');
     nodes.forEach(n => {
@@ -8055,7 +8157,7 @@ function manualPollReplies() {
     const backendCard = Array.from(document.querySelectorAll('#autoscout-panel .as-card')).find(c => /Backend Server|Auto-Scout Control/i.test(c.textContent||''));
     if (backendCard && !q('v56-autoscout-note')) {
       const note=document.createElement('div'); note.id='v56-autoscout-note'; note.style.cssText='margin-top:10px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:8px;padding:10px 12px;font-size:11px;color:var(--muted);line-height:1.6';
-      note.innerHTML='<strong style="color:var(--accent)">Auto-Scout diagnostics:</strong> Auto-Scout now logs the exact website/domain it checks, how many pages the backend reached, and whether emails were found. Found emails go to <strong>Email Found</strong>, not Batch Approve.';
+      note.innerHTML='<strong style="color:var(--accent)">Auto-Scout diagnostics:</strong> Auto-Scout now logs the exact website/domain it checks, how many pages the backend reached, and whether emails were found. Found emails go to <strong>Email Found</strong>, not Review.';
       backendCard.appendChild(note);
     }
   }
@@ -8269,7 +8371,7 @@ function manualPollReplies() {
    1) Important filters stay visible, less-used filters move into a dropdown.
    2) Auto-Scout does not mark unreachable/skipped websites as No Email.
    3) Auto-Scout logs the exact website, pages reached, and found email count.
-   4) Extension Auto-Scout results are forced into Email Found, not Batch Approve. */
+   4) Extension Auto-Scout results are forced into Email Found, not Review. */
 (function(){
   const VERSION = 'v58';
   const PAGE_SIZE = 30;
@@ -8505,7 +8607,7 @@ function manualPollReplies() {
     const panel=q('autoscout-panel');
     if (panel && !q('sv58-autoscout-warning')) {
       const card=document.createElement('div'); card.id='sv58-autoscout-warning'; card.className='as-card';
-      card.innerHTML = `<h3>Auto-Scout rule</h3><p>Pending stays Pending if the website cannot be reached or no website exists. A lead moves to <strong>No Email</strong> only after the backend reaches pages and finds no visible email. Found emails move to <strong>Email Found</strong> for verification, not Batch Approve.</p>`;
+      card.innerHTML = `<h3>Auto-Scout rule</h3><p>Pending stays Pending if the website cannot be reached or no website exists. A lead moves to <strong>No Email</strong> only after the backend reaches pages and finds no visible email. Found emails move to <strong>Email Found</strong> for verification, not Review.</p>`;
       panel.insertBefore(card, panel.firstChild);
     }
   }
@@ -8582,11 +8684,11 @@ function manualPollReplies() {
     if (logo) logo.textContent = '🧭 Scout App';
     if (title) title.textContent = VERSION + ' — Simple Workflow';
 
-    // Rename tabs/buttons: Verify & Send -> Verify, Email Scout -> Send Message.
+    // Rename tabs/buttons: Verify -> Verify, Send Message -> Send Message.
     document.querySelectorAll('button,.nav-tab,.tt-btn,.mob-nav-btn,h2,h3,p,span,label').forEach(el => {
       if (el.childElementCount) return;
       let t = el.textContent || '';
-      t = t.replace(/Verify\s*&\s*Send/g, 'Verify').replace(/Email Scout/g, 'Send Message');
+      t = t.replace(/Verify\s*&\s*Send/g, 'Verify').replace(/Send Message/g, 'Send Message');
       if (t !== el.textContent) el.textContent = t;
     });
     const emailH2 = document.querySelector('#email-scout-content h2');
@@ -8749,6 +8851,639 @@ function manualPollReplies() {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 </script>
+
+
+
+<script>
+/* Scout App v60 - Robust Gmail reply tracking fix.
+   Fixes missed replies by using backend /gmail/check-replies instead of only browser unread/24h polling. */
+(function(){
+  const VERSION = 'v60';
+  const REPLY_LOOKBACK_DAYS = 45;
+  let v60ReplyCheckRunning = false;
+
+  function q(id){ return document.getElementById(id); }
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function normEmail(v){ return String(v || '').trim().toLowerCase().replace(/^mailto:/,'').split('?')[0].replace(/[.,;:)>\]"]+$/,'').replace(/^[<(\[]+/,''); }
+  function safeArr(v){ return Array.isArray(v) ? v : []; }
+  function nowIso(){ return new Date().toISOString(); }
+  function toastSafe(msg,type){ try { if (typeof toast === 'function') toast(msg,type); else console.log(msg); } catch(e){ console.log(msg); } }
+  function logSafe(msg){ try { if (typeof esLog === 'function') esLog(msg); else console.log(msg); } catch(e){ console.log(msg); } }
+  function getSettingsSafe(){ try { return (typeof settings !== 'undefined' ? settings : JSON.parse(localStorage.getItem('sv13_settings') || '{}')); } catch(e){ return {}; } }
+  function getBackendUrl(){ const st = getSettingsSafe(); return String(st.backendUrl || localStorage.getItem('backendUrl') || localStorage.getItem('scoutBackendUrl') || '').replace(/\/+$/,''); }
+  function getClientId(){ const st = getSettingsSafe(); return st.oauthClientId || q('oauth-client-id')?.value || ''; }
+  function getTokenMap(){ try { return JSON.parse(localStorage.getItem('scout_gmail_tokens') || '{}') || {}; } catch(e){ return {}; } }
+  function setTokenMap(map){ localStorage.setItem('scout_gmail_tokens', JSON.stringify(map || {})); try { if (typeof gmailTokens !== 'undefined') gmailTokens = map || {}; } catch(e){} }
+  function tokenEntries(){ const map = getTokenMap(); return Object.keys(map).map(k => ({ key:k, token:map[k] || {} })).filter(e => e.token && (e.token.access_token || e.token.refresh_token)); }
+  function getBusinesses(){ try { if (typeof businesses !== 'undefined' && Array.isArray(businesses)) return businesses; } catch(e){} return Array.isArray(window.businesses) ? window.businesses : []; }
+  function getEsContacts(){ try { if (typeof esContacts !== 'undefined' && Array.isArray(esContacts)) return esContacts; } catch(e){} return Array.isArray(window.esContacts) ? window.esContacts : []; }
+  function statusOf(b){ return String((b && (b.status || b.contactStatus)) || '').toLowerCase().replace(/\s+/g,'_'); }
+  function findBizByReply(reply){
+    const list = getBusinesses();
+    const id = String(reply.contactId || reply.id || '');
+    const email = normEmail(reply.contactEmail || reply.email || '');
+    return list.find(b => id && String(b.id || '') === id) || list.find(b => normEmail(b.email || (Array.isArray(b.emails) ? b.emails[0] : '')) === email) || null;
+  }
+  function contactedLeadsForReplyCheck(){
+    const seen = new Set();
+    const out = [];
+    getBusinesses().forEach(b => {
+      const email = normEmail(b.email || (Array.isArray(b.emails) ? b.emails[0] : ''));
+      if (!email || seen.has(email)) return;
+      const st = statusOf(b);
+      const hasSentProof = b.sentAt || b.contactedAt || b.gmailThreadId || b.gmailMessageId || b.gmailUsed;
+      if (!hasSentProof && !['contacted','replied','followup','follow_up_due'].includes(st)) return;
+      if (['closed','invalid','duplicate','no_email','ready','ready_to_send','pending','found','review','risky'].includes(st) && !hasSentProof) return;
+      seen.add(email);
+      out.push({
+        id: b.id || '',
+        name: b.name || b.businessName || b.companyName || '',
+        email,
+        sentAt: b.sentAt || b.contactedAt || '',
+        contactedAt: b.contactedAt || '',
+        gmailThreadId: b.gmailThreadId || '',
+        gmailMessageId: b.gmailMessageId || '',
+        subjectSent: b.subjectSent || b.sentSubject || '',
+        gmailUsed: b.gmailUsed || b.sentBy || ''
+      });
+    });
+    // Include sent contacts that may exist only in the Send Message local list.
+    getEsContacts().forEach(c => {
+      const email = normEmail(c.email || c.best_email || '');
+      if (!email || seen.has(email)) return;
+      const st = statusOf(c);
+      if (!(c.sentAt || c.contactedAt || c.gmailThreadId || st === 'contacted' || st === 'replied')) return;
+      seen.add(email);
+      out.push({ id:c.id || c.businessId || c.leadId || '', name:c.name || c.business || c.company || '', email, sentAt:c.sentAt || c.contactedAt || '', contactedAt:c.contactedAt || '', gmailThreadId:c.gmailThreadId || '', gmailMessageId:c.gmailMessageId || '', subjectSent:c.sentSubject || c.subjectSent || '', gmailUsed:c.sentBy || c.gmailUsed || '' });
+    });
+    return out;
+  }
+  function updateStoredToken(entry, data){
+    if (!entry || !data || !data.access_token) return;
+    const map = getTokenMap();
+    const t = map[entry.key] || entry.token || {};
+    t.access_token = data.access_token;
+    t.expires_at = Date.now() + 55 * 60 * 1000;
+    if (data.gmailAccount) t.email = data.gmailAccount;
+    map[entry.key] = t;
+    setTokenMap(map);
+  }
+  function classifyTextForReply(biz, body){
+    try { if (typeof classifyReply === 'function') return classifyReply(body || ''); } catch(e){}
+    return 'neutral';
+  }
+  function suggestedReplyFor(biz, body){
+    try { if (typeof suggestResponseNoAI === 'function') return suggestResponseNoAI(biz || {}, body || ''); } catch(e){}
+    return '';
+  }
+  function applyReplyToScout(reply){
+    const biz = findBizByReply(reply);
+    if (!biz) return false;
+    if (statusOf(biz) === 'replied' && (biz.gmailMsgId === reply.gmailMsgId || biz.replyGmailMsgId === reply.gmailMsgId)) return false;
+    const body = String(reply.body || reply.snippet || '').trim();
+    const patch = {
+      status: 'replied',
+      repliedAt: reply.receivedAt || nowIso(),
+      theirReply: body.slice(0, 2000),
+      replyClassification: classifyTextForReply(biz, body),
+      suggestedResponse: suggestedReplyFor(biz, body),
+      gmailMsgId: reply.gmailMsgId || '',
+      replyGmailMsgId: reply.gmailMsgId || '',
+      gmailThreadId: reply.gmailThreadId || biz.gmailThreadId || '',
+      replySubject: reply.subject || '',
+      replyFrom: reply.replyFrom || reply.replyFromHeader || '',
+      replyFromAccount: reply.gmailAccount || '',
+      replyMatchMethod: reply.matchMethod || ''
+    };
+    try { if (typeof updateBiz === 'function') updateBiz(biz.id, patch); else Object.assign(biz, patch); } catch(e){ Object.assign(biz, patch); }
+    const e = normEmail(reply.contactEmail || biz.email);
+    getEsContacts().forEach(c => {
+      if (normEmail(c.email || c.best_email || '') === e) {
+        c.status = 'replied'; c.repliedAt = patch.repliedAt; c.theirReply = patch.theirReply; c.replyFrom = patch.replyFrom; c.gmailThreadId = patch.gmailThreadId;
+      }
+    });
+    return true;
+  }
+  function saveAndRenderReplyUpdates(){
+    try { if (typeof save === 'function') save(); } catch(e){}
+    try { if (typeof renderQueue === 'function') renderQueue(); } catch(e){}
+    try { if (typeof renderDashboard === 'function') renderDashboard(); } catch(e){}
+    try { if (typeof updateEsSendStats === 'function') updateEsSendStats(); } catch(e){}
+  }
+
+  async function v60PollGmailReplies(options){
+    if (v60ReplyCheckRunning) return { success:false, running:true, repliesFound:0 };
+    v60ReplyCheckRunning = true;
+    try { if (typeof replyPollRunning !== 'undefined') replyPollRunning = true; } catch(e){}
+    const manual = !!(options && options.manual);
+    const backendUrl = getBackendUrl();
+    const contacts = contactedLeadsForReplyCheck();
+    const accounts = tokenEntries();
+    if (!backendUrl) { if (manual) toastSafe('Backend URL is required for reply tracking.', 'err'); return { success:false, error:'missing backend' }; }
+    if (!accounts.length) { if (manual) toastSafe('No Gmail account connected for reply tracking.', 'err'); return { success:false, error:'no gmail' }; }
+    if (!contacts.length) { if (manual) toastSafe('No Contacted leads to check yet.', 'warn'); return { success:true, repliesFound:0, checked:0 }; }
+
+    let totalReplies = 0;
+    let totalChecked = 0;
+    let lastError = '';
+    logSafe(`📬 Checking Gmail replies for ${contacts.length} contacted lead(s)…`);
+    for (const entry of accounts) {
+      const token = entry.token || {};
+      try {
+        const res = await fetch(backendUrl + '/gmail/check-replies', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            contacts,
+            access_token: token.access_token || '',
+            refresh_token: token.refresh_token || '',
+            expires_at: token.expires_at || 0,
+            client_id: getClientId(),
+            senderEmail: token.email || entry.key || '',
+            lookbackDays: REPLY_LOOKBACK_DAYS
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) throw new Error(data.error || 'Reply check failed');
+        updateStoredToken(entry, data);
+        totalChecked += Number(data.checked || 0);
+        const replies = safeArr(data.replies);
+        replies.forEach(r => {
+          if (applyReplyToScout(r)) {
+            totalReplies++;
+            logSafe(`✓ Reply detected from ${r.replyFrom || r.contactEmail} for ${r.contactName || r.contactEmail} (${r.matchMethod || 'gmail'})`);
+          }
+        });
+      } catch(err) {
+        lastError = err.message || String(err);
+        logSafe(`✗ Reply check error for ${token.email || entry.key || 'Gmail'}: ${lastError}`);
+      }
+    }
+    if (totalReplies) {
+      saveAndRenderReplyUpdates();
+      toastSafe(`📬 ${totalReplies} new repl${totalReplies > 1 ? 'ies' : 'y'} logged. Check Replies filter.`, 'ok');
+    } else if (manual) {
+      toastSafe(lastError ? `Reply check finished with error: ${lastError}` : `Reply check complete. Checked ${contacts.length} contacted lead(s), no new reply found.`, lastError ? 'err' : 'ok');
+    }
+    return { success: !lastError, repliesFound: totalReplies, checked: totalChecked, error:lastError };
+  }
+
+  window.pollGmailReplies = v60PollGmailReplies;
+  window.manualPollReplies = function(){ toastSafe('Checking replies…'); return v60PollGmailReplies({ manual:true }); };
+  window.v60PollGmailReplies = v60PollGmailReplies;
+  window.v60ReplyTrackingDiagnostics = function(){
+    return { backendUrl:getBackendUrl(), connectedGmailAccounts:tokenEntries().length, contactedLeads:contactedLeadsForReplyCheck().length, lookbackDays:REPLY_LOOKBACK_DAYS };
+  };
+
+  function patchVersion(){
+    const logo=q('topbar-logo'), title=q('topbar-title');
+    if (logo) logo.textContent='🧭 Scout App';
+    if (title) title.textContent='v61 — Premium Design + Reply Tracking';
+  }
+  function addReplyHint(){
+    const btn = document.querySelector('button[onclick="manualPollReplies()"]');
+    if (btn) btn.title = 'Checks Contacted leads using Gmail thread IDs and sender search. Does not require unread replies.';
+  }
+  function init(){ patchVersion(); addReplyHint(); setTimeout(() => v60PollGmailReplies({ manual:false }), 15000); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+  setInterval(() => v60PollGmailReplies({ manual:false }), 10 * 60 * 1000);
+})();
+</script>
+
+
+
+<script>
+// ---------------------------------------------------------------
+// SCOUT APP v62 — Follow-up integrity, template analytics, graphs,
+// and local scheduled Gmail batches.
+// Uses the v61 premium design and keeps all v60/v61 features intact.
+// ---------------------------------------------------------------
+(function(){
+  'use strict';
+  const VERSION = 'v62 — Scheduling + Analytics';
+  const SCHEDULE_KEY = 'scout_scheduled_batches_v62';
+  const q = id => document.getElementById(id);
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const norm = v => String(v || '').trim().toLowerCase();
+  const nowIso = () => new Date().toISOString();
+  const safeArr = v => Array.isArray(v) ? v : [];
+  const DAY = 24 * 60 * 60 * 1000;
+  let scheduleRunnerBusy = false;
+
+  function toastSafe(msg, type){ try { if (typeof toast === 'function') toast(msg, type || 'ok'); else console.log(msg); } catch(e){ console.log(msg); } }
+  function logSafe(msg){ try { if (typeof esLog === 'function') esLog(msg); else console.log(msg); } catch(e){ console.log(msg); } }
+  function settingsSafe(){ try { return (typeof getSettings === 'function') ? getSettings() : (window.settings || settings || JSON.parse(localStorage.getItem('sv13_settings') || '{}')); } catch(e){ return {}; } }
+  function getBackendUrl(){
+    const s = settingsSafe();
+    return String((q('backend-url-input') && q('backend-url-input').value) || s.backendUrl || localStorage.getItem('backendUrl') || localStorage.getItem('scoutBackendUrl') || '').trim().replace(/\/+$/,'');
+  }
+  function getClientId(){
+    const s = settingsSafe();
+    return String((q('oauth-client-id') && q('oauth-client-id').value) || s.oauthClientId || localStorage.getItem('oauthClientId') || '').trim();
+  }
+  function businessesSafe(){
+    try { if (Array.isArray(window.businesses)) return window.businesses; } catch(e) {}
+    try { if (typeof businesses !== 'undefined' && Array.isArray(businesses)) return businesses; } catch(e) {}
+    return [];
+  }
+  function saveAll(){ try { if (typeof save === 'function') save(); } catch(e){} try { if (typeof renderQueue === 'function') renderQueue(); } catch(e){} try { if (typeof updateEsSendStats === 'function') updateEsSendStats(); } catch(e){} }
+  function statusOf(b){ return norm(b && (b.status || 'pending')); }
+  function emailOf(b){ return String(b && (b.email || (Array.isArray(b.emails) ? b.emails[0] : '')) || '').trim().toLowerCase().replace(/^mailto:/,'').replace(/[;,.)\]]+$/g,'').replace(/^[\[(]+/g,''); }
+  function nameOf(b){ try { if (typeof cleanBizName === 'function') return cleanBizName(b.name || b.business || ''); } catch(e){} return (b && (b.name || b.business || b.company)) || ''; }
+  function fieldClean(v){
+    if (Array.isArray(v)) return v.filter(Boolean).join(', ');
+    let s = String(v || '').trim();
+    if (s === '[]') return '';
+    if (/^\[.*\]$/.test(s)) s = s.replace(/^\[|\]$/g,'').replace(/["']/g,'').split(',').map(x=>x.trim()).filter(Boolean).join(', ');
+    return s;
+  }
+  function isContacted(b){ return ['contacted','replied','closed'].includes(statusOf(b)) || !!(b && (b.sentAt || b.contactedAt)); }
+  function hasReply(b){ return statusOf(b) === 'replied' || !!(b && (b.theirReply || b.repliedAt || b.lastReplyAt)); }
+  function isReady(b){
+    const st = statusOf(b);
+    const v = b && b.emailVerification;
+    return !!b && emailOf(b) && st === 'ready_to_send' && !isContacted(b) && (!v || String(v.status || '').toUpperCase() === 'READY');
+  }
+  function followupThresholdMs(){ return Math.max(1, parseInt(localStorage.getItem('scout_followup_due_hours') || '24', 10)) * 60 * 60 * 1000; }
+  function isFollowupDue(b){
+    const t = b && (b.contactedAt || b.sentAt || b.lastContactedAt);
+    return !!(b && statusOf(b) === 'contacted' && !hasReply(b) && t && (Date.now() - new Date(t).getTime()) >= followupThresholdMs());
+  }
+  function gmailTokensMap(){ try { return JSON.parse(localStorage.getItem('scout_gmail_tokens') || '{}') || {}; } catch(e){ return {}; } }
+  function gmailAccounts(){
+    const m = gmailTokensMap();
+    return Object.keys(m).map(k => ({ key:k, ...(m[k] || {}) })).filter(t => t && (t.email || t.access_token || t.refresh_token));
+  }
+  function selectedGmailFrom(selectorId){
+    const email = q(selectorId)?.value || q('v51-gmail-account')?.value || '';
+    const accounts = gmailAccounts();
+    return accounts.find(a => norm(a.email || a.key) === norm(email)) || accounts[0] || null;
+  }
+  function templatesSafe(){
+    try { if (Array.isArray(window.esTemplates)) return window.esTemplates; } catch(e){}
+    try { if (typeof esTemplates !== 'undefined' && Array.isArray(esTemplates)) return esTemplates; } catch(e){}
+    try { return JSON.parse(localStorage.getItem('sv13_es_templates') || localStorage.getItem('esTemplates') || '[]') || []; } catch(e){ return []; }
+  }
+  function contactFromBiz(b){
+    const category = fieldClean(b.category || b.mainCategories || b.mainCategory || b.industry || b.niche || '');
+    return {
+      id: b.id, businessId: b.id, name: nameOf(b) || emailOf(b), email: emailOf(b), website: b.website || b.domain || '', domain: b.domain || b.website || '',
+      category, industry: category || fieldClean(b.industry || ''), location: b.location || b.address || b.city || '', address: b.address || b.location || '',
+      rating: b.rating || '', reviews: b.reviews || '', phone: b.phone || (Array.isArray(b.phones) ? b.phones[0] : '') || '', sourceType: b.sourceType || b.source || ''
+    };
+  }
+  function personalise(text, c){
+    const x = c || {};
+    try { if (typeof personaliseEsMsg === 'function') return personaliseEsMsg(text, x); } catch(e){}
+    return String(text || '')
+      .replace(/\{name\}/gi, x.name || '')
+      .replace(/\{email\}/gi, x.email || '')
+      .replace(/\{website\}/gi, x.website || '')
+      .replace(/\{domain\}/gi, x.domain || '')
+      .replace(/\{category\}/gi, x.category || '')
+      .replace(/\{industry\}/gi, x.industry || x.category || '')
+      .replace(/\{location\}/gi, x.location || x.address || '')
+      .replace(/\{address\}/gi, x.address || x.location || '')
+      .replace(/\{phone\}/gi, x.phone || '')
+      .replace(/\{rating\}/gi, x.rating || '')
+      .replace(/\{reviews\}/gi, x.reviews || '');
+  }
+  function pickTemplate(index, templateMode){
+    const ts = templatesSafe();
+    if (!ts.length) return { id:'default', name:'Default', subject:'Quick question for {name}', message:'Hi {name},\n\nI wanted to reach out with a quick idea for your business.\n\nWould you be open to taking a look?' };
+    const mode = templateMode || q('v62-template-choice')?.value || 'current';
+    if (/^template:/.test(mode)) {
+      const idx = Math.max(0, parseInt(mode.split(':')[1] || '0', 10));
+      return ts[idx] || ts[0];
+    }
+    const rotation = q('es-rotation-mode')?.value || 'rotate';
+    if (rotation === 'first') return ts[0];
+    if (rotation === 'random') return ts[Math.floor(Math.random() * ts.length)] || ts[0];
+    return ts[index % ts.length] || ts[0];
+  }
+  function buildSendRows(limit, templateMode){
+    const sig = q('es-signature')?.value || settingsSafe().signature || '';
+    const ready = businessesSafe().filter(isReady).slice(0, Math.max(1, parseInt(limit || 1, 10)));
+    return ready.map((b, idx) => {
+      const c = contactFromBiz(b);
+      const tpl = pickTemplate(idx, templateMode);
+      const tplId = tpl.id || tpl.key || ('template_' + templatesSafe().indexOf(tpl));
+      const tplName = tpl.name || tpl.title || ('Template ' + (templatesSafe().indexOf(tpl) + 1 || idx + 1));
+      const subject = personalise(tpl.subject || 'Quick question for {name}', c).trim();
+      const body = personalise(tpl.message || tpl.body || '', c).trim();
+      return {
+        id: b.id, businessId: b.id, name: c.name, email: c.email, subject,
+        message: body + (sig ? '\n\n' + sig : ''),
+        templateId: tplId, templateName: tplName, templateIndex: templatesSafe().indexOf(tpl)
+      };
+    }).filter(r => r.email && r.subject && r.message);
+  }
+  function markSent(row, result, senderEmail, meta){
+    const b = businessesSafe().find(x => String(x.id) === String(row.businessId || row.id) || norm(emailOf(x)) === norm(row.email));
+    if (!b) return;
+    const patch = {
+      status:'contacted', contactedAt:nowIso(), sentAt:nowIso(), gmailUsed:senderEmail || '',
+      subjectSent:row.subject, messageSent:row.message,
+      sentTemplateId:row.templateId || '', sentTemplateName:row.templateName || '', sentTemplateIndex:row.templateIndex,
+      gmailMessageId: result.gmailMessageId || result.messageId || '', gmailThreadId: result.gmailThreadId || result.threadId || '',
+      scheduledBatchId: meta && meta.scheduleId || b.scheduledBatchId || '', lastSendMode: meta && meta.scheduled ? 'scheduled' : 'manual'
+    };
+    try { if (typeof updateBiz === 'function') updateBiz(b.id, patch); else Object.assign(b, patch); } catch(e){ Object.assign(b, patch); }
+  }
+  async function scoutSendBatchV62(opts){
+    const options = opts || {};
+    const backendUrl = getBackendUrl();
+    if (!backendUrl) throw new Error('Backend URL is missing. Save your Render backend URL first.');
+    const account = options.account || selectedGmailFrom(options.senderSelectorId || 'v62-schedule-sender');
+    if (!account) throw new Error('No connected Gmail account selected.');
+    const limit = Math.max(1, parseInt(options.limit || q('v51-send-limit')?.value || '50', 10));
+    const delayMs = Math.max(0, parseInt(options.delayMs ?? q('v51-send-delay')?.value ?? '1500', 10));
+    const dryRun = !!options.dryRun;
+    const rows = buildSendRows(limit, options.templateMode);
+    if (!rows.length) throw new Error('No Ready to Send contacts available. Verify leads first.');
+    logSafe(`${dryRun ? 'Dry run' : (options.scheduled ? 'Scheduled send' : 'Automatic send')} starting for ${rows.length} contact(s) from ${account.email || account.key}…`);
+    const res = await fetch(backendUrl + '/email-scout/send-selected-batch', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        contacts: rows, limit: rows.length, delayMs, dryRun,
+        senderEmail: account.email || account.key || '', access_token: account.access_token || '', refresh_token: account.refresh_token || '',
+        expires_at: account.expires_at || 0, client_id: getClientId()
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `Gmail API send failed: HTTP ${res.status}`);
+    let sent = 0, failed = 0, skipped = 0;
+    safeArr(data.results).forEach((r, idx) => {
+      const row = rows.find(x => String(x.id) === String(r.id) || norm(x.email) === norm(r.email)) || rows[idx];
+      if (r.status === 'sent') { sent++; markSent(row, r, data.senderEmail || account.email || account.key, options); logSafe(`✓ Sent to ${row.name || row.email} using ${row.templateName || 'template'}`); }
+      else if (r.status === 'dry_run') { skipped++; logSafe(`• Dry run: ${row.name || row.email} using ${row.templateName || 'template'}`); }
+      else if (r.status === 'skipped') { skipped++; logSafe(`↷ Skipped ${row.email}: ${r.reason || 'missing data'}`); }
+      else { failed++; logSafe(`✗ Failed ${row.email}: ${r.reason || 'unknown error'}`); }
+    });
+    saveAll();
+    if (window.renderScoutDashboard) window.renderScoutDashboard();
+    return { success:true, sent, failed, skipped, rows:rows.length, senderEmail:data.senderEmail || account.email || account.key };
+  }
+  window.scoutSendBatchV62 = scoutSendBatchV62;
+  window.startEsSend = async function(){
+    const btn = q('es-start-btn'); if (btn) btn.disabled = true;
+    try {
+      const res = await scoutSendBatchV62({
+        senderSelectorId:'v51-gmail-account',
+        limit:q('v51-send-limit')?.value || 50,
+        delayMs:q('v51-send-delay')?.value || 1500,
+        dryRun:!!q('v51-dry-run')?.checked,
+        templateMode:q('v62-template-choice')?.value || 'current'
+      });
+      toastSafe(`Gmail send complete: ${res.sent} sent, ${res.failed} failed, ${res.skipped} skipped.`, res.failed ? 'warn' : 'ok');
+    } catch(e){ logSafe('✗ Gmail API send error: ' + e.message); toastSafe('Automatic send failed: ' + e.message, 'err'); }
+    finally { if (btn) btn.disabled = false; renderSchedules(); }
+  };
+
+  function loadSchedules(){ try { return JSON.parse(localStorage.getItem(SCHEDULE_KEY) || '[]') || []; } catch(e){ return []; } }
+  function saveSchedules(list){ localStorage.setItem(SCHEDULE_KEY, JSON.stringify(safeArr(list))); }
+  function scheduleLabel(s){ return `${new Date(s.runAt).toLocaleString()} · ${s.limit} from ${s.senderEmail || 'Gmail'}`; }
+  function refreshSenderSelect(selectId){
+    const sel = q(selectId); if (!sel) return;
+    const old = sel.value;
+    const accounts = gmailAccounts();
+    sel.innerHTML = accounts.length ? accounts.map(a => `<option value="${esc(a.email || a.key || '')}">${esc(a.email || a.key || 'connected Gmail')}</option>`).join('') : '<option value="">No Gmail connected</option>';
+    if (old) sel.value = old;
+  }
+  function refreshTemplateSelect(selectId){
+    const sel = q(selectId); if (!sel) return;
+    const old = sel.value;
+    const ts = templatesSafe();
+    sel.innerHTML = '<option value="current">Use current rotation</option>' + ts.map((t,i) => `<option value="template:${i}">${esc(t.name || t.title || ('Template ' + (i+1)))}</option>`).join('');
+    if (old) sel.value = old;
+  }
+  function setScheduleQuick(hours){
+    const el = q('v62-schedule-time'); if (!el) return;
+    const d = new Date(Date.now() + hours * 60 * 60 * 1000);
+    d.setSeconds(0,0);
+    el.value = new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  }
+  window.v62SetScheduleQuick = setScheduleQuick;
+  window.v62CreateSchedule = function(){
+    const t = q('v62-schedule-time')?.value;
+    const senderEmail = q('v62-schedule-sender')?.value || '';
+    const limit = Math.max(1, parseInt(q('v62-schedule-limit')?.value || '50', 10));
+    const delayMs = Math.max(0, parseInt(q('v62-schedule-delay')?.value || '1500', 10));
+    const templateMode = q('v62-schedule-template')?.value || 'current';
+    if (!t) return toastSafe('Choose a schedule time.', 'err');
+    const runAt = new Date(t).toISOString();
+    if (new Date(runAt).getTime() < Date.now() - 60000) return toastSafe('Schedule time is already in the past.', 'err');
+    if (!senderEmail) return toastSafe('Choose a connected Gmail sender.', 'err');
+    const list = loadSchedules();
+    const entry = { id:'sch_' + Date.now() + '_' + Math.random().toString(36).slice(2,7), createdAt:nowIso(), runAt, senderEmail, limit, delayMs, templateMode, status:'scheduled', sent:0, failed:0, skipped:0 };
+    list.push(entry); saveSchedules(list); renderSchedules();
+    toastSafe('Scheduled: ' + scheduleLabel(entry), 'ok');
+  };
+  window.v62CancelSchedule = function(id){
+    const list = loadSchedules().map(s => s.id === id && ['scheduled','failed'].includes(s.status) ? { ...s, status:'cancelled', cancelledAt:nowIso() } : s);
+    saveSchedules(list); renderSchedules();
+  };
+  async function runDueSchedules(){
+    if (scheduleRunnerBusy) return;
+    const list = loadSchedules();
+    const due = list.filter(s => s.status === 'scheduled' && new Date(s.runAt).getTime() <= Date.now()).sort((a,b) => new Date(a.runAt)-new Date(b.runAt));
+    if (!due.length) return;
+    scheduleRunnerBusy = true;
+    for (const s of due) {
+      const fresh = loadSchedules();
+      const idx = fresh.findIndex(x => x.id === s.id);
+      if (idx < 0 || fresh[idx].status !== 'scheduled') continue;
+      fresh[idx] = { ...fresh[idx], status:'running', startedAt:nowIso() }; saveSchedules(fresh); renderSchedules();
+      try {
+        const account = gmailAccounts().find(a => norm(a.email || a.key) === norm(s.senderEmail));
+        if (!account) throw new Error('Scheduled Gmail account is not connected anymore: ' + s.senderEmail);
+        const result = await scoutSendBatchV62({ account, limit:s.limit, delayMs:s.delayMs, dryRun:false, templateMode:s.templateMode, scheduled:true, scheduleId:s.id });
+        const done = loadSchedules(); const j = done.findIndex(x => x.id === s.id);
+        if (j >= 0) done[j] = { ...done[j], status:'completed', completedAt:nowIso(), sent:result.sent, failed:result.failed, skipped:result.skipped, actualSender:result.senderEmail };
+        saveSchedules(done); renderSchedules();
+        toastSafe(`Scheduled batch sent: ${result.sent} sent from ${result.senderEmail}.`, result.failed ? 'warn' : 'ok');
+      } catch(e) {
+        const failed = loadSchedules(); const j = failed.findIndex(x => x.id === s.id);
+        if (j >= 0) failed[j] = { ...failed[j], status:'failed', failedAt:nowIso(), error:e.message || String(e) };
+        saveSchedules(failed); renderSchedules();
+        toastSafe('Scheduled batch failed: ' + (e.message || e), 'err');
+      }
+    }
+    scheduleRunnerBusy = false;
+  }
+  function renderSchedules(){
+    refreshSenderSelect('v62-schedule-sender');
+    refreshTemplateSelect('v62-schedule-template');
+    refreshTemplateSelect('v62-template-choice');
+    const listEl = q('v62-schedule-list');
+    if (!listEl) return;
+    const list = loadSchedules().sort((a,b) => new Date(a.runAt)-new Date(b.runAt));
+    const visible = list.slice(-30).reverse();
+    listEl.innerHTML = visible.length ? visible.map(s => {
+      const color = s.status === 'completed' ? 'var(--green)' : s.status === 'failed' ? 'var(--red)' : s.status === 'running' ? 'var(--amber)' : s.status === 'cancelled' ? 'var(--faint)' : 'var(--accent)';
+      return `<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:10px;padding:9px 10px;margin-top:7px;background:var(--card2)">
+        <div style="min-width:0"><div style="font-size:12px;font-weight:750;color:var(--text)">${esc(scheduleLabel(s))}</div><div style="font-size:11px;color:${color};margin-top:2px">${esc(s.status)}${s.sent ? ' · sent ' + s.sent : ''}${s.failed ? ' · failed ' + s.failed : ''}${s.error ? ' · ' + esc(s.error) : ''}</div></div>
+        ${['scheduled','failed'].includes(s.status) ? `<button class="topbar-btn danger" style="font-size:11px;padding:5px 9px" onclick="v62CancelSchedule('${esc(s.id)}')">Cancel</button>` : ''}
+      </div>`;
+    }).join('') : '<div style="font-size:12px;color:var(--muted);padding:10px 0">No scheduled batches yet.</div>';
+  }
+
+  function installSendEnhancements(){
+    const startBtn = q('es-start-btn');
+    if (!startBtn || q('v62-scheduler-card')) return;
+    startBtn.textContent = '🚀 Send Ready Batch Now';
+    const apiPanel = q('v51-gmail-api-panel');
+    if (apiPanel && !q('v62-template-choice')) {
+      const row = document.createElement('div');
+      row.style.cssText = 'margin-top:8px;display:grid;grid-template-columns:1fr;gap:4px';
+      row.innerHTML = `<label style="font-size:11px;color:var(--muted);display:block">Template for this send</label><select id="v62-template-choice" class="as-input"></select>`;
+      apiPanel.appendChild(row);
+    }
+    const card = document.createElement('div');
+    card.id = 'v62-scheduler-card';
+    card.className = 'as-card';
+    card.style.marginBottom = '14px';
+    card.innerHTML = `
+      <h3>Schedule Batch Messages</h3>
+      <p style="font-size:12px;color:var(--muted);line-height:1.65;margin-bottom:10px">Schedules always pick fresh contacts from <strong>Ready to Send</strong> at the time they run. Keep this browser/app open for local schedules to execute.</p>
+      <div style="display:grid;grid-template-columns:1.2fr 1.2fr 90px 120px;gap:8px;align-items:end">
+        <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Run at</label><input id="v62-schedule-time" type="datetime-local" class="as-input"></div>
+        <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Send from Gmail</label><select id="v62-schedule-sender" class="as-input"></select></div>
+        <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Limit</label><input id="v62-schedule-limit" type="number" min="1" max="500" value="50" class="as-input"></div>
+        <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Delay</label><select id="v62-schedule-delay" class="as-input"><option value="0">No delay</option><option value="1500" selected>1.5 sec</option><option value="5000">5 sec</option><option value="10000">10 sec</option></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px;margin-top:8px;align-items:end">
+        <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Template</label><select id="v62-schedule-template" class="as-input"></select></div>
+        <button class="topbar-btn" onclick="v62SetScheduleQuick(2)">+2h</button>
+        <button class="topbar-btn" onclick="v62SetScheduleQuick(3)">+3h</button>
+        <button class="topbar-btn primary" onclick="v62CreateSchedule()">Schedule Batch</button>
+      </div>
+      <div id="v62-schedule-list" style="margin-top:10px"></div>`;
+    const sendControl = startBtn.closest('.as-card') || startBtn.parentElement;
+    sendControl.parentElement.insertBefore(card, sendControl);
+    setScheduleQuick(2);
+    renderSchedules();
+  }
+
+  function rangeBounds(range){
+    const now = new Date(); const start = new Date(now); start.setHours(0,0,0,0); const end = new Date(now); end.setHours(23,59,59,999);
+    if (range === 'today') return [start, end];
+    if (range === 'yesterday') { start.setDate(start.getDate()-1); end.setDate(end.getDate()-1); return [start,end]; }
+    if (range === '7days') { start.setDate(start.getDate()-6); return [start,end]; }
+    if (range === '1month') { start.setDate(start.getDate()-29); return [start,end]; }
+    return [new Date(0), new Date(8640000000000000)];
+  }
+  function inRangeDate(value, range){ if (!value) return range === 'all'; const d = new Date(value); if (isNaN(d)) return false; const [a,b]=rangeBounds(range); return d>=a && d<=b; }
+  function daysForRange(range){ const n = range === 'today' || range === 'yesterday' ? 1 : range === '7days' ? 7 : range === '1month' ? 30 : 14; const out=[]; const end=new Date(); end.setHours(0,0,0,0); if (range==='yesterday') end.setDate(end.getDate()-1); for(let i=n-1;i>=0;i--){ const d=new Date(end); d.setDate(end.getDate()-i); out.push(d); } return out; }
+  function dayKey(d){ const x = new Date(d); if (isNaN(x)) return ''; return x.toISOString().slice(0,10); }
+  function metricCounts(range){
+    const all = businessesSafe();
+    const sentInRange = all.filter(b => isContacted(b) && inRangeDate(b.sentAt || b.contactedAt, range));
+    const repliesInRange = all.filter(b => hasReply(b) && inRangeDate(b.repliedAt || b.lastReplyAt || b.contactedAt, range));
+    const sentAllForRate = all.filter(isContacted);
+    const repliesAllForRate = all.filter(hasReply);
+    return {
+      sent: sentInRange.length,
+      responded: repliesInRange.length,
+      responseRate: sentInRange.length ? Math.round((repliesInRange.length / sentInRange.length) * 100) : (sentAllForRate.length ? Math.round((repliesAllForRate.length / sentAllForRate.length) * 100) : 0),
+      followupDue: all.filter(isFollowupDue).length,
+      ready: all.filter(isReady).length,
+      emailFound: all.filter(b => ['found','email_found'].includes(statusOf(b))).length,
+      pending: all.filter(b => statusOf(b)==='pending').length,
+      review: all.filter(b => statusOf(b)==='review').length,
+      risky: all.filter(b => statusOf(b)==='risky').length,
+      noEmail: all.filter(b => statusOf(b)==='no_email').length,
+      recentSent: sentInRange.slice(-8).reverse(),
+      recentReplies: repliesInRange.slice(-8).reverse()
+    };
+  }
+  function templateStats(range){
+    const map = {};
+    businessesSafe().forEach(b => {
+      if (!isContacted(b)) return;
+      const sentAt = b.sentAt || b.contactedAt;
+      if (!inRangeDate(sentAt, range)) return;
+      const key = b.sentTemplateId || b.sentTemplateName || b.subjectSent || 'Unknown / old send';
+      const name = b.sentTemplateName || (b.sentTemplateId ? b.sentTemplateId : 'Unknown / old send');
+      if (!map[key]) map[key] = { key, name, sent:0, replies:0, rate:0 };
+      map[key].sent++;
+      if (hasReply(b)) map[key].replies++;
+    });
+    return Object.values(map).map(x => ({...x, rate:x.sent ? Math.round((x.replies/x.sent)*100) : 0})).sort((a,b) => (b.replies-a.replies) || (b.rate-a.rate) || (b.sent-a.sent));
+  }
+  function activityByDay(range){
+    const days = daysForRange(range); const sent={}, replies={}; days.forEach(d => { sent[dayKey(d)]=0; replies[dayKey(d)]=0; });
+    businessesSafe().forEach(b => {
+      const sKey = dayKey(b.sentAt || b.contactedAt); if (sent[sKey] !== undefined && isContacted(b)) sent[sKey]++;
+      const rKey = dayKey(b.repliedAt || b.lastReplyAt); if (replies[rKey] !== undefined && hasReply(b)) replies[rKey]++;
+    });
+    return days.map(d => ({ key:dayKey(d), label: d.toLocaleDateString(undefined,{month:'short',day:'numeric'}), sent:sent[dayKey(d)]||0, replies:replies[dayKey(d)]||0 }));
+  }
+  function card(title, num, sub, color){ return `<div class="as-card" style="padding:14px"><div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px">${esc(title)}</div><div style="font-size:28px;font-weight:900;color:${color};margin-top:5px">${num}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">${esc(sub)}</div></div>`; }
+  function barChart(rows){
+    const max = Math.max(1, ...rows.map(r => Math.max(r.sent, r.replies)));
+    return `<div style="display:flex;align-items:flex-end;gap:8px;height:180px;padding:10px 2px 0;border-bottom:1px solid var(--border);overflow-x:auto">${rows.map(r => {
+      const sh = Math.max(3, Math.round((r.sent/max)*150)); const rh = Math.max(3, Math.round((r.replies/max)*150));
+      return `<div title="${esc(r.label)} — sent ${r.sent}, replies ${r.replies}" style="min-width:36px;display:flex;flex-direction:column;align-items:center;gap:5px"><div style="display:flex;align-items:flex-end;gap:3px;height:150px"><div style="width:13px;height:${sh}px;background:var(--green);border-radius:5px 5px 0 0"></div><div style="width:13px;height:${rh}px;background:var(--accent);border-radius:5px 5px 0 0"></div></div><div style="font-size:10px;color:var(--muted);white-space:nowrap">${esc(r.label)}</div></div>`;
+    }).join('')}</div><div style="display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:8px"><span><b style="color:var(--green)">■</b> Sent</span><span><b style="color:var(--accent)">■</b> Replies</span></div>`;
+  }
+  function templateTable(stats){
+    if (!stats.length) return '<div style="font-size:12px;color:var(--muted);padding:10px 0">No template data yet. New v62 sends will store the exact template used.</div>';
+    return `<div style="overflow:auto;max-height:260px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);color:var(--muted)">Template</th><th style="text-align:right;padding:8px;border-bottom:1px solid var(--border);color:var(--muted)">Sent</th><th style="text-align:right;padding:8px;border-bottom:1px solid var(--border);color:var(--muted)">Replies</th><th style="text-align:right;padding:8px;border-bottom:1px solid var(--border);color:var(--muted)">Rate</th></tr></thead><tbody>${stats.map(x => `<tr><td style="padding:8px;border-bottom:1px solid var(--border)">${esc(x.name)}</td><td style="padding:8px;border-bottom:1px solid var(--border);text-align:right">${x.sent}</td><td style="padding:8px;border-bottom:1px solid var(--border);text-align:right;color:var(--accent);font-weight:800">${x.replies}</td><td style="padding:8px;border-bottom:1px solid var(--border);text-align:right;color:var(--green)">${x.rate}%</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  function recentRows(rows, empty){
+    return rows.length ? rows.map(b => `<tr><td style="padding:8px;border-bottom:1px solid var(--border)">${esc(nameOf(b)||'Unknown')}</td><td style="padding:8px;border-bottom:1px solid var(--border);color:var(--green)">${esc(emailOf(b))}</td><td style="padding:8px;border-bottom:1px solid var(--border);color:var(--muted)">${esc(String(b.sentAt||b.contactedAt||b.repliedAt||b.lastReplyAt||'').slice(0,19).replace('T',' '))}</td></tr>`).join('') : `<tr><td colspan="3" style="padding:12px;color:var(--muted)">${esc(empty)}</td></tr>`;
+  }
+  function renderDashboardV62(){
+    const panel = q('dashboard-content'); if (!panel) return;
+    const range = q('dash-range')?.value || localStorage.getItem('scout_dashboard_range') || 'today';
+    localStorage.setItem('scout_dashboard_range', range);
+    const c = metricCounts(range); const tstats = templateStats(range); const scheduleCounts = loadSchedules().reduce((a,s)=>{a[s.status]=(a[s.status]||0)+1;return a;},{});
+    panel.innerHTML = `<div style="padding:18px;overflow-y:auto;height:100%">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+        <div><h2 style="font-size:18px;font-weight:900">📊 Dashboard</h2><p style="font-size:12px;color:var(--muted);margin-top:3px">Sending, replies, follow-ups, template performance, and scheduled batches.</p></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="dash-range" class="as-input" style="width:150px" onchange="window.renderScoutDashboard()"><option value="today" ${range==='today'?'selected':''}>Today</option><option value="yesterday" ${range==='yesterday'?'selected':''}>Yesterday</option><option value="7days" ${range==='7days'?'selected':''}>Last 7 days</option><option value="1month" ${range==='1month'?'selected':''}>Last 1 month</option><option value="all" ${range==='all'?'selected':''}>All time</option></select><button class="topbar-btn" onclick="window.renderScoutDashboard()">Refresh</button></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+        ${card('Messages sent', c.sent, 'Confirmed sent/contacted', 'var(--green)')}
+        ${card('Responded', c.responded, c.responseRate + '% response rate', 'var(--accent)')}
+        ${card('Follow-up due', c.followupDue, 'Contacted, no reply yet', 'var(--amber)')}
+        ${card('Ready to Send', c.ready, 'Verified and unsent', 'var(--green)')}
+        ${card('Email Found', c.emailFound, 'Needs verification', 'var(--blue)')}
+        ${card('Scheduled', scheduleCounts.scheduled || 0, 'Upcoming local batches', 'var(--accent)')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px">
+        <div class="as-card"><h3>Sent vs Replies per Day</h3>${barChart(activityByDay(range))}</div>
+        <div class="as-card"><h3>Best Reply Templates</h3><p style="font-size:12px;color:var(--muted);margin-bottom:8px">Sorted by replies first, then response rate.</p>${templateTable(tstats)}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:14px">
+        <div class="as-card"><h3>Follow-up Purpose</h3><p style="font-size:12px;color:var(--muted);line-height:1.65">Contacted leads with no reply still remain in <strong>Contacted</strong> and appear under <strong>Follow-up Due</strong> after ${Math.round(followupThresholdMs()/3600000)} hour(s). They are not deleted or hidden.</p><button class="topbar-btn" onclick="queueFilter='followup';renderQueue();">Show Follow-up Due</button></div>
+        <div class="as-card"><h3>Scheduled Batches</h3><p style="font-size:12px;color:var(--muted)">Scheduled: <strong>${scheduleCounts.scheduled||0}</strong> · Running: <strong>${scheduleCounts.running||0}</strong> · Completed: <strong>${scheduleCounts.completed||0}</strong> · Failed: <strong>${scheduleCounts.failed||0}</strong></p><button class="topbar-btn" onclick="showContentTab('email-scout-content', document.getElementById('tab-emailscout'))">Open Send Message</button></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:12px;margin-top:14px">
+        <div class="as-card"><h3>Recent Sent</h3><div style="overflow:auto;max-height:240px"><table style="width:100%;border-collapse:collapse;font-size:12px">${recentRows(c.recentSent,'No sent messages in this range.')}</table></div></div>
+        <div class="as-card"><h3>Recent Replies</h3><div style="overflow:auto;max-height:240px"><table style="width:100%;border-collapse:collapse;font-size:12px">${recentRows(c.recentReplies,'No replies detected in this range.')}</table></div></div>
+      </div>
+    </div>`;
+  }
+  window.renderScoutDashboard = renderDashboardV62;
+
+  function patchFollowupFilter(){
+    window.getFollowUpsDue = function(){ return businessesSafe().filter(isFollowupDue); };
+  }
+  function patchVersion(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent=VERSION; }
+  function init(){
+    patchVersion(); patchFollowupFilter(); installSendEnhancements(); renderSchedules();
+    if (q('dashboard-content')) renderDashboardV62();
+    setInterval(refreshSenderSelect.bind(null,'v51-gmail-account'), 5000);
+    setInterval(renderSchedules, 15000);
+    setInterval(runDueSchedules, 30000);
+    setTimeout(runDueSchedules, 5000);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+<!-- v62: Analytics + follow-up integrity + local batch scheduling. Backend remains v5.4. -->
 
 </body>
 </html>
