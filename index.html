@@ -365,7 +365,7 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 <!-- TOP BAR -->
 <div id="topbar">
   <span id="topbar-logo">🧭 Scout App</span>
-  <span id="topbar-title">v36 — Business Scouting System</span>
+  <span id="topbar-title">v47 — Selective Transfer Export</span>
   <button class="topbar-btn" onclick="showTab('upload')">📁 Upload List</button>
   <button class="topbar-btn" onclick="showTab('verify')">🧪 Verify & Send</button>
   <button class="topbar-btn" onclick="showTab('autoscout')">🤖 Auto-Scout</button>
@@ -6372,6 +6372,457 @@ function manualPollReplies() {
     const search = q('qp-search');
     if (search && !search.__v45_patched) { search.__v45_patched = true; search.addEventListener('input', () => { window.scoutQueueLimit = PAGE_SIZE; window.__scoutLastQueueRenderKey=''; setTimeout(renderQueue,0); }); }
     rerender();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+
+<script>
+// ---------------------------------------------------------------
+// SCOUT APP v47 — Selective transfer export + message subjects
+// ---------------------------------------------------------------
+(function(){
+  'use strict';
+  const VERSION = 'v47';
+  const q = id => document.getElementById(id);
+  const safeArr = v => Array.isArray(v) ? v : [];
+  const nowIso = () => new Date().toISOString();
+  const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const getSettings = () => (typeof settings === 'object' && settings) ? settings : JSON.parse(localStorage.getItem('sv13_settings') || '{}');
+  const toastSafe = (m,t) => { try { if (typeof toast === 'function') toast(m,t||'ok'); else alert(m); } catch(e) { console.log(m); } };
+  const saveSafe = () => { try { if (typeof save === 'function') save(); else if (typeof saveNow === 'function') saveNow(); } catch(e) {} };
+  const renderSafe = () => { try { if (typeof renderQueue === 'function') renderQueue(); } catch(e) {} try { if (typeof updateAsStats === 'function') updateAsStats(); } catch(e) {} try { if (typeof sv36RenderVerifySendTab === 'function') sv36RenderVerifySendTab(); } catch(e) {} };
+  const gen = () => (typeof genId === 'function' ? genId() : ('id_' + Date.now() + '_' + Math.random().toString(36).slice(2,8)));
+
+  function persistTemplates(){
+    try { localStorage.setItem('scout_send_message_templates', JSON.stringify(safeArr(window.esTemplates || esTemplates))); } catch(e) {}
+  }
+
+  function readTemplates(){
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem('scout_send_message_templates') || '[]'); } catch(e) { stored = []; }
+    if (!Array.isArray(stored) || !stored.length) {
+      // migrate the old Settings → Custom Messages into the single Send Message area
+      try {
+        const oldCustom = JSON.parse(localStorage.getItem('scout_custom_templates') || '[]');
+        if (Array.isArray(oldCustom) && oldCustom.length) {
+          stored = oldCustom.map((t, i) => ({ id: t.id || gen(), name: 'Message ' + (i+1), subject: t.subject || (getSettings().emailSubject || 'Quick question for {name}'), message: t.message || '' }));
+        }
+      } catch(e) {}
+    }
+    if (!Array.isArray(stored) || !stored.length) {
+      stored = [{
+        id: gen(),
+        name: 'Message 1',
+        subject: 'Quick question for {name}',
+        message: 'Hi {name},\n\nI came across your business and noticed something that caught my attention.\n\nI work with businesses to help them organize leads, follow-ups, and customer records in one simple system.\n\nWould you be open to a quick 10-minute conversation this week?\n\nLooking forward to hearing from you.'
+      }];
+    }
+    return stored.map((t, i) => ({ id: t.id || gen(), name: t.name || ('Message ' + (i+1)), subject: t.subject || getSettings().emailSubject || 'Quick question for {name}', message: t.message || '' }));
+  }
+
+  function installTemplates(){
+    try {
+      const loaded = readTemplates();
+      if (typeof esTemplates !== 'undefined') {
+        esTemplates.splice(0, esTemplates.length, ...loaded);
+      }
+      window.esTemplates = (typeof esTemplates !== 'undefined') ? esTemplates : loaded;
+      persistTemplates();
+    } catch(e) {}
+  }
+
+  window.addEsTemplate = function(text, subject){
+    if (safeArr(window.esTemplates || esTemplates).length >= 20) { toastSafe('Maximum 20 messages', 'err'); return; }
+    (window.esTemplates || esTemplates).push({ id: gen(), name: 'Message ' + (safeArr(window.esTemplates || esTemplates).length + 1), subject: subject || getSettings().emailSubject || 'Quick question for {name}', message: text || '' });
+    persistTemplates();
+    renderEsTemplates();
+  };
+
+  window.removeEsTemplate = function(id){
+    const next = safeArr(window.esTemplates || esTemplates).filter(t => t.id !== id);
+    if (typeof esTemplates !== 'undefined') { esTemplates.splice(0, esTemplates.length, ...next); }
+    window.esTemplates = (typeof esTemplates !== 'undefined') ? esTemplates : next;
+    persistTemplates();
+    renderEsTemplates();
+  };
+
+  window.personaliseEsMsg = function(template, contact){
+    const c = contact || {};
+    const val = key => c[key] || (key === 'category' ? c.industry : '') || '';
+    return String(template || '')
+      .replace(/\{name\}/gi, val('name'))
+      .replace(/\{fullname\}/gi, val('fullname') || val('name'))
+      .replace(/\{email\}/gi, val('email'))
+      .replace(/\{website\}/gi, val('website') || val('domain'))
+      .replace(/\{domain\}/gi, val('domain') || val('website'))
+      .replace(/\{phone\}/gi, val('phone'))
+      .replace(/\{category\}/gi, val('category'))
+      .replace(/\{industry\}/gi, val('industry'))
+      .replace(/\{location\}/gi, val('location') || val('city') || val('country') || val('address'))
+      .replace(/\{address\}/gi, val('address'))
+      .replace(/\{rating\}/gi, val('rating'))
+      .replace(/\{reviews\}/gi, val('reviews'));
+  };
+
+  function selectedTemplate(contact){
+    const templates = safeArr(window.esTemplates || esTemplates);
+    if (!templates.length) return null;
+    const mode = q('es-rotation-mode')?.value || 'rotate';
+    let tpl;
+    if (mode === 'selected') {
+      const idx = Math.max(0, parseInt(q('es-selected-template')?.value || '0', 10));
+      tpl = templates[idx] || templates[0];
+    } else if (mode === 'first') tpl = templates[0];
+    else if (mode === 'random') tpl = templates[Math.floor(Math.random() * templates.length)];
+    else { tpl = templates[(window.esRotationIndex || esRotationIndex || 0) % templates.length]; if (typeof esRotationIndex !== 'undefined') esRotationIndex++; window.esRotationIndex = (window.esRotationIndex || 0) + 1; }
+    return tpl;
+  }
+
+  window.getEsMessage = function(contact){
+    const tpl = selectedTemplate(contact);
+    return tpl ? personaliseEsMsg(tpl.message, contact) : '';
+  };
+
+  window.getEsSubject = function(contact){
+    const tpl = selectedTemplate(contact);
+    const fallback = q('es-subject')?.value || getSettings().emailSubject || 'Quick question for {name}';
+    return personaliseEsMsg((tpl && tpl.subject) || fallback, contact);
+  };
+
+  window.renderEsTemplates = function(){
+    const el = q('es-templates-list');
+    if (!el) return;
+    const templates = safeArr(window.esTemplates || esTemplates);
+    const mode = q('es-rotation-mode');
+    if (mode && !Array.from(mode.options).some(o => o.value === 'selected')) {
+      const opt = document.createElement('option'); opt.value = 'selected'; opt.textContent = 'Use selected message only'; mode.appendChild(opt);
+    }
+    let picker = q('es-selected-template');
+    if (!picker && mode) {
+      picker = document.createElement('select'); picker.id = 'es-selected-template'; picker.className = 'upload-opt-select';
+      picker.style.cssText = 'background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;color:var(--text);font-size:12px';
+      mode.insertAdjacentElement('afterend', picker);
+    }
+    if (picker) picker.innerHTML = templates.map((t,i)=>`<option value="${i}">${escHtml(t.name || ('Message ' + (i+1)))} — ${escHtml((t.subject || '').slice(0,45))}</option>`).join('');
+    if (!templates.length) {
+      el.innerHTML = `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">No messages yet — click "+ Add Message" to add one.</div>`;
+      return;
+    }
+    el.innerHTML = templates.map((t, i) => `
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;position:relative">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <span style="font-size:11px;font-weight:700;color:var(--accent);background:rgba(91,110,245,.15);padding:2px 8px;border-radius:6px">Message ${i + 1}</span>
+          <input value="${escHtml(t.name || ('Message ' + (i+1)))}" placeholder="Message name" onchange="esTemplates[${i}].name=this.value;persistScoutSendMessagesV46()" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:7px;padding:7px;color:var(--text);font-size:12px">
+          <button onclick="removeEsTemplate('${escHtml(t.id)}')" style="margin-left:auto;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px">✕</button>
+        </div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Subject for this message</label>
+        <input value="${escHtml(t.subject || '')}" placeholder="Quick question for {name}" onchange="esTemplates[${i}].subject=this.value;persistScoutSendMessagesV46()" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:9px;color:var(--text);font-size:12px;margin-bottom:8px">
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Message body</label>
+        <textarea
+          style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:12px;line-height:1.65;resize:vertical;min-height:120px;font-family:inherit"
+          placeholder="Hi {name},\n\nI came across your business and noticed…\n\nWould you be open to a quick chat?"
+          onchange="esTemplates[${i}].message=this.value;persistScoutSendMessagesV46()"
+        >${escHtml(t.message)}</textarea>
+        <div style="margin-top:6px;font-size:11px;color:var(--muted);line-height:1.5">
+          Shortcodes: <code>{name}</code> <code>{email}</code> <code>{website}</code> <code>{category}</code> <code>{industry}</code> <code>{location}</code> <code>{rating}</code> <code>{reviews}</code> <code>{phone}</code><br>
+          Subject preview: <em style="color:var(--text)">${(window.esContacts||esContacts||[])[0] ? escHtml(personaliseEsMsg(t.subject || '', (window.esContacts||esContacts)[0]).slice(0,100)) : '(load contacts to preview)'}</em>
+        </div>
+      </div>`).join('');
+  };
+
+  window.persistScoutSendMessagesV46 = persistTemplates;
+
+  // Override the old Gmail-open sender so each selected message controls its own subject.
+  const oldSendNextEs = window.sendNextEs;
+  window.sendNextEs = function(){
+    if (typeof esRunning === 'undefined') return oldSendNextEs && oldSendNextEs();
+    if (!esRunning || esCurrentIndex >= esContacts.length) { stopEsSend(true); return; }
+    const contact = esContacts[esCurrentIndex];
+    const tpl = selectedTemplate(contact);
+    const signature = q('es-signature')?.value || getSettings().signature || '';
+    const subject = personaliseEsMsg((tpl && tpl.subject) || q('es-subject')?.value || getSettings().emailSubject || 'Quick question for {name}', contact);
+    const message = personaliseEsMsg((tpl && tpl.message) || '', contact);
+    const body = message + (signature ? '\n\n' + signature : '');
+    const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contact.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(url, '_blank');
+    if (typeof esLog === 'function') esLog(`✓ Opened Gmail for ${contact.name || contact.email} using ${tpl?.name || 'message'} (${subject})`);
+    esCurrentIndex++;
+    const pct = (esCurrentIndex / esContacts.length) * 100;
+    const fillEl = q('es-progress-fill'); const textEl = q('es-progress-text');
+    if (fillEl) fillEl.style.width = pct + '%';
+    if (textEl) textEl.textContent = `${esCurrentIndex} / ${esContacts.length} opened`;
+    const delay = parseInt(q('es-delay')?.value || '0', 10);
+    const nextBtn = q('es-next-btn');
+    if (delay === 0) { if (nextBtn) nextBtn.style.display = esCurrentIndex < esContacts.length ? '' : 'none'; }
+    else { if (nextBtn) nextBtn.style.display = 'none'; if (esCurrentIndex < esContacts.length) setTimeout(() => { if (esRunning) sendNextEs(); }, delay); else stopEsSend(true); }
+  };
+
+  function getStatus(b){ return String(b?.status || 'pending').toLowerCase(); }
+  function emailOf(b){ return String(b?.email || (Array.isArray(b?.emails) ? b.emails[0] : '') || '').trim().toLowerCase(); }
+  function isNotSent(b){ const s = getStatus(b); return !['contacted','replied','closed'].includes(s) && !b.contactedAt && !b.sentAt; }
+
+  function exportOption(id, fallback=false){
+    const el = q(id);
+    return el ? !!el.checked : fallback;
+  }
+
+  function transferSelectedGroups(){
+    const includeAllLeads = exportOption('v47-export-all-leads', false);
+    return {
+      coreSettings: exportOption('v47-export-core-settings', true),
+      messageTemplates: exportOption('v47-export-messages', true),
+      dorkingSignals: exportOption('v47-export-dorking', true),
+      gmailAccounts: exportOption('v47-export-gmail-accounts', true),
+      gmailTokens: exportOption('v47-export-gmail-tokens', false),
+      pendingNotScouted: includeAllLeads || exportOption('v47-export-pending', true),
+      emailFoundNeedsVerification: includeAllLeads || exportOption('v47-export-email-found', true),
+      readyToSendNotSent: includeAllLeads || exportOption('v47-export-ready', true),
+      review: includeAllLeads || exportOption('v47-export-review', false),
+      risky: includeAllLeads || exportOption('v47-export-risky', false),
+      noEmail: includeAllLeads || exportOption('v47-export-no-email', false),
+      allLeads: includeAllLeads
+    };
+  }
+
+  window.setScoutTransferPresetV47 = function(preset){
+    const ids = ['v47-export-core-settings','v47-export-messages','v47-export-dorking','v47-export-gmail-accounts','v47-export-gmail-tokens','v47-export-pending','v47-export-email-found','v47-export-ready','v47-export-review','v47-export-risky','v47-export-no-email','v47-export-all-leads'];
+    ids.forEach(id => { const el = q(id); if (el) el.checked = false; });
+    const check = (...keys) => keys.forEach(id => { const el = q(id); if (el) el.checked = true; });
+    if (preset === 'device') {
+      check('v47-export-core-settings','v47-export-messages','v47-export-dorking','v47-export-gmail-accounts','v47-export-pending','v47-export-email-found','v47-export-ready');
+    } else if (preset === 'settings') {
+      check('v47-export-core-settings','v47-export-messages','v47-export-dorking','v47-export-gmail-accounts');
+    } else if (preset === 'all_safe') {
+      check('v47-export-core-settings','v47-export-messages','v47-export-dorking','v47-export-gmail-accounts','v47-export-pending','v47-export-email-found','v47-export-ready','v47-export-review','v47-export-risky','v47-export-no-email');
+    } else if (preset === 'all_sensitive') {
+      check('v47-export-core-settings','v47-export-messages','v47-export-dorking','v47-export-gmail-accounts','v47-export-gmail-tokens','v47-export-all-leads');
+    }
+    updateScoutTransferSummaryV47();
+  };
+
+  window.updateScoutTransferSummaryV47 = function(){
+    const el = q('v47-export-summary'); if (!el) return;
+    const all = safeArr(window.businesses || businesses);
+    const g = transferSelectedGroups();
+    const parts = [];
+    if (g.coreSettings) parts.push('core settings');
+    if (g.messageTemplates) parts.push('messages');
+    if (g.dorkingSignals) parts.push('signals');
+    if (g.gmailAccounts) parts.push('Gmail account list');
+    if (g.gmailTokens) parts.push('OAuth tokens ⚠️');
+    const count = (fn) => all.filter(fn).length;
+    let leadCount = 0;
+    if (g.allLeads) leadCount = all.length;
+    else {
+      if (g.pendingNotScouted) leadCount += count(b => getStatus(b) === 'pending');
+      if (g.emailFoundNeedsVerification) leadCount += count(b => getStatus(b) === 'found');
+      if (g.readyToSendNotSent) leadCount += count(b => getStatus(b) === 'ready_to_send' && emailOf(b) && isNotSent(b));
+      if (g.review) leadCount += count(b => getStatus(b) === 'review');
+      if (g.risky) leadCount += count(b => getStatus(b) === 'risky');
+      if (g.noEmail) leadCount += count(b => getStatus(b) === 'no_email');
+    }
+    if (leadCount) parts.push(leadCount.toLocaleString() + ' lead records');
+    el.textContent = parts.length ? ('Will export: ' + parts.join(', ')) : 'Nothing selected yet.';
+  };
+
+  function backupPayload(scope){
+    const all = safeArr(window.businesses || businesses);
+    const st = getSettings();
+    const g = transferSelectedGroups();
+    const payload = {
+      app: 'Scout App',
+      version: VERSION,
+      exportedAt: nowIso(),
+      scope: scope || 'selected_transfer',
+      selected: g,
+      leads: {},
+      localStorageSmall: {}
+    };
+
+    if (g.coreSettings) {
+      payload.settings = st;
+      payload.oauthClientId = st.oauthClientId || localStorage.getItem('oauthClientId') || '';
+      payload.localStorageSmall.sv13_settings = localStorage.getItem('sv13_settings');
+    }
+    if (g.dorkingSignals) {
+      payload.dorkSettings = JSON.parse(localStorage.getItem('scout_dork_settings') || '{}');
+      payload.localStorageSmall.scout_dork_settings = localStorage.getItem('scout_dork_settings');
+    }
+    if (g.messageTemplates) {
+      payload.sendMessages = safeArr(window.esTemplates || esTemplates);
+      payload.legacyCustomMessages = JSON.parse(localStorage.getItem('scout_custom_templates') || '[]');
+      payload.localStorageSmall.scout_send_message_templates = localStorage.getItem('scout_send_message_templates');
+      payload.localStorageSmall.scout_custom_templates = localStorage.getItem('scout_custom_templates');
+    }
+    if (g.gmailAccounts) {
+      payload.gmailAccounts = JSON.parse(localStorage.getItem('scout_gmail_accounts') || '[]');
+      payload.localStorageSmall.scout_gmail_accounts = localStorage.getItem('scout_gmail_accounts');
+    }
+    if (g.gmailTokens) {
+      payload.gmailTokens = JSON.parse(localStorage.getItem('scout_gmail_tokens') || '{}');
+    }
+
+    if (g.allLeads) {
+      payload.leads.all = all;
+    } else {
+      if (g.pendingNotScouted) payload.leads.pendingNotScouted = all.filter(b => getStatus(b) === 'pending');
+      if (g.emailFoundNeedsVerification) payload.leads.emailFoundNeedsVerification = all.filter(b => getStatus(b) === 'found');
+      if (g.readyToSendNotSent) payload.leads.readyToSendNotSent = all.filter(b => getStatus(b) === 'ready_to_send' && emailOf(b) && isNotSent(b));
+      if (g.review) payload.leads.review = all.filter(b => getStatus(b) === 'review');
+      if (g.risky) payload.leads.risky = all.filter(b => getStatus(b) === 'risky');
+      if (g.noEmail) payload.leads.noEmail = all.filter(b => getStatus(b) === 'no_email');
+    }
+    return payload;
+  }
+
+  function downloadJson(name, obj){
+    const blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  }
+
+  window.exportScoutTransferV46 = function(scope){
+    const payload = backupPayload(scope);
+    downloadJson(`scout_app_${scope || 'transfer'}_${new Date().toISOString().slice(0,10)}.json`, payload);
+    toastSafe('Scout transfer file exported', 'ok');
+  };
+
+  function mergeLead(existing, incoming){
+    if (!existing) return { ...incoming, id: incoming.id || gen(), importedAt: incoming.importedAt || nowIso() };
+    return { ...existing, ...incoming, id: existing.id || incoming.id, updatedAt: nowIso() };
+  }
+  function keyOfLead(b){ return emailOf(b) || String(b?.place_id || b?.placeId || '').trim() || String(b?.website || b?.domain || '').toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').split('/')[0] || String(b?.name || b?.business || '').toLowerCase().trim(); }
+
+  window.importScoutTransferV46 = function(file, mode){
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!data || data.app !== 'Scout App') throw new Error('This does not look like a Scout App transfer file.');
+        const doReplace = mode === 'replace';
+        if (data.settings) { Object.assign(settings, data.settings); localStorage.setItem('sv13_settings', JSON.stringify(settings)); }
+        if (data.dorkSettings) localStorage.setItem('scout_dork_settings', JSON.stringify(data.dorkSettings));
+        if (Array.isArray(data.sendMessages)) { if (typeof esTemplates !== 'undefined') esTemplates.splice(0, esTemplates.length, ...data.sendMessages); window.esTemplates = (typeof esTemplates !== 'undefined') ? esTemplates : data.sendMessages; persistTemplates(); }
+        if (Array.isArray(data.legacyCustomMessages)) localStorage.setItem('scout_custom_templates', JSON.stringify(data.legacyCustomMessages));
+        if (data.gmailAccounts) localStorage.setItem('scout_gmail_accounts', JSON.stringify(data.gmailAccounts));
+        if (data.gmailTokens) localStorage.setItem('scout_gmail_tokens', JSON.stringify(data.gmailTokens));
+        const incoming = [];
+        const leads = data.leads || {};
+        if (Array.isArray(leads.all) && leads.all.length) incoming.push(...leads.all);
+        else ['pendingNotScouted','emailFoundNeedsVerification','readyToSendNotSent','review','risky','noEmail'].forEach(k => { if (Array.isArray(leads[k])) incoming.push(...leads[k]); });
+        if (incoming.length) {
+          if (doReplace) businesses.splice(0, businesses.length);
+          const map = new Map(safeArr(businesses).map(b => [keyOfLead(b), b]));
+          incoming.forEach(item => {
+            const k = keyOfLead(item) || gen();
+            const merged = mergeLead(map.get(k), item);
+            if (!map.has(k)) businesses.push(merged);
+            else Object.assign(map.get(k), merged);
+            map.set(k, merged);
+          });
+        }
+        saveSafe();
+        renderSafe();
+        renderEsTemplates();
+        try { if (typeof loadDorkSettingsUI === 'function') loadDorkSettingsUI(); } catch(e) {}
+        toastSafe(`Imported Scout transfer: ${incoming.length} lead${incoming.length===1?'':'s'} plus settings/messages`, 'ok');
+      } catch(err) { console.error(err); toastSafe('Import failed: ' + err.message, 'err'); }
+    };
+    reader.readAsText(file);
+  };
+
+
+  window.exportScoutTransferV47 = window.exportScoutTransferV46;
+  window.importScoutTransferV47 = window.importScoutTransferV46;
+  function transferCheckbox(id, label, checked, warning){
+    return `<label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.03);font-size:12px;color:var(--muted);line-height:1.45">
+      <input type="checkbox" id="${id}" ${checked ? 'checked' : ''} onchange="updateScoutTransferSummaryV47()" style="margin-top:2px">
+      <span><strong style="color:var(--text)">${label}</strong>${warning ? `<br><span style="color:var(--amber)">${warning}</span>` : ''}</span>
+    </label>`;
+  }
+
+  function installTransferCard(){
+    const settingsPanel = q('settings-panel'); if (!settingsPanel || q('v46-transfer-card') || q('v47-transfer-card')) return;
+    const card = document.createElement('div'); card.className='settings-card'; card.id='v47-transfer-card';
+    card.innerHTML = `<h3>Transfer / Backup</h3>
+      <p>Choose exactly what you want to export. Use this to move Scout App settings, messages, signals, and selected lead groups to another device.</p>
+      <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--muted);line-height:1.6">⚠️ Gmail OAuth tokens are sensitive. They are unchecked by default. Only include them when transferring to your own trusted device. For other people, export settings without tokens and let them connect their own Gmail.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="topbar-btn" onclick="setScoutTransferPresetV47('device')">Recommended device transfer</button>
+        <button class="topbar-btn" onclick="setScoutTransferPresetV47('settings')">Settings only</button>
+        <button class="topbar-btn" onclick="setScoutTransferPresetV47('all_safe')">All safe data</button>
+        <button class="topbar-btn danger" onclick="if(confirm('This will include Gmail OAuth tokens and all leads. Only use this for your own trusted device.')) setScoutTransferPresetV47('all_sensitive')">Everything incl. tokens</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin-bottom:12px">
+        ${transferCheckbox('v47-export-core-settings', 'Core settings', true)}
+        ${transferCheckbox('v47-export-messages', 'Message templates + subjects', true)}
+        ${transferCheckbox('v47-export-dorking', 'Dorking signals/settings', true)}
+        ${transferCheckbox('v47-export-gmail-accounts', 'Gmail account list', true)}
+        ${transferCheckbox('v47-export-gmail-tokens', 'Gmail OAuth tokens', false, 'Sensitive: can allow Gmail access. Do not share.')}
+        ${transferCheckbox('v47-export-pending', 'Pending / not scouted leads', true)}
+        ${transferCheckbox('v47-export-email-found', 'Email Found / needs verification', true)}
+        ${transferCheckbox('v47-export-ready', 'Ready to Send / verified not sent', true)}
+        ${transferCheckbox('v47-export-review', 'Review leads', false)}
+        ${transferCheckbox('v47-export-risky', 'Risky leads', false)}
+        ${transferCheckbox('v47-export-no-email', 'No Email leads', false)}
+        ${transferCheckbox('v47-export-all-leads', 'All leads', false, 'Overrides the lead-group checkboxes.')}
+      </div>
+      <div id="v47-export-summary" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin-bottom:12px;font-size:12px;color:var(--muted);line-height:1.5">Preparing export summary…</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="settings-btn" onclick="exportScoutTransferV46('selected_transfer')">Export selected</button>
+        <button class="settings-btn ghost" onclick="document.getElementById('v46-import-file').click()">Import / merge file</button>
+        <button class="settings-btn danger" onclick="document.getElementById('v46-import-file-replace').click()">Import and replace leads</button>
+      </div>
+      <input id="v46-import-file" type="file" accept=".json,application/json" style="display:none" onchange="importScoutTransferV46(this.files[0], 'merge'); this.value=''">
+      <input id="v46-import-file-replace" type="file" accept=".json,application/json" style="display:none" onchange="if(confirm('Replace current leads with imported leads? Settings/messages will also be imported.')) importScoutTransferV46(this.files[0], 'replace'); this.value=''">
+      <div style="font-size:11px;color:var(--muted);line-height:1.6">Tip: for moving to another personal device, use Recommended device transfer. For giving Scout App to another person, leave Gmail OAuth tokens unchecked and let them connect their own Gmail.</div>`;
+    const dm = Array.from(settingsPanel.querySelectorAll('.settings-card')).find(c => (c.querySelector('h3')?.textContent || '').includes('Data Management'));
+    if (dm) settingsPanel.insertBefore(card, dm); else settingsPanel.appendChild(card);
+    setTimeout(()=>{ try { updateScoutTransferSummaryV47(); } catch(e) {} }, 100);
+  }
+
+  function hideSettingsMessages(){
+    const card = q('custom-msg-section');
+    if (card) card.style.display = 'none';
+  }
+
+  function renameUi(){
+    const replacements = [
+      ['📧 Email Scout','📧 Send Message'], ['Email Scout','Send Message'], ['email scout','send message'], ['Email scout','Send message']
+    ];
+    const nodes = document.querySelectorAll('button, .nav-tab, h2, h3, p, span, label');
+    nodes.forEach(n => {
+      if (!n.childElementCount && n.textContent) {
+        let txt = n.textContent;
+        replacements.forEach(([a,b]) => { txt = txt.split(a).join(b); });
+        if (txt !== n.textContent) n.textContent = txt;
+      }
+    });
+    const logo = q('topbar-logo'), title = q('topbar-title');
+    if (logo) logo.textContent = '🧭 Scout App';
+    if (title) title.textContent = VERSION + ' — Selective Transfer Export';
+    const h2 = document.querySelector('#email-scout-content h2'); if (h2) h2.textContent = '📧 Send Message';
+    const uploadStatus = q('es-upload-status'); if (uploadStatus) uploadStatus.textContent = 'No upload here. Upload leads in Upload List, verify them, then send from this tab.';
+  }
+
+  function addOnePlaceNotice(){
+    const host = q('email-scout-content'); if (!host || q('v46-one-place-notice')) return;
+    const inner = host.querySelector('div[style*="max-width:860px"]') || host.firstElementChild; if (!inner) return;
+    const notice = document.createElement('div'); notice.className='as-card'; notice.id='v46-one-place-notice'; notice.style.marginBottom='14px';
+    notice.innerHTML = `<h3>One place for messages</h3><p style="font-size:12px;color:var(--muted);line-height:1.6">All message templates now live here. Each message has its own subject and body. The old message area in Settings is hidden to avoid confusion.</p>`;
+    inner.insertBefore(notice, inner.children[1] || null);
+  }
+
+  function init(){
+    installTemplates();
+    hideSettingsMessages();
+    installTransferCard();
+    addOnePlaceNotice();
+    renameUi();
+    renderEsTemplates();
+    setTimeout(()=>{ hideSettingsMessages(); installTransferCard(); renameUi(); renderEsTemplates(); }, 600);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
