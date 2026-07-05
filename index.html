@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Scout App">
 <meta name="theme-color" content="#0d0f14">
 <link rel="manifest" href="manifest.json">
-<title>Scout App v61</title>
+<title>Scout App v78</title>
 <style>
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
@@ -11922,6 +11922,156 @@ function manualPollReplies() {
   function addCss(){if(q('v75-css'))return; const css=document.createElement('style'); css.id='v75-css'; css.textContent=`#dashboard-content.v75-dashboard-panel{overflow:auto!important;height:100%!important;min-height:0!important;padding:0!important;display:block!important}#dashboard-content.v75-dashboard-panel>*:not(#${ROOT}){display:none!important;visibility:hidden!important;height:0!important;overflow:hidden!important}#${ROOT}{padding:18px;max-width:1120px;margin:0 auto;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}#${ROOT} .v75-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}#${ROOT} h2{font-size:18px;font-weight:950;margin:0 0 4px}#${ROOT} p{font-size:12px;color:var(--muted);margin:0}#${ROOT} .v75-ranges{display:flex;gap:7px;flex-wrap:wrap}#${ROOT} .v75-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px}#${ROOT} .v75-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px}#${ROOT} .v75-card div{font-size:11px;color:var(--muted);font-weight:850;text-transform:uppercase;letter-spacing:.35px}#${ROOT} .v75-card strong{display:block;font-size:25px;font-weight:950;line-height:1;margin:7px 0;color:var(--text)}#${ROOT} .v75-card strong.ok{color:var(--green)}#${ROOT} .v75-card strong.warn{color:var(--amber)}#${ROOT} .v75-card strong.accent{color:var(--accent)}#${ROOT} .v75-card span,#${ROOT} .v75-empty{font-size:11px;color:var(--muted)}#${ROOT} .v75-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}#${ROOT} section{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;min-height:150px}#${ROOT} section h3{font-size:14px;margin:0 0 10px;font-weight:900}#${ROOT} .v75-row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);min-width:0}#${ROOT} .v75-row:last-child{border-bottom:none}#${ROOT} .v75-row div{min-width:0}#${ROOT} .v75-row b{display:block;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#${ROOT} .v75-row span{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#${ROOT} .v75-row em{font-style:normal;font-size:11px;color:var(--accent);flex-shrink:0}`; document.head.appendChild(css)}
   function init(){addCss(); patchVersion(); patchNav(); cleanSchedules(); if(q('dashboard-content')?.classList.contains('active')) renderDashboard(true)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init); else init();
+})();
+</script>
+
+
+
+<!-- SCOUT APP v78 - Stability bridge: single version + restored queue population -->
+<script>
+(function(){
+  const VERSION_TEXT = 'Scout App v78 — Stable Queue + Clean No Inbox';
+  const q = (id)=>document.getElementById(id);
+  const esc = (v)=>String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const arr = (v)=>Array.isArray(v)?v:[];
+  const norm = (v)=>String(v||'').trim().toLowerCase();
+  const emailOf = (b)=>String((b&&(b.email||b.best_email||b.validatedEmail||b.validatedEmail1||(Array.isArray(b.emails)?b.emails[0]:'')))||'').trim();
+  const parseEmail = (v)=>{ const m=String(v||'').match(/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/i); return m?m[0].toLowerCase():''; };
+  const fmtTime = (v)=>{ if(!v)return ''; const d=new Date(v); if(isNaN(d.getTime()))return String(v).slice(0,16).replace('T',' '); const today=d.toDateString()===new Date().toDateString(); return today?d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString([], {month:'short',day:'numeric'})+' '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); };
+  const sentAtOf = (b)=>b&&(b.sentAt||b.contactedAt||b.lastSentAt||b.sent_at||'');
+  const senderOf = (b)=>parseEmail(b&&(b.emailUsedToContact||b.contactedByEmail||b.lastContactedByEmail||b.sentFromEmail||b.gmailUsed||b.sentBy||b.senderEmail||b.actualSender||b.fromEmail||b.gmailAccount||''));
+  const replyAtOf = (b)=>b&&(b.lastReplyAt||b.repliedAt||((Array.isArray(b.replyHistory)&&b.replyHistory.length)?(b.replyHistory[b.replyHistory.length-1].receivedAt||b.replyHistory[b.replyHistory.length-1].at):'')||'');
+  const replyGmailOf = (b)=>parseEmail(b&&(b.replyTrackingGmail||b.replyFromAccount||b.replyGmail||senderOf(b)||''));
+  function getBusinesses(){ try { if (typeof businesses !== 'undefined' && Array.isArray(businesses)) return businesses; } catch(e){} try { if(Array.isArray(window.__scoutBusinessesFallback)) return window.__scoutBusinessesFallback; } catch(e){} return []; }
+  function setBusinesses(list){ try { businesses = Array.isArray(list)?list:[]; } catch(e) { window.__scoutBusinessesFallback = Array.isArray(list)?list:[]; } }
+
+  // Bridge old patches that expect window.businesses to the real top-level IndexedDB queue.
+  function installBusinessBridge(){
+    try{
+      const desc = Object.getOwnPropertyDescriptor(window, 'businesses');
+      if(!desc || desc.configurable){
+        try{ delete window.businesses; }catch(e){}
+        Object.defineProperty(window, 'businesses', {
+          configurable:true,
+          get(){ return getBusinesses(); },
+          set(v){ setBusinesses(v); }
+        });
+      }
+    }catch(e){}
+  }
+
+  async function repairLeadLoad(){
+    try{
+      const cur=getBusinesses();
+      if(cur.length) return cur;
+      let saved=[];
+      if(typeof scoutDbGetAllLeads==='function'){
+        try{ saved=await scoutDbGetAllLeads(); }catch(e){ saved=[]; }
+      }
+      if(!saved.length){
+        try{ saved=JSON.parse(localStorage.getItem('sv13_businesses')||'[]')||[]; }catch(e){ saved=[]; }
+      }
+      if(saved.length){
+        saved.sort((a,b)=>String(b.updatedAt||b.addedAt||'').localeCompare(String(a.updatedAt||a.addedAt||'')));
+        setBusinesses(saved);
+        try{ if(typeof save==='function') save(); }catch(e){}
+      }
+      return saved;
+    }catch(e){ return getBusinesses(); }
+  }
+
+  function statusOf(b){ return norm(b && (b.status||b.emailStatus)) || 'pending'; }
+  function isFollowup(b){ const t=new Date(sentAtOf(b)||0).getTime(); return !!t && !replyAtOf(b) && !['replied','closed','no_inbox','no_email','invalid','duplicate'].includes(statusOf(b)) && (Date.now()-t>24*60*60*1000); }
+  function matchesFilter(b, filter){
+    const s=statusOf(b);
+    if(filter==='all') return true;
+    if(filter==='followup') return isFollowup(b);
+    if(filter==='dorking') return b.source==='dorking';
+    if(filter==='maps') return b.source!=='dorking';
+    if(filter==='ready' || filter==='ready_to_send') return s==='ready_to_send' || s==='ready';
+    if(filter==='found') return s==='found' || s==='email_found';
+    if(filter==='no_inbox') return s==='no_inbox' || b.inboxStatus==='no_inbox' || b.mailboxExists===false;
+    return s===filter;
+  }
+  function labelFor(s){ return ({pending:'Pending',scanning:'Scanning',found:'Email Found',email_found:'Email Found',ready:'Ready',ready_to_send:'Ready',review:'Review',risky:'Risky',invalid:'Invalid',duplicate:'Duplicate',no_email:'No Email',no_inbox:'No Inbox',contacted:'Contacted',replied:'Replied',closed:'Closed'})[s] || s; }
+  function classFor(s){ if(s==='ready_to_send') return 's-ready'; if(s==='email_found') return 's-found'; return 's-'+s; }
+
+  function renderQueueV78(){
+    const listAll=getBusinesses();
+    const container=q('queue-list'); if(!container) return;
+    const search=norm(q('qp-search')?.value||'');
+    let filter='all'; try{ filter=queueFilter||'all'; }catch(e){}
+    const list=listAll.filter(b=>matchesFilter(b,filter)).filter(b=>{
+      if(!search) return true;
+      return norm(b.name).includes(search)||norm(emailOf(b)).includes(search)||norm(b.website).includes(search)||norm(b.category||b.industry).includes(search);
+    });
+    const stats={}; listAll.forEach(b=>{ let s=statusOf(b); if(s==='email_found')s='found'; if(s==='ready')s='ready_to_send'; stats[s]=(stats[s]||0)+1; });
+    const st=q('qp-stats');
+    if(st){
+      const order=[['ready_to_send','Ready'],['replied','Replies'],['followup','Follow-up'],['contacted','Contacted'],['no_inbox','No Inbox'],['found','Email Found'],['pending','Pending']];
+      const follow=listAll.filter(isFollowup).length;
+      stats.followup=follow;
+      st.innerHTML=order.filter(([k])=>stats[k]).map(([k,l])=>`<div class="qp-stat"><span class="qp-stat-dot"></span><span class="qp-stat-count">${stats[k]||0}</span><span class="qp-stat-label">${l}</span></div>`).join('');
+    }
+    if(!list.length){ container.innerHTML=`<div id="queue-empty"><div class="icon">${listAll.length?'🔍':'📋'}</div><p>${listAll.length?'No matches for this filter':'No businesses loaded yet. Upload leads or wait for storage to load.'}</p></div>`; return; }
+    let active=''; try{ active=activeId||''; }catch(e){}
+    container.innerHTML=list.slice(0,80).map(b=>{
+      const s=statusOf(b), email=emailOf(b), sent=sentAtOf(b), sender=senderOf(b), rep=replyAtOf(b), repG=replyGmailOf(b);
+      const id=String(b.id||email||b.name||Math.random()).replace(/'/g,'');
+      return `<div class="qi${String(b.id||'')===String(active)?' active':''}" data-id="${esc(id)}" onclick="try{selectBiz('${esc(id)}')}catch(e){}">
+        <div class="qi-name">${esc(b.name||email||b.website||'Unnamed business')}</div>
+        <div class="qi-meta"><span class="qi-status ${classFor(s)}">${esc(labelFor(s))}</span>${b.rating?`<span>★ ${esc(b.rating)}</span>`:''}${b.reviews?`<span>${esc(b.reviews)} reviews</span>`:''}</div>
+        ${email?`<div class="qi-email">✉ ${esc(email)}</div>`:''}
+        ${sent?`<div class="v78-tag">Sent · ${esc(fmtTime(sent))}${sender?' · '+esc(sender):''}</div>`:''}
+        ${rep?`<div class="v78-tag reply">Reply · ${esc(fmtTime(rep))}${repG?' · via '+esc(repG):''}</div>`:(sent && !['no_inbox','no_email','replied'].includes(s)?`<div class="v78-tag muted">No reply yet</div>`:'')}
+        ${s==='no_inbox'?`<div class="v78-tag warn">No Inbox / bounce</div>`:''}
+        <button onclick="event.stopPropagation();try{deleteBiz('${esc(id)}')}catch(e){}" style="position:absolute;top:6px;right:6px;background:transparent;border:none;color:var(--faint);font-size:13px;cursor:pointer;padding:2px 5px;border-radius:4px;line-height:1" title="Delete">✕</button>
+      </div>`;
+    }).join('') + (list.length>80?`<div style="padding:12px;text-align:center;color:var(--muted);font-size:12px">Showing first 80 of ${list.length}. Use search/filter to narrow.</div>`:'');
+  }
+
+  function installQueueRenderer(){
+    window.renderQueue = renderQueueV78;
+    const oldSetFilter = window.setFilter;
+    window.setFilter = function(f,el){
+      try{ queueFilter=f; }catch(e){}
+      document.querySelectorAll('#qp-actions .qp-action').forEach(b=>b.classList.remove('active'));
+      if(el) el.classList.add('active');
+      renderQueueV78();
+    };
+  }
+
+  function singleDashboard(){
+    const panel=q('dashboard-content'); if(!panel) return;
+    const data=getBusinesses();
+    const realReplies=data.filter(b=>statusOf(b)==='replied' && replyAtOf(b));
+    const noInbox=data.filter(b=>statusOf(b)==='no_inbox'||b.inboxStatus==='no_inbox'||b.mailboxExists===false);
+    const contacted=data.filter(b=>sentAtOf(b)&&!noInbox.includes(b));
+    const ready=data.filter(b=>['ready_to_send','ready'].includes(statusOf(b)));
+    const follow=data.filter(isFollowup);
+    panel.innerHTML=`<div id="v78-dashboard-root" style="padding:18px;max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px;overflow:visible"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div><h2 style="font-size:18px;margin:0 0 4px">📊 Dashboard</h2><p style="font-size:12px;color:var(--muted);margin:0">One lightweight dashboard. Real replies only. No duplicate renderers.</p></div><button class="topbar-btn" onclick="renderScoutDashboard()">Refresh</button></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px">${[['Actual contacted',contacted.length],['Real responses',realReplies.length],['No Inbox',noInbox.length],['Contacted no reply',contacted.length-realReplies.length],['Follow-up due',follow.length],['Ready to Send',ready.length]].map(([a,b])=>`<div class="v78-card"><div>${a}</div><strong>${b}</strong></div>`).join('')}</div><div class="v78-card"><b>Live Activity Log</b><div style="margin-top:8px;color:var(--muted);font-size:12px">Use Send Message / Check Replies for detailed logs. Dashboard no longer auto-renders every few seconds.</div></div></div>`;
+  }
+  function installDashboard(){ window.renderScoutDashboard=singleDashboard; window.renderDashboardStable=singleDashboard; }
+
+  function patchVersion(){
+    document.title='Scout App v78';
+    const title=q('topbar-title'); if(title) title.textContent=VERSION_TEXT;
+    const logo=q('topbar-logo'); if(logo) logo.textContent='🧭 Scout App';
+  }
+  function addCss(){
+    if(q('v78-css')) return;
+    const style=document.createElement('style'); style.id='v78-css'; style.textContent=`.v78-tag{font-size:10.5px;margin-top:4px;color:var(--green);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.v78-tag.reply{color:var(--accent)}.v78-tag.warn{color:var(--red)}.v78-tag.muted{color:var(--muted)}.v78-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px}.v78-card div{font-size:11px;color:var(--muted);font-weight:800;text-transform:uppercase}.v78-card strong{display:block;font-size:26px;line-height:1;margin-top:8px;color:var(--text)}#dashboard-content{overflow:auto!important;display:block!important}`; document.head.appendChild(style);
+  }
+  async function init(){
+    addCss(); installBusinessBridge(); installQueueRenderer(); installDashboard(); patchVersion();
+    await repairLeadLoad();
+    renderQueueV78();
+    if(q('dashboard-content')?.classList.contains('active')) singleDashboard();
+    setTimeout(()=>{installBusinessBridge(); patchVersion(); renderQueueV78();}, 2500);
+    setTimeout(()=>{patchVersion();}, 6000);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', init); else init();
+  window.v78RepairScout = init;
 })();
 </script>
 
