@@ -11350,5 +11350,382 @@ function manualPollReplies() {
 })();
 </script>
 
+
+
+<script>
+/* Scout App v72 — compact UI + queue-visible contact/reply tags.
+   Adds sender/time tracking before opening a business and removes noisy guide copy.
+   Frontend-only patch; keeps v71 conversation thread and v5.9 reply history backend. */
+(function(){
+  const VERSION = 'v72 — Compact UI + Contact Tags';
+  const q = id => document.getElementById(id);
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const arr = v => Array.isArray(v) ? v : [];
+  const norm = v => String(v || '').trim().toLowerCase();
+  const parseEmail = v => String(v || '').trim().replace(/^mailto:/i,'').split('?')[0].replace(/[<>()\[\]"']/g,'').trim();
+  function now(){ return new Date().toISOString(); }
+  function fmt(v){
+    if(!v) return '';
+    const d = new Date(v);
+    if(isNaN(d.getTime())) return String(v).slice(0,19).replace('T',' ');
+    const today = new Date();
+    const same = d.toDateString() === today.toDateString();
+    return same ? d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : d.toLocaleDateString([], {month:'short', day:'numeric'}) + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+  function shortEmail(v){
+    v = parseEmail(v);
+    if(!v) return '';
+    if(v.length <= 28) return v;
+    const [u,d] = v.split('@');
+    if(!d) return v.slice(0,25)+'…';
+    return (u.length>12?u.slice(0,12)+'…':u) + '@' + d;
+  }
+  function statusOf(b){ return norm(b && (b.status || b.emailStatus)) || 'pending'; }
+  function senderOf(b){ return parseEmail(b && (b.emailUsedToContact || b.contactedByEmail || b.lastContactedByEmail || b.sentFromEmail || b.replyTrackingGmail || b.gmailUsed || b.sentBy || b.senderEmail || b.actualSender || b.gmailAccount || b.fromEmail)); }
+  function sentAtOf(b){ return b && (b.sentAt || b.contactedAt || b.lastSentAt || b.contacted_at || ''); }
+  function realReplyItems(b){
+    const bad = /mail delivery subsystem|mailer-daemon|delivery status notification|address not found|your message was not sent|you have reached a limit for sending mail|delivery incomplete|undeliverable|returned mail|message blocked|quota exceeded|recipient address rejected/i;
+    const items = arr(b && b.replyHistory).filter(r => !bad.test(String((r.body||'')+' '+(r.subject||'')+' '+(r.replyFrom||''))));
+    if(!items.length && b && (b.theirReply || b.repliedAt || b.lastReplyAt) && !bad.test(String((b.theirReply||'')+' '+(b.replySubject||'')+' '+(b.replyFrom||'')))){
+      items.push({ body:b.theirReply||'', receivedAt:b.repliedAt||b.lastReplyAt||'', replyFrom:b.replyFrom||b.replyFromHeader||'', gmailAccount:b.replyTrackingGmail||b.replyFromAccount||senderOf(b), subject:b.replySubject||'' });
+    }
+    return items;
+  }
+  function lastReply(b){
+    const items = realReplyItems(b).slice().sort((a,b) => new Date(a.receivedAt || a.at || 0) - new Date(b.receivedAt || b.at || 0));
+    return items[items.length-1] || null;
+  }
+  function hasBounce(b){
+    const s = String((b&&b.bounceType)||'') + ' ' + String((b&&b.bounceReason)||'') + ' ' + String((b&&b.emailStatus)||'');
+    return /bounce|delivery|limit|invalid|address not found|not sent/i.test(s);
+  }
+  function bizList(){ try { return Array.isArray(businesses) ? businesses : []; } catch(e){ return []; } }
+  function saveNow(){ try { if(typeof save === 'function') save(); } catch(e){} }
+
+  function normalizeContactTags(){
+    let changed = false;
+    bizList().forEach(b => {
+      const sender = senderOf(b);
+      const sentAt = sentAtOf(b);
+      if(sender){
+        ['emailUsedToContact','contactedByEmail','lastContactedByEmail','sentFromEmail','gmailUsed','sentBy'].forEach(k => { if(!b[k]){ b[k] = sender; changed = true; } });
+      }
+      if(sentAt){
+        ['sentAt','contactedAt'].forEach(k => { if(!b[k]){ b[k] = sentAt; changed = true; } });
+      }
+      const replies = arr(b.replyHistory);
+      if(replies.length){
+        replies.forEach(r => {
+          if(!r.gmailAccount && (b.replyTrackingGmail || sender)){ r.gmailAccount = b.replyTrackingGmail || sender; changed = true; }
+          if(!r.trackedThroughEmail && r.gmailAccount){ r.trackedThroughEmail = r.gmailAccount; changed = true; }
+          if(!r.receivedAt && (b.repliedAt || b.lastReplyAt)){ r.receivedAt = b.repliedAt || b.lastReplyAt; changed = true; }
+        });
+      }
+    });
+    if(changed) saveNow();
+  }
+
+  function contactTagsHtml(b){
+    const sentAt = sentAtOf(b), sender = senderOf(b), reply = lastReply(b), st = statusOf(b);
+    let lines = [];
+    if(sentAt || sender){
+      lines.push(`<div class="v72-queue-tag v72-sent"><span>Sent</span>${sentAt?`<b>${esc(fmt(sentAt))}</b>`:''}${sender?`<em>${esc(shortEmail(sender))}</em>`:''}</div>`);
+    }
+    if(reply){
+      const t = reply.receivedAt || reply.at || reply.date || '';
+      const via = parseEmail(reply.gmailAccount || reply.trackedThroughEmail || b.replyTrackingGmail || sender || '');
+      lines.push(`<div class="v72-queue-tag v72-reply"><span>Reply</span>${t?`<b>${esc(fmt(t))}</b>`:''}${via?`<em>via ${esc(shortEmail(via))}</em>`:''}</div>`);
+    } else if(st === 'contacted' && sentAt && !hasBounce(b)) {
+      lines.push(`<div class="v72-queue-tag v72-wait"><span>No reply yet</span></div>`);
+    }
+    if(hasBounce(b)) lines.push(`<div class="v72-queue-tag v72-bounce"><span>Delivery notice</span></div>`);
+    return lines.join('');
+  }
+
+  function enhanceQueueItems(){
+    normalizeContactTags();
+    document.querySelectorAll('#queue-list .qi').forEach(item => {
+      if(item.querySelector('.v72-queue-tags')) return;
+      const onclick = item.getAttribute('onclick') || '';
+      const m = onclick.match(/selectBiz\(['\"]([^'\"]+)['\"]\)/);
+      if(!m) return;
+      const b = bizList().find(x => String(x.id) === String(m[1]));
+      if(!b) return;
+      const html = contactTagsHtml(b);
+      if(!html) return;
+      const box = document.createElement('div');
+      box.className = 'v72-queue-tags';
+      box.innerHTML = html;
+      const emailLine = item.querySelector('.qi-email');
+      if(emailLine) emailLine.insertAdjacentElement('afterend', box); else item.appendChild(box);
+    });
+  }
+
+  function compactCopy(){
+    document.body.classList.add('v72-compact');
+    const noisyText = /This is a Scout App tab|No upload happens here|Subject lines are controlled|Upload\/import leads|Search engines can still block|Used to generate personalized|daily export|separate app|playbook|QuickBook|Airtable/i;
+    document.querySelectorAll('p, .claude-key-note, .as-hint').forEach(el => {
+      const text = (el.textContent || '').trim();
+      if(text.length > 95 || noisyText.test(text)) el.classList.add('v72-hidden-copy');
+    });
+    // Remove duplicated/old dashboard helper panels if any old renderer leaves them behind.
+    document.querySelectorAll('[id^="v63-dashboard"], [id^="v68-dashboard"], #v70-contact-timeline').forEach(el => { try { el.remove(); } catch(e){} });
+    const storage = q('scout-storage-badge'); if(storage) storage.style.display='none';
+  }
+
+  function enhanceBusinessDetail(){
+    const panel = q('detail-panel');
+    let b = null;
+    try { b = typeof getActiveBiz === 'function' ? getActiveBiz() : bizList().find(x => x.id === activeId); } catch(e){ b = null; }
+    if(!panel || !b) return;
+    const old = q('v72-detail-summary'); if(old) old.remove();
+    const reply = lastReply(b);
+    const summary = document.createElement('div');
+    summary.id = 'v72-detail-summary';
+    summary.className = 'detail-section';
+    summary.innerHTML = `<div class="detail-section-head"><span class="detail-section-title">Contact Summary</span></div>
+      <div class="detail-section-body v72-detail-summary-grid">
+        <div><span>Sent at</span><b>${esc(fmt(sentAtOf(b)) || '—')}</b></div>
+        <div><span>Sent from</span><b>${esc(senderOf(b) || '—')}</b></div>
+        <div><span>Last response</span><b>${esc(reply ? fmt(reply.receivedAt || reply.at || reply.date) : '—')}</b></div>
+        <div><span>Tracked through</span><b>${esc(reply ? (parseEmail(reply.gmailAccount || reply.trackedThroughEmail || b.replyTrackingGmail || senderOf(b)) || '—') : (b.replyTrackingGmail || senderOf(b) || '—'))}</b></div>
+      </div>`;
+    const conversation = q('v71-conversation-thread');
+    if(conversation) conversation.insertAdjacentElement('beforebegin', summary);
+    else {
+      const header = panel.querySelector('.detail-header');
+      if(header) header.insertAdjacentElement('afterend', summary); else panel.prepend(summary);
+    }
+  }
+
+  function patchVersion(){
+    const title = q('topbar-title'); if(title) title.textContent = VERSION;
+    const docTitle = document.querySelector('title'); if(docTitle) docTitle.textContent = 'Scout App v72';
+  }
+
+  const css = document.createElement('style');
+  css.textContent = `
+    body.v72-compact #topbar-title{font-size:12px;color:var(--muted)}
+    body.v72-compact .v72-hidden-copy{display:none!important}
+    body.v72-compact .as-card, body.v72-compact .settings-card{padding:14px!important}
+    body.v72-compact .as-card h3, body.v72-compact .settings-card h3{margin-bottom:8px!important}
+    body.v72-compact #detail-panel{overflow-y:auto!important;min-height:0!important;padding-bottom:40px!important}
+    body.v72-compact #content, body.v72-compact .tab-panel.active{min-height:0!important}
+    .v72-queue-tags{display:flex;flex-direction:column;gap:3px;margin-top:6px;max-width:100%}
+    .v72-queue-tag{display:flex;align-items:center;gap:5px;min-width:0;font-size:10px;line-height:1.25;color:var(--muted);background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.06);border-radius:7px;padding:4px 6px;overflow:hidden}
+    .v72-queue-tag span{font-weight:800;text-transform:uppercase;letter-spacing:.35px;font-size:9px;color:var(--faint);flex-shrink:0}
+    .v72-queue-tag b{font-weight:750;color:var(--text);white-space:nowrap;flex-shrink:0}
+    .v72-queue-tag em{font-style:normal;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+    .v72-queue-tag.v72-sent{border-color:rgba(34,211,165,.16)}
+    .v72-queue-tag.v72-reply{border-color:rgba(167,139,250,.22);background:rgba(167,139,250,.06)}
+    .v72-queue-tag.v72-reply span{color:var(--accent)}
+    .v72-queue-tag.v72-bounce{border-color:rgba(245,166,35,.28);background:rgba(245,166,35,.07)}
+    .v72-queue-tag.v72-bounce span{color:var(--amber)}
+    .v72-detail-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+    .v72-detail-summary-grid>div{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;min-width:0}
+    .v72-detail-summary-grid span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:850;letter-spacing:.35px;margin-bottom:4px}
+    .v72-detail-summary-grid b{font-size:12px;color:var(--text);word-break:break-word}
+    body.v72-compact #dashboard-content{overflow:auto!important;height:100%!important;min-height:0!important}
+    body.v72-compact #dashboard-content [id^="scout-dashboard-root"]{max-width:1120px!important}
+  `;
+  document.head.appendChild(css);
+
+  const oldRenderQueue = window.renderQueue;
+  window.renderQueue = function(){
+    const result = oldRenderQueue ? oldRenderQueue.apply(this, arguments) : undefined;
+    setTimeout(() => { enhanceQueueItems(); compactCopy(); }, 20);
+    return result;
+  };
+
+  const oldRenderDetail = window.renderDetail;
+  window.renderDetail = function(){
+    const result = oldRenderDetail ? oldRenderDetail.apply(this, arguments) : undefined;
+    setTimeout(() => { enhanceBusinessDetail(); compactCopy(); }, 90);
+    return result;
+  };
+
+  function init(){
+    patchVersion(); compactCopy(); normalizeContactTags();
+    try { if(typeof renderQueue === 'function') renderQueue(); } catch(e){}
+    try { if(typeof renderDetail === 'function') renderDetail(); } catch(e){}
+    setInterval(() => { try { enhanceQueueItems(); compactCopy(); } catch(e){} }, 5000);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+
+
+<script>
+/* Scout App v73 — hard single-dashboard fix + schedule cleanup.
+   This disables/hides all legacy dashboard renderers so only one dashboard exists.
+   It also removes completed schedules from visible schedule lists and keeps sender/reply tags. */
+(function(){
+  const VERSION='v73 — Single Dashboard Hard Fix';
+  const ROOT='v73-dashboard-root';
+  const q=id=>document.getElementById(id);
+  const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const arr=v=>Array.isArray(v)?v:[];
+  const norm=v=>String(v||'').trim().toLowerCase();
+  const safeJson=(raw,fb)=>{try{return JSON.parse(raw||'')??fb}catch(e){return fb}};
+  const parseEmail=v=>String(v||'').trim().replace(/^mailto:/i,'').split('?')[0].replace(/[<>()\[\]"']/g,'').trim();
+  const bizList=()=>{try{return Array.isArray(businesses)?businesses:[]}catch(e){return[]}};
+  const saveNow=()=>{try{if(typeof save==='function')save()}catch(e){}};
+  function fmt(v){ if(!v) return '—'; const d=new Date(v); if(isNaN(d.getTime())) return String(v).slice(0,19).replace('T',' '); return d.toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  function fmtShort(v){ if(!v) return ''; const d=new Date(v); if(isNaN(d.getTime())) return String(v).slice(0,16).replace('T',' '); const same=d.toDateString()===new Date().toDateString(); return same?d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString([], {month:'short',day:'numeric'})+' '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+  function inRange(v, range){
+    if(range==='all') return true;
+    if(!v) return false;
+    const d=new Date(v); if(isNaN(d.getTime())) return false;
+    const now=new Date();
+    const startToday=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+    const t=d.getTime();
+    if(range==='today') return t>=startToday;
+    if(range==='yesterday') return t>=startToday-86400000 && t<startToday;
+    if(range==='7days') return t>=Date.now()-7*86400000;
+    if(range==='1month') return t>=Date.now()-31*86400000;
+    return true;
+  }
+  function statusOf(b){return norm(b&&(b.status||b.emailStatus))||'pending'}
+  function sentAtOf(b){return b&&(b.sentAt||b.contactedAt||b.lastSentAt||b.contacted_at||'')}
+  function senderOf(b){return parseEmail(b&&(b.emailUsedToContact||b.contactedByEmail||b.lastContactedByEmail||b.sentFromEmail||b.replyTrackingGmail||b.gmailUsed||b.sentBy||b.senderEmail||b.actualSender||b.gmailAccount||b.fromEmail))}
+  const bounceRx=/mail delivery subsystem|mailer-daemon|delivery status notification|address not found|your message was not sent|you have reached a limit for sending mail|delivery incomplete|undeliverable|returned mail|message blocked|quota exceeded|recipient address rejected|550 |554 |blocked|bounce/i;
+  function isBounceObj(x){ return bounceRx.test(String((x&&x.body)||'')+' '+String((x&&x.subject)||'')+' '+String((x&&x.replyFrom)||'')+' '+String((x&&x.from)||'')+' '+String((x&&x.type)||'')); }
+  function replyItems(b){
+    const out=[];
+    arr(b&&b.replyHistory).forEach(r=>{ if(!isBounceObj(r)) out.push(r); });
+    if(!out.length && b && (b.theirReply||b.repliedAt||b.lastReplyAt) && !isBounceObj({body:b.theirReply,subject:b.replySubject,replyFrom:b.replyFrom})){
+      out.push({body:b.theirReply||'',subject:b.replySubject||'',replyFrom:b.replyFrom||'',receivedAt:b.repliedAt||b.lastReplyAt||'',gmailAccount:b.replyTrackingGmail||b.replyFromAccount||senderOf(b)});
+    }
+    return out;
+  }
+  function bounceItems(b){
+    const out=[];
+    arr(b&&b.replyHistory).forEach(r=>{ if(isBounceObj(r)) out.push(r); });
+    arr(b&&b.bounces).forEach(r=>out.push(r));
+    if((b&&b.bounceType)||/bounce|delivery|limit|invalid|address not found|not sent/i.test(String((b&&b.emailStatus)||'')+' '+String((b&&b.bounceReason)||''))) out.push({at:b.bouncedAt||b.updatedAt||b.sentAt||'', reason:b.bounceReason||b.emailStatus||b.bounceType||'Delivery notice'});
+    return out;
+  }
+  function latestReply(b){ const items=replyItems(b).slice().sort((a,b)=>new Date(a.receivedAt||a.at||0)-new Date(b.receivedAt||b.at||0)); return items[items.length-1]||null; }
+  function shortEmail(v){v=parseEmail(v); if(!v)return''; if(v.length<=30)return v; const [u,d]=v.split('@'); return (u&&d)?((u.length>12?u.slice(0,12)+'…':u)+'@'+d):v.slice(0,27)+'…';}
+  function normalizeContactTags(){
+    let changed=false;
+    bizList().forEach(b=>{
+      const sender=senderOf(b), sentAt=sentAtOf(b);
+      if(sender){ ['emailUsedToContact','contactedByEmail','lastContactedByEmail','sentFromEmail','gmailUsed','sentBy'].forEach(k=>{if(!b[k]){b[k]=sender;changed=true;}}); }
+      if(sentAt){ ['sentAt','contactedAt'].forEach(k=>{if(!b[k]){b[k]=sentAt;changed=true;}}); }
+      arr(b.replyHistory).forEach(r=>{ if(!r.gmailAccount && (b.replyTrackingGmail||sender)){r.gmailAccount=b.replyTrackingGmail||sender;changed=true;} if(!r.trackedThroughEmail && r.gmailAccount){r.trackedThroughEmail=r.gmailAccount;changed=true;} if(!r.receivedAt && (b.repliedAt||b.lastReplyAt)){r.receivedAt=b.repliedAt||b.lastReplyAt;changed=true;} });
+    });
+    if(changed) saveNow();
+  }
+  function cleanSchedules(){
+    const key='scout_scheduled_batches_v62';
+    const list=safeJson(localStorage.getItem(key),[]);
+    if(!Array.isArray(list)) return;
+    const keep=list.filter(s=>!['completed','cancelled','done','sent'].includes(norm(s.status)));
+    if(keep.length!==list.length) localStorage.setItem(key, JSON.stringify(keep));
+  }
+  function activeSchedulesHtml(){
+    cleanSchedules();
+    const list=safeJson(localStorage.getItem('scout_scheduled_batches_v62'),[]).filter(s=>!['completed','cancelled','done','sent'].includes(norm(s.status))).sort((a,b)=>new Date(a.runAt)-new Date(b.runAt));
+    if(!list.length) return '<div class="v73-muted">No active schedules.</div>';
+    return list.slice(0,8).map(s=>`<div class="v73-row"><div><b>${esc(fmt(s.runAt))}</b><span>${esc(s.limit||0)} from ${esc(shortEmail(s.senderEmail||s.senderKey||'Gmail'))}</span></div><em>${esc(s.status||'scheduled')}</em></div>`).join('');
+  }
+  function activityHtml(){
+    const logs=safeJson(localStorage.getItem('scout_send_activity_log_v63'),[]).slice(-12).reverse();
+    if(!logs.length) return '<div class="v73-muted">No recent activity.</div>';
+    return logs.map(x=>`<div class="v73-row"><div><b>${esc(fmt(x.at))}</b><span>${esc((x.type||'activity') + (x.email?' · '+x.email:''))}</span></div><em>${esc(shortEmail(x.senderEmail||x.sender||''))}</em></div>`).join('');
+  }
+  function metric(range){
+    const all=bizList();
+    const sent=all.filter(b=>inRange(sentAtOf(b),range));
+    const replies=all.filter(b=>replyItems(b).some(r=>inRange(r.receivedAt||r.at||b.repliedAt||b.lastReplyAt,range)));
+    const bounces=all.filter(b=>bounceItems(b).some(r=>inRange(r.at||r.receivedAt||b.bouncedAt||b.sentAt,range)));
+    const contactedNoReply=all.filter(b=>sentAtOf(b)&&!replyItems(b).length&&!bounceItems(b).length);
+    const follow=all.filter(b=>/follow/.test(statusOf(b)) || (sentAtOf(b)&&!replyItems(b).length&&!bounceItems(b).length && (Date.now()-new Date(sentAtOf(b)).getTime()>3*86400000)));
+    const ready=all.filter(b=>['ready','ready_to_send'].includes(statusOf(b)) || b.readyToSend===true);
+    return {all,sent,replies,bounces,contactedNoReply,follow,ready};
+  }
+  function card(label,num,sub,cls){return `<div class="v73-card"><div>${esc(label)}</div><strong class="${cls||''}">${esc(num)}</strong><span>${esc(sub||'')}</span></div>`}
+  function topTemplates(range){
+    const map=new Map();
+    bizList().forEach(b=>{
+      const sent=sentAtOf(b); if(!inRange(sent,range)) return;
+      const key=b.sentTemplateId||b.sentTemplateName||b.templateName||b.subjectSent||'Unknown message';
+      const label=b.sentTemplateName||b.templateName||b.subjectSent||key;
+      if(!map.has(key)) map.set(key,{label,sent:0,replies:0,bounces:0});
+      const row=map.get(key); row.sent++;
+      if(replyItems(b).length) row.replies++;
+      if(bounceItems(b).length) row.bounces++;
+    });
+    const rows=[...map.values()].sort((a,b)=>(b.replies/b.sent||0)-(a.replies/a.sent||0)||b.sent-a.sent).slice(0,5);
+    if(!rows.length)return '<div class="v73-muted">No sent template data yet.</div>';
+    return rows.map(r=>`<div class="v73-row"><div><b>${esc(r.label)}</b><span>${r.sent} sent · ${r.replies} real replies · ${r.bounces} notices</span></div><em>${r.sent?Math.round((r.replies/r.sent)*100):0}%</em></div>`).join('');
+  }
+  function gmailUsedHtml(range){
+    const map=new Map();
+    bizList().forEach(b=>{
+      const sent=sentAtOf(b); if(!inRange(sent,range)) return;
+      const sender=senderOf(b)||'Unknown Gmail';
+      if(!map.has(sender)) map.set(sender,{sent:0,replies:0,bounces:0});
+      const row=map.get(sender); row.sent++;
+      if(replyItems(b).length) row.replies++;
+      if(bounceItems(b).length) row.bounces++;
+    });
+    const rows=[...map.entries()].sort((a,b)=>b[1].sent-a[1].sent).slice(0,8);
+    if(!rows.length)return '<div class="v73-muted">No Gmail sender data yet.</div>';
+    return rows.map(([email,r])=>`<div class="v73-row"><div><b>${esc(shortEmail(email))}</b><span>${r.sent} sent · ${r.replies} replies · ${r.bounces} notices</span></div><em>${r.sent?Math.round((r.replies/r.sent)*100):0}%</em></div>`).join('');
+  }
+  function renderDashboard(){
+    const panel=q('dashboard-content'); if(!panel) return;
+    const range=q('dash-range-v73')?.value||localStorage.getItem('scout_dashboard_range')||'today'; localStorage.setItem('scout_dashboard_range',range);
+    cleanSchedules(); normalizeContactTags();
+    const c=metric(range);
+    panel.classList.add('v73-dashboard-panel');
+    panel.innerHTML=`<div id="${ROOT}">
+      <div class="v73-head"><div><h2>📊 Dashboard</h2><p>One dashboard only. Real prospect replies and delivery notices are separated.</p></div><div class="v73-actions"><select id="dash-range-v73" class="as-input" onchange="window.renderScoutDashboard()"><option value="today" ${range==='today'?'selected':''}>Today</option><option value="yesterday" ${range==='yesterday'?'selected':''}>Yesterday</option><option value="7days" ${range==='7days'?'selected':''}>Last 7 days</option><option value="1month" ${range==='1month'?'selected':''}>Last 1 month</option><option value="all" ${range==='all'?'selected':''}>All time</option></select><button class="topbar-btn" onclick="window.v73CleanDashboardData();window.renderScoutDashboard()">Clean</button><button class="topbar-btn" onclick="window.renderScoutDashboard()">Refresh</button></div></div>
+      <div class="v73-grid v73-metrics">${card('Messages sent',c.sent.length,'Confirmed contacted','ok')}${card('Real responses',c.replies.length,'Prospect replies only','accent')}${card('Delivery notices',c.bounces.length,'Not responses','warn')}${card('Contacted no reply',c.contactedNoReply.length,'Follow-up pool','')}${card('Follow-up due',c.follow.length,'Needs next touch','warn')}${card('Ready to Send',c.ready.length,'Available contacts','ok')}</div>
+      <div class="v73-grid"><div class="as-card"><h3>Top 5 Messages</h3>${topTemplates(range)}</div><div class="as-card"><h3>Gmail Used Per Contact</h3>${gmailUsedHtml(range)}</div></div>
+      <div class="v73-grid"><div class="as-card"><h3>Live Activity Log</h3>${activityHtml()}</div><div class="as-card"><h3>Active Schedule Status</h3>${activeSchedulesHtml()}</div></div>
+    </div>`;
+  }
+  window.renderScoutDashboard=renderDashboard;
+  window.renderDashboardStable=renderDashboard;
+  window.v73CleanDashboardData=function(){ cleanSchedules(); normalizeContactTags(); try{ if(window.v68CleanFalseReplies) window.v68CleanFalseReplies(false); }catch(e){} };
+  function dashboardGuard(){ const panel=q('dashboard-content'); if(!panel) return; if(panel.classList.contains('active') && !q(ROOT)) renderDashboard(); }
+  function installObserver(){ const panel=q('dashboard-content'); if(!panel||panel.__v73obs)return; panel.__v73obs=true; const obs=new MutationObserver(()=>{ if(panel.__v73rendering)return; if(!q(ROOT)){ panel.__v73rendering=true; setTimeout(()=>{renderDashboard(); panel.__v73rendering=false;},0); } }); obs.observe(panel,{childList:true,subtree:false}); }
+  function patchNav(){
+    const old=window.showContentTab; if(typeof old==='function'&&!old.__v73){ window.showContentTab=function(id,el){ const out=old.apply(this,arguments); if(id==='dashboard-content') setTimeout(renderDashboard,0); return out; }; window.showContentTab.__v73=true; }
+    const oldM=window.showTabMobile; if(typeof oldM==='function'&&!oldM.__v73){ window.showTabMobile=function(id,el){ const out=oldM.apply(this,arguments); if(id==='dashboard'||id==='dashboard-content') setTimeout(renderDashboard,0); return out; }; window.showTabMobile.__v73=true; }
+  }
+  const css=document.createElement('style'); css.textContent=`
+    #dashboard-content.v73-dashboard-panel{overflow:auto!important;height:100%!important;min-height:0!important;padding:0!important;display:flex!important;flex-direction:column!important;}
+    #dashboard-content.v73-dashboard-panel > *:not(#${ROOT}){display:none!important;visibility:hidden!important;height:0!important;overflow:hidden!important;}
+    #${ROOT}{padding:18px;max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:14px;width:100%;box-sizing:border-box;min-height:100%;}
+    #${ROOT} .v73-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;}
+    #${ROOT} h2{font-size:18px;font-weight:950;margin:0 0 4px 0;}
+    #${ROOT} p{font-size:12px;color:var(--muted);margin:0;}
+    #${ROOT} .v73-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    #${ROOT} .v73-actions select{width:150px;}
+    #${ROOT} .v73-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;}
+    #${ROOT} .v73-metrics{grid-template-columns:repeat(auto-fit,minmax(145px,1fr));}
+    #${ROOT} .v73-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px;box-shadow:var(--shadow-sm);}
+    #${ROOT} .v73-card div{font-size:11px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.35px;}
+    #${ROOT} .v73-card strong{display:block;font-size:25px;font-weight:950;line-height:1;margin:7px 0;color:var(--text);}
+    #${ROOT} .v73-card strong.ok{color:var(--green)} #${ROOT} .v73-card strong.warn{color:var(--amber)} #${ROOT} .v73-card strong.accent{color:var(--accent)}
+    #${ROOT} .v73-card span,#${ROOT} .v73-muted{font-size:11px;color:var(--muted);}
+    #${ROOT} .v73-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);min-width:0;}
+    #${ROOT} .v73-row:last-child{border-bottom:none;}
+    #${ROOT} .v73-row div{min-width:0;}
+    #${ROOT} .v73-row b{display:block;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+    #${ROOT} .v73-row span{display:block;font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    #${ROOT} .v73-row em{font-style:normal;font-size:11px;color:var(--accent);flex-shrink:0;}
+  `; document.head.appendChild(css);
+  function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent=VERSION; document.title='Scout App v73'; }
+  function init(){ patchVersion(); patchNav(); installObserver(); cleanSchedules(); normalizeContactTags(); if(q('dashboard-content')?.classList.contains('active')) renderDashboard(); setInterval(()=>{cleanSchedules();dashboardGuard();},4000); }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
+})();
+</script>
+
 </body>
 </html>
