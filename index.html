@@ -1,6 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script id="scout-v75-early-guard">
+(function(){
+  window.__SCOUT_V75__ = { intervalIds: [], blockedIntervals: 0 };
+  var nativeSetInterval = window.setInterval.bind(window);
+  window.setInterval = function(fn, delay){
+    var src = '';
+    try { src = String(fn || ''); } catch(e) {}
+    var d = Number(delay || 0);
+    // Block old UI repaint loops that caused dashboard flicker/resource drain.
+    var noisy = /renderSchedulesV63|renderSchedules\(|renderSelectedGmailOptions|enhanceQueueItems|compactCopy|setBounds/.test(src);
+    if (noisy && d && d < 30000) {
+      window.__SCOUT_V75__.blockedIntervals++;
+      return 0;
+    }
+    var id = nativeSetInterval.apply(window, arguments);
+    window.__SCOUT_V75__.intervalIds.push(id);
+    return id;
+  };
+})();
+</script>
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
@@ -8,8 +29,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Scout App">
 <meta name="theme-color" content="#0d0f14">
-<link rel="manifest" href="manifest.json">
-<title>Scout App v74</title>
+<title>Scout App - v7.5</title>
 <style>
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
@@ -426,7 +446,7 @@ body{
 <!-- TOP BAR -->
 <div id="topbar">
   <span id="topbar-logo">🧭 Scout App</span>
-  <span id="topbar-title">Scout App v74 — Dashboard + Reply Sender Fix</span>
+  <span id="topbar-title">Scout App - v7.5</span>
   <button class="topbar-btn" onclick="showTab('upload')">📁 Upload List</button>
   <button class="topbar-btn" onclick="showTab('verify')">🧪 Verify</button>
   <button class="topbar-btn" onclick="showTab('autoscout')">🤖 Auto-Scout</button>
@@ -11907,6 +11927,313 @@ function manualPollReplies() {
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot); else boot();
   setTimeout(boot,500);
+})();
+</script>
+
+
+<script id="scout-v75-final-stabilizer">
+(function(){
+  'use strict';
+  const APP_NAME = 'Scout App - v7.5';
+  const DB_NAME = 'scout_app_local_db_v43';
+  const STORE = 'leads';
+  const PAGE_SIZE = 30;
+  let lastDashboardRender = 0;
+  let dashboardRange = localStorage.getItem('scout_dashboard_range') || 'today';
+  let queueLimit = PAGE_SIZE;
+
+  const $ = id => document.getElementById(id);
+  const $$ = sel => Array.from(document.querySelectorAll(sel));
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const norm = s => String(s || '').trim().toLowerCase();
+  const arr = v => Array.isArray(v) ? v : [];
+  const nowIso = () => new Date().toISOString();
+  const fmt = v => { if(!v) return ''; const d = new Date(v); return isNaN(d) ? '' : d.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}); };
+  const emailOf = b => norm(b && (b.email || b.best_email || b.bestEmail || (Array.isArray(b.emails) ? b.emails[0] : ''))).replace(/^mailto:/,'');
+  const statusOf = b => norm(b && b.status || 'pending');
+  const sentAtOf = b => b?.sentAt || b?.contactedAt || b?.lastContactedAt || b?.gmailSentAt || b?.sent_time || '';
+  const senderOf = b => b?.emailUsedToContact || b?.contactedByEmail || b?.lastContactedByEmail || b?.sentFromEmail || b?.gmailUsed || b?.senderEmail || b?.sentBy || b?.replyTrackingGmail || '';
+  const replyAtOf = b => b?.lastRealReplyAt || b?.lastReplyAt || b?.repliedAt || b?.replyReceivedAt || '';
+  const replyAccountOf = b => b?.replyTrackingGmail || b?.replyFromAccount || b?.gmailUsed || senderOf(b) || '';
+  function isDeliveryNoticeText(t){ t=norm(t); return /mailer-daemon|mail delivery subsystem|delivery status notification|address not found|message wasn't delivered|message was not sent|you have reached a limit|recipient address rejected|undeliverable|delivery failure/.test(t); }
+  function realReplies(b){
+    const sent = sentAtOf(b) ? new Date(sentAtOf(b)).getTime() : 0;
+    const all = [];
+    if (Array.isArray(b?.replyHistory)) all.push(...b.replyHistory);
+    if (b?.theirReply || b?.repliedAt) all.push({ body:b.theirReply||'', receivedAt:b.repliedAt||b.lastReplyAt, replyFrom:b.replyFrom||'', gmailAccount:replyAccountOf(b), subject:b.replySubject||'' });
+    return all.filter(r => {
+      const text = [r.body,r.subject,r.replyFrom,r.from].join(' ');
+      if (isDeliveryNoticeText(text)) return false;
+      const t = r.receivedAt || r.date || r.at || r.createdAt;
+      if (sent && t && new Date(t).getTime() <= sent) return false;
+      return true;
+    }).sort((a,b)=> new Date(a.receivedAt||a.date||a.at||0) - new Date(b.receivedAt||b.date||b.at||0));
+  }
+  function hasRealReply(b){ return realReplies(b).length > 0 || statusOf(b)==='replied'; }
+  function isNoInbox(b){ const s=statusOf(b); const blob = [s,b?.bounceReason,b?.deliveryNotice,b?.replySubject,b?.theirReply].join(' '); return s==='no_inbox'||s==='no_inbox_found'||s==='invalid_recipient'||(/address not found|mailer-daemon|delivery status notification/i.test(blob)&&!hasRealReply(b)); }
+  function getBusinesses(){ try { if (Array.isArray(businesses)) return businesses; } catch(e){} return Array.isArray(window.businesses) ? window.businesses : []; }
+  function setBusinesses(list){
+    list = Array.isArray(list) ? list : [];
+    try { businesses = list; } catch(e) {}
+    window.businesses = list;
+    try { localStorage.setItem('sv13_businesses_meta', JSON.stringify({ count:list.length, updatedAt:nowIso(), storage:'indexeddb' })); } catch(e){}
+    return list;
+  }
+  function openDb(){
+    return new Promise((resolve,reject)=>{
+      if(!window.indexedDB) return reject(new Error('IndexedDB unavailable'));
+      const req = indexedDB.open(DB_NAME);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+    });
+  }
+  async function loadFromIndexedDb(force){
+    const current = getBusinesses();
+    if (!force && current.length) return current;
+    try {
+      const db = await openDb();
+      const storeName = db.objectStoreNames.contains(STORE) ? STORE : db.objectStoreNames[0];
+      if (!storeName) return current;
+      const leads = await new Promise((resolve,reject)=>{
+        const tx = db.transaction([storeName], 'readonly');
+        const req = tx.objectStore(storeName).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error || new Error('IndexedDB read failed'));
+      });
+      if (leads && leads.length) {
+        leads.sort((a,b)=>String(b.updatedAt||b.addedAt||b.contactedAt||'').localeCompare(String(a.updatedAt||a.addedAt||a.contactedAt||'')));
+        setBusinesses(leads);
+        return leads;
+      }
+    } catch(e) { console.warn('[Scout App - v7.5] IndexedDB load warning:', e); }
+    return current;
+  }
+
+  function lockVersion(){
+    document.title = APP_NAME;
+    const logo = $('topbar-logo'); if (logo) logo.textContent = '🫐 Scout App';
+    const title = $('topbar-title'); if (title && title.textContent !== APP_NAME) title.textContent = APP_NAME;
+  }
+  function unregisterOldServiceWorker(){
+    try { document.querySelectorAll('link[rel="manifest"]').forEach(n => n.remove()); } catch(e){}
+    try { if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(()=>{}); } catch(e){}
+  }
+  function ensureCss(){
+    if ($('scout-v75-css')) return;
+    const css = document.createElement('style'); css.id='scout-v75-css';
+    css.textContent = `
+      #topbar > button.topbar-btn{display:none!important}
+      #topbar{min-height:56px!important}
+      #content{min-width:0!important;overflow:hidden!important}
+      .tab-panel{min-height:0!important;overflow:hidden!important}
+      .tab-panel.active{display:flex!important}
+      #dashboard-content{overflow:auto!important;height:100%!important;min-height:0!important;padding:0!important;display:none;flex-direction:column!important}
+      #dashboard-content.active{display:flex!important}
+      #dashboard-content > *:not(#scout-v75-dashboard-root){display:none!important;visibility:hidden!important;height:0!important;max-height:0!important;overflow:hidden!important;margin:0!important;padding:0!important}
+      #detail-panel{overflow:auto!important;min-height:0!important;height:100%!important;padding-bottom:80px!important}
+      #queue-list{min-height:0!important;overflow:auto!important}
+      .v75-kpi{background:var(--card,#171a24);border:1px solid var(--border,#262b3d);border-radius:14px;padding:14px;min-height:92px}
+      .v75-kpi .lbl{font-size:11px;color:var(--muted,#8b93b3);text-transform:uppercase;font-weight:800;letter-spacing:.4px}
+      .v75-kpi .num{font-size:28px;font-weight:950;margin-top:8px;color:var(--text,#fff)}
+      .v75-card{background:var(--card,#171a24);border:1px solid var(--border,#262b3d);border-radius:14px;padding:14px;min-width:0}
+      .v75-card h3{margin:0 0 10px;font-size:14px;color:var(--text,#fff)}
+      .v75-row{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--border,#262b3d);padding:8px 0;font-size:12px}
+      .v75-row:last-child{border-bottom:none}
+      .v75-muted{color:var(--muted,#8b93b3);font-size:12px;line-height:1.5}
+      .v75-tag{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border,#262b3d);background:rgba(255,255,255,.03);border-radius:8px;padding:3px 7px;font-size:10px;color:var(--muted,#8b93b3);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .qi .v75-contact-tags{display:flex;flex-direction:column;gap:4px;margin-top:7px;min-width:0}
+      .v75-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.v75-actions .topbar-btn{display:inline-flex!important}
+      .upload-zone p,.as-card p,.settings-card p,#verify-send-panel>div>p,#email-scout-content .as-card>p,#dorking-content .as-card>p{display:none!important}
+    `;
+    document.head.appendChild(css);
+  }
+  function ensureDashboard(){
+    const nav = $('nav-tabs');
+    if (nav && !$('tab-dashboard')) {
+      const t=document.createElement('div'); t.className='nav-tab'; t.id='tab-dashboard'; t.textContent='📊 Dashboard';
+      t.onclick=function(){ activateTab('dashboard-content','tab-dashboard',true); };
+      nav.insertBefore(t, nav.firstChild);
+    }
+    const content = $('content');
+    if (content && !$('dashboard-content')) {
+      const p=document.createElement('div'); p.className='tab-panel'; p.id='dashboard-content'; p.style.overflow='auto';
+      const first = $('detail'); content.insertBefore(p, first || content.firstChild);
+    }
+  }
+  function activateTab(panelId, tabId, forceDash){
+    $$('.tab-panel').forEach(p => p.classList.remove('active'));
+    $$('.nav-tab').forEach(t => t.classList.remove('active'));
+    const p = $(panelId); if (p) p.classList.add('active');
+    const t = $(tabId); if (t) t.classList.add('active');
+    if (panelId === 'dashboard-content') renderDashboard(true);
+    if (panelId === 'timeline-content') renderTimeline();
+  }
+  function patchNavigation(){
+    const oldShowContent = window.showContentTab;
+    window.showContentTab = function(id, el){
+      const map={dashboard:'dashboard-content',detail:'detail','business':'detail',upload:'upload-content',send:'email-scout-content',emailscout:'email-scout-content',verify:'verify-send-content',autoscout:'autoscout-content',timeline:'timeline-content',settings:'settings-content',batch:'batch-content',review:'batch-content',dorking:'dorking-content'};
+      const panelId = map[id] || id;
+      const tabMap={'dashboard-content':'tab-dashboard','detail':'tab-detail','upload-content':'tab-upload','email-scout-content':'tab-emailscout','verify-send-content':'tab-verify','autoscout-content':'tab-autoscout','timeline-content':'tab-timeline','settings-content':'tab-settings','batch-content':'tab-batch','dorking-content':'tab-dorking'};
+      activateTab(panelId, (el && el.id) || tabMap[panelId], true);
+      return false;
+    };
+    window.showTab = function(name){ return window.showContentTab(name); };
+    window.showTabMobile = function(id, el){ return window.showContentTab(id, el); };
+  }
+
+  function withinRange(dt, range){
+    if (!dt) return range === 'all';
+    const d = new Date(dt); if (isNaN(d)) return range === 'all';
+    const now = new Date();
+    const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startYesterday = new Date(startToday.getTime() - 864e5);
+    if (range === 'today') return d >= startToday;
+    if (range === 'yesterday') return d >= startYesterday && d < startToday;
+    if (range === '7days') return d >= new Date(now.getTime() - 7*864e5);
+    if (range === '1month') return d >= new Date(now.getTime() - 30*864e5);
+    return true;
+  }
+  function metrics(range){
+    const all = getBusinesses();
+    const sent = all.filter(b => sentAtOf(b) && !isNoInbox(b) && withinRange(sentAtOf(b), range));
+    const replies = all.filter(b => realReplies(b).some(r => withinRange(r.receivedAt||r.date||r.at, range)));
+    const noInbox = all.filter(b => isNoInbox(b));
+    const contactedNoReply = all.filter(b => sentAtOf(b) && !isNoInbox(b) && !hasRealReply(b));
+    const follow = all.filter(b => /follow/.test(statusOf(b)) || (sentAtOf(b) && !isNoInbox(b) && !hasRealReply(b) && (Date.now() - new Date(sentAtOf(b)).getTime()) > 48*3600*1000));
+    const ready = all.filter(b => ['ready_to_send','ready'].includes(statusOf(b)));
+    return {all,sent,replies,noInbox,contactedNoReply,follow,ready};
+  }
+  function kpi(label, n, sub){ return `<div class="v75-kpi"><div class="lbl">${esc(label)}</div><div class="num">${Number(n||0).toLocaleString()}</div><div class="v75-muted">${esc(sub||'')}</div></div>`; }
+  function topMessages(all, range){
+    const map = new Map();
+    all.forEach(b => {
+      const key = b.sentTemplateName || b.templateName || (b.sentTemplateIndex != null ? 'Message '+(Number(b.sentTemplateIndex)+1) : 'Message 1');
+      if (!map.has(key)) map.set(key, {sent:0,replies:0,notices:0});
+      const m = map.get(key);
+      if (sentAtOf(b) && withinRange(sentAtOf(b), range)) m.sent++;
+      const rr = realReplies(b).filter(r => withinRange(r.receivedAt||r.date||r.at, range)).length; m.replies += rr;
+      if (isNoInbox(b)) m.notices++;
+    });
+    return Array.from(map.entries()).sort((a,b)=>(b[1].replies/(b[1].sent||1))-(a[1].replies/(a[1].sent||1))).slice(0,5);
+  }
+  function senders(all, range){
+    const map = new Map();
+    all.forEach(b => { const s = senderOf(b); if(!s || !sentAtOf(b) || !withinRange(sentAtOf(b), range)) return; if(!map.has(s)) map.set(s,{sent:0,replies:0,noInbox:0}); const m=map.get(s); m.sent++; if(hasRealReply(b))m.replies++; if(isNoInbox(b))m.noInbox++; });
+    return Array.from(map.entries()).sort((a,b)=>b[1].sent-a[1].sent).slice(0,10);
+  }
+  function activityRows(){
+    try { return arr(JSON.parse(localStorage.getItem('scout_send_activity_log_v63')||'[]')).slice(-10).reverse(); } catch(e) { return []; }
+  }
+  function scheduleRows(){
+    let rows=[]; try { rows=arr(JSON.parse(localStorage.getItem('scout_scheduled_batches_v62')||'[]')); } catch(e) {}
+    const active=rows.filter(s=>!['completed','done','sent','cancelled','failed'].includes(norm(s.status)) && (!s.runAt || new Date(s.runAt).getTime() > Date.now()-10*60*1000)).slice(0,10);
+    if (active.length !== rows.length) { try { localStorage.setItem('scout_scheduled_batches_v62', JSON.stringify(active)); } catch(e){} }
+    return active;
+  }
+  function renderDashboard(force){
+    const panel = $('dashboard-content'); if (!panel) return;
+    if (!panel.classList.contains('active') && !force) return;
+    const t = Date.now(); if (!force && t - lastDashboardRender < 30000) return; lastDashboardRender = t;
+    const range = dashboardRange || 'today'; localStorage.setItem('scout_dashboard_range', range);
+    const c = metrics(range);
+    const top = topMessages(c.all, range);
+    const snd = senders(c.all, range);
+    const logs = activityRows();
+    const schedules = scheduleRows();
+    panel.innerHTML = `<div id="scout-v75-dashboard-root" style="padding:18px;max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:14px;width:100%;box-sizing:border-box;">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><h2 style="font-size:20px;font-weight:950;margin:0 0 4px">📊 Dashboard</h2><div class="v75-muted">One lightweight dashboard. Real replies only. Delivery/no-inbox notices are separate.</div></div><div class="v75-actions"><button class="topbar-btn ${range==='today'?'primary':''}" onclick="window.v75SetDashboardRange('today')">Today</button><button class="topbar-btn ${range==='yesterday'?'primary':''}" onclick="window.v75SetDashboardRange('yesterday')">Yesterday</button><button class="topbar-btn ${range==='7days'?'primary':''}" onclick="window.v75SetDashboardRange('7days')">Last 7 days</button><button class="topbar-btn ${range==='1month'?'primary':''}" onclick="window.v75SetDashboardRange('1month')">Last 1 month</button><button class="topbar-btn ${range==='all'?'primary':''}" onclick="window.v75SetDashboardRange('all')">All time</button><button class="topbar-btn" onclick="window.v75RefreshNow()">Refresh</button></div></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px">${kpi('Actual contacted',c.sent.length,'Inbox contacts only')}${kpi('Real responses',c.replies.length,'Prospect replies')}${kpi('No inbox',c.noInbox.length,'Bounce / delivery failure')}${kpi('Contacted no reply',c.contactedNoReply.length,'Follow-up pool')}${kpi('Follow-up due',c.follow.length,'Needs next touch')}${kpi('Ready to send',c.ready.length,'Strict ready only')}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px"><div class="v75-card"><h3>Top 5 Messages</h3>${top.length?top.map(([name,m])=>`<div class="v75-row"><div><strong>${esc(name)}</strong><div class="v75-muted">${m.sent} sent · ${m.replies} replies · ${m.notices} notices</div></div><strong>${m.sent?Math.round(m.replies/m.sent*100):0}%</strong></div>`).join(''):'<div class="v75-muted">No message data yet.</div>'}</div><div class="v75-card"><h3>Gmail Used Per Contact</h3>${snd.length?snd.map(([name,m])=>`<div class="v75-row"><div><strong>${esc(name)}</strong><div class="v75-muted">${m.sent} sent · ${m.replies} replies · ${m.noInbox} no inbox</div></div><strong>${m.sent?Math.round(m.replies/m.sent*100):0}%</strong></div>`).join(''):'<div class="v75-muted">No sender data yet.</div>'}</div></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px"><div class="v75-card"><h3>Live Activity Log</h3>${logs.length?logs.map(l=>`<div class="v75-row"><div><strong>${esc(l.type||'activity')}</strong><div class="v75-muted">${esc(l.email||l.to||l.message||l.reason||'')}</div></div><span class="v75-muted">${esc(fmt(l.at||l.time||l.createdAt))}</span></div>`).join(''):'<div class="v75-muted">Use Send Message / Check Replies for detailed logs.</div>'}</div><div class="v75-card"><h3>Active Schedule Status</h3>${schedules.length?schedules.map(s=>`<div class="v75-row"><div><strong>${esc(s.senderEmail||s.gmail||s.account||'Scheduled batch')}</strong><div class="v75-muted">${esc(s.limit||s.batchLimit||'')} contacts · ${esc(s.status||'pending')}</div></div><span class="v75-muted">${esc(fmt(s.runAt||s.time||s.scheduledAt))}</span></div>`).join(''):'<div class="v75-muted">No active schedules.</div>'}</div></div>
+    </div>`;
+  }
+  window.v75SetDashboardRange = function(r){ dashboardRange=r; renderDashboard(true); };
+  window.v75RefreshNow = function(){ loadFromIndexedDb(true).then(()=>{ renderQueue(); renderDashboard(true); }); };
+  window.renderScoutDashboard = renderDashboard;
+  window.renderDashboardStable = renderDashboard;
+
+  function matchesFilter(b, filter){
+    const s = statusOf(b); const src=norm(b.source||b.leadSource||''); const q=norm($('qp-search')?.value || '');
+    if (q) { const hay=[b.name,b.businessName,b.email,b.website,b.category,b.location,b.address].join(' ').toLowerCase(); if(!hay.includes(q)) return false; }
+    if (!filter || filter==='all') return true;
+    if (filter==='ready'||filter==='ready_to_send') return ['ready','ready_to_send'].includes(s);
+    if (filter==='replied'||filter==='replies') return hasRealReply(b) || s==='replied';
+    if (filter==='contacted') return sentAtOf(b) && !isNoInbox(b);
+    if (filter==='followup') return /follow/.test(s) || (sentAtOf(b) && !hasRealReply(b) && !isNoInbox(b));
+    if (filter==='found') return s==='found' || s==='email_found';
+    if (filter==='no_inbox') return isNoInbox(b);
+    if (filter==='no_email') return s==='no_email';
+    if (filter==='pending') return s==='pending';
+    if (filter==='review') return s==='review';
+    if (filter==='risky') return s==='risky';
+    if (filter==='invalid') return s==='invalid';
+    if (filter==='duplicate') return s==='duplicate';
+    if (filter==='blocked') return s==='blocked' || s==='team_scouted';
+    if (filter==='dorking') return /dork|web/.test(src);
+    if (filter==='maps') return /map|google|directory/.test(src);
+    return s===filter;
+  }
+  function statusLabel(b){
+    const s=statusOf(b);
+    if (isNoInbox(b)) return ['No Inbox','s-no_email'];
+    if (hasRealReply(b)) return ['Replied','s-replied'];
+    if (sentAtOf(b)) return ['Contacted','s-contacted'];
+    if (['ready','ready_to_send'].includes(s)) return ['Ready','s-ready'];
+    if (s==='found'||s==='email_found') return ['Email Found','s-found'];
+    return [s.replace(/_/g,' ')||'Pending', 's-'+s];
+  }
+  function contactTags(b){
+    const rows=[];
+    if (sentAtOf(b)) rows.push(`<span class="v75-tag">SENT · ${esc(fmt(sentAtOf(b)))} · ${esc(senderOf(b)||'unknown Gmail')}</span>`);
+    const rr=realReplies(b); if (rr.length){ const last=rr[rr.length-1]; rows.push(`<span class="v75-tag">REPLY · ${esc(fmt(last.receivedAt||last.date||last.at))} · via ${esc(last.gmailAccount||replyAccountOf(b)||'Gmail')}</span>`); }
+    if (isNoInbox(b)) rows.push(`<span class="v75-tag" style="color:var(--amber)">NO INBOX / DELIVERY NOTICE</span>`);
+    return rows.length ? `<div class="v75-contact-tags">${rows.join('')}</div>` : '';
+  }
+  function renderQueue(){
+    const list = $('queue-list'); if (!list) return;
+    const all=getBusinesses();
+    const currentFilter = (typeof queueFilter !== 'undefined' ? queueFilter : (window.queueFilter || 'all')) || 'all';
+    const filtered=all.filter(b=>matchesFilter(b,currentFilter));
+    const show=filtered.slice(0, queueLimit);
+    const stats={ready:0,replies:0,found:0,pending:0,scanning:0,review:0,risky:0,invalid:0,duplicate:0,contacted:0,no_email:0,no_inbox:0};
+    all.forEach(b=>{ const s=statusOf(b); if(['ready','ready_to_send'].includes(s))stats.ready++; if(hasRealReply(b))stats.replies++; if(s==='found'||s==='email_found')stats.found++; if(s==='pending')stats.pending++; if(s==='scanning')stats.scanning++; if(s==='review')stats.review++; if(s==='risky')stats.risky++; if(s==='invalid')stats.invalid++; if(s==='duplicate')stats.duplicate++; if(sentAtOf(b)&&!isNoInbox(b))stats.contacted++; if(s==='no_email')stats.no_email++; if(isNoInbox(b))stats.no_inbox++; });
+    const st=$('qp-stats'); if(st) st.innerHTML = `<span class="qp-stat"><span class="qp-stat-dot" style="color:var(--green)"></span><span class="qp-stat-count">${stats.ready}</span><span class="qp-stat-label">Ready</span></span><span class="qp-stat"><span class="qp-stat-dot" style="color:var(--accent)"></span><span class="qp-stat-count">${stats.replies}</span><span class="qp-stat-label">Replies</span></span><span class="qp-stat"><span class="qp-stat-dot" style="color:var(--green)"></span><span class="qp-stat-count">${stats.found}</span><span class="qp-stat-label">Email Found</span></span><span class="qp-stat"><span class="qp-stat-dot"></span><span class="qp-stat-count">${stats.pending}</span><span class="qp-stat-label">Pending</span></span><span class="qp-stat"><span class="qp-stat-dot" style="color:var(--amber)"></span><span class="qp-stat-count">${stats.review}</span><span class="qp-stat-label">Review</span></span><span class="qp-stat"><span class="qp-stat-dot" style="color:var(--red)"></span><span class="qp-stat-count">${stats.no_inbox}</span><span class="qp-stat-label">No Inbox</span></span>`;
+    if(!all.length){ list.innerHTML='<div id="queue-empty"><div class="icon">📋</div><p>No businesses loaded yet. Your storage is checked automatically; use Upload List if this is a new browser.</p></div>'; return; }
+    if(!show.length){ list.innerHTML='<div id="queue-empty"><div class="icon">🔍</div><p>No matches for this filter.</p></div>'; return; }
+    list.innerHTML = show.map(b=>{ const [label, cls]=statusLabel(b); const active=(typeof activeId!=='undefined' && activeId===b.id)?'active':''; return `<div class="qi ${active}" onclick="selectBiz('${esc(b.id)}')"><div class="qi-name">${esc(b.name||b.businessName||b.domain||'Unnamed business')}</div><div class="qi-meta"><span class="qi-status ${esc(cls)}">${esc(label)}</span>${emailOf(b)?`<span class="qi-email">${esc(emailOf(b))}</span>`:''}</div>${contactTags(b)}</div>`; }).join('') + (filtered.length>show.length?`<button class="topbar-btn" style="margin:8px auto 16px;display:block" onclick="window.v75LoadMoreQueue()">Load more (${filtered.length-show.length} left)</button>`:'');
+  }
+  window.v75LoadMoreQueue=function(){ queueLimit += PAGE_SIZE; renderQueue(); };
+  window.setFilter=function(f, el){ try { queueFilter=f; } catch(e) { window.queueFilter=f; } queueLimit=PAGE_SIZE; $$('#qp-actions .qp-action').forEach(x=>x.classList.remove('active')); if(el)el.classList.add('active'); renderQueue(); };
+  try { renderQueue = window.renderQueue = renderQueue; } catch(e) { window.renderQueue = renderQueue; }
+
+  function selectBizPatched(id){
+    try { activeId = id; } catch(e) { window.activeId = id; }
+    activateTab('detail','tab-detail');
+    try { if (typeof renderDetail === 'function') renderDetail(); } catch(e){ console.warn(e); }
+    renderQueue();
+  }
+  try { selectBiz = window.selectBiz = selectBizPatched; } catch(e) { window.selectBiz = selectBizPatched; }
+
+  function renderTimeline(){
+    const list=$('tl-list'); if(!list)return; const all=getBusinesses().slice();
+    const rows=all.sort((a,b)=>new Date(b.updatedAt||b.contactedAt||b.repliedAt||b.addedAt||0)-new Date(a.updatedAt||a.contactedAt||a.repliedAt||a.addedAt||0)).slice(0,10);
+    list.innerHTML = rows.length ? rows.map(b=>`<div class="tl-item" onclick="selectBiz('${esc(b.id)}')"><span class="qi-status ${esc(statusLabel(b)[1])}">${esc(statusLabel(b)[0])}</span><div class="tl-item-info"><div class="tl-item-name">${esc(b.name||b.businessName||'Unnamed business')}</div><div class="tl-item-meta">${sentAtOf(b)?'Sent '+esc(fmt(sentAtOf(b)))+' · ':''}${replyAtOf(b)?'Reply '+esc(fmt(replyAtOf(b)))+' · ':''}${emailOf(b)?'✉ '+esc(emailOf(b)):''}</div></div></div>`).join('') : '<div style="color:var(--muted);text-align:center;padding:40px">No notifications yet.</div>';
+  }
+  window.renderTimeline = renderTimeline;
+  window.setTlFilter = function(f, el){
+    try { tlFilter = f; } catch(e) { window.tlFilter = f; }
+    document.querySelectorAll('.tl-chip').forEach(x => x.classList.remove('active'));
+    if (el) el.classList.add('active');
+    renderTimeline();
+  };
+
+  function firstBoot(){
+    unregisterOldServiceWorker(); ensureCss(); ensureDashboard(); patchNavigation(); lockVersion();
+    loadFromIndexedDb(true).then(()=>{ renderQueue(); renderDashboard(true); activateTab('dashboard-content','tab-dashboard',true); lockVersion(); setTimeout(()=>{ renderQueue(); lockVersion(); },600); });
+    const title=$('topbar-title'); if(title && !title.__v75lock){ title.__v75lock=true; new MutationObserver(lockVersion).observe(title,{childList:true,characterData:true,subtree:true}); }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', firstBoot); else firstBoot();
+  window.addEventListener('load', () => setTimeout(firstBoot, 250));
 })();
 </script>
 
