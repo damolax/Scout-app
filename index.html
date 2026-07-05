@@ -403,6 +403,7 @@ body{
   .as-big-btn{width:100%}
 }
 
+#v63-dashboard-send-log-card{display:none!important}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -8166,7 +8167,7 @@ function manualPollReplies() {
     if (logo) logo.textContent='🧭 Scout App';
     if (title) title.textContent='v56 — Dashboard + Auto-Scout Diagnostics';
   }
-  function init(){ insertDashboard(); addAutoScoutDiagnosticButton(); patchVersion(); setInterval(()=>{ if (q('dashboard-content')?.classList.contains('active')) renderDashboard(); }, 10000); }
+  function init(){ insertDashboard(); addAutoScoutDiagnosticButton(); patchVersion(); /* v70: old dashboard interval disabled */ }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 </script>
@@ -9860,7 +9861,7 @@ function manualPollReplies() {
       v63RunnerInstalled = true;
       setInterval(runDueSchedulesV63, 15000);
       setInterval(renderSchedulesV63, 6000);
-      setInterval(() => { if (q('dashboard-content')?.classList.contains('active')) injectDashboardActivity(); }, 3000);
+      /* v70: old dashboard live activity injector disabled */
       setTimeout(runDueSchedulesV63, 3000);
     }
   }
@@ -10806,10 +10807,19 @@ function manualPollReplies() {
   function applyRealReply(reply){
     if(isAutomatedDeliveryNotice(reply)) return applyBounceToScout(reply);
     const b=findBizByReply(reply); if(!b) return false;
-    if(statusOf(b)==='replied' && (b.replyGmailMsgId===reply.gmailMsgId || b.gmailMsgId===reply.gmailMsgId)) return false;
+    const history = Array.isArray(b.replyHistory) ? b.replyHistory.slice() : [];
+    const msgId = String(reply.gmailMsgId || reply.id || '');
+    if(msgId && history.some(x => String(x.gmailMsgId || x.id || '') === msgId)) return false;
+    if(statusOf(b)==='replied' && msgId && (b.replyGmailMsgId===msgId || b.gmailMsgId===msgId)) return false;
     const body=String(reply.body||reply.snippet||'').trim();
     if(!body || isAutomatedDeliveryNotice({...reply, theirReply:body})) return applyBounceToScout({...reply, body});
-    patchBiz(b,{ status:'replied', repliedAt:reply.receivedAt||nowIso(), theirReply:body.slice(0,2000), replyClassification:classify(body), suggestedResponse:suggest(b,body), gmailMsgId:reply.gmailMsgId||'', replyGmailMsgId:reply.gmailMsgId||'', gmailThreadId:reply.gmailThreadId||b.gmailThreadId||'', replySubject:reply.subject||'', replyFrom:reply.replyFrom||reply.replyFromHeader||'', replyFromHeader:reply.replyFromHeader||'', replyFromAccount:reply.gmailAccount||'', replyMatchMethod:reply.matchMethod||'', bounceType:'', bounceReason:'', emailStatus:'' });
+    const receivedAt = reply.receivedAt || nowIso();
+    const replyFrom = reply.replyFrom || reply.replyFromHeader || '';
+    const gmailAccount = reply.gmailAccount || b.replyTrackingGmail || senderOf(b) || '';
+    const row = { gmailMsgId: msgId, gmailThreadId: reply.gmailThreadId || b.gmailThreadId || '', receivedAt, body: body.slice(0,2000), subject: reply.subject || '', replyFrom, replyFromHeader: reply.replyFromHeader || '', gmailAccount, matchMethod: reply.matchMethod || '' };
+    history.push(row);
+    history.sort((a,b)=>new Date(a.receivedAt||0)-new Date(b.receivedAt||0));
+    patchBiz(b,{ status:'replied', repliedAt:receivedAt, lastReplyAt:receivedAt, theirReply:body.slice(0,2000), replyHistory:history.slice(-50), replyCount:history.length, replyClassification:classify(body), suggestedResponse:responseBasedSuggestion(body, b), gmailMsgId:msgId, replyGmailMsgId:msgId, gmailThreadId:reply.gmailThreadId||b.gmailThreadId||'', replySubject:reply.subject||'', replyFrom, replyFromHeader:reply.replyFromHeader||'', replyFromAccount:gmailAccount, replyTrackingGmail:gmailAccount, replyMatchMethod:reply.matchMethod||'', bounceType:'', bounceReason:'', emailStatus:'' });
     return true;
   }
   async function pollRepliesV68(options){
@@ -10828,7 +10838,7 @@ function manualPollReplies() {
         safeArr(data.bounces).forEach(b=>{ if(applyBounceToScout(b)){ bounced++; logSafe(`↩ Delivery notice, not a reply: ${b.contactName||b.contactEmail} — ${b.bounceReason||b.bounceType||'delivery failed'}`); } });
       }catch(e){ lastError=e.message||String(e); logSafe(`✗ Reply check error for ${token.email||entry.key||'Gmail'}: ${lastError}`); }
     }
-    saveNow(); renderNow(); renderDashboardStable();
+    saveNow(); renderNow(); if(window.renderScoutDashboard) window.renderScoutDashboard();
     if(real) toastSafe(`📬 ${real} real repl${real>1?'ies':'y'} logged.`, 'ok');
     if(bounced) toastSafe(`↩ ${bounced} delivery notice${bounced>1?'s':''} cleaned/not counted as replies.`, 'warn');
     if(manual && !real && !bounced) toastSafe(lastError?`Reply check error: ${lastError}`:`Reply check complete. No real replies found.`, lastError?'err':'ok');
@@ -10875,16 +10885,15 @@ function manualPollReplies() {
     return `<div style="display:flex;gap:8px;align-items:end;height:180px;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--bg);overflow-x:auto">${days.map(d=>`<div style="min-width:38px;display:flex;flex-direction:column;align-items:center;gap:5px;height:100%;justify-content:end"><div title="Replies ${replyBy[d]}" style="width:12px;height:${Math.max(2,Math.round((replyBy[d]/max)*120))}px;background:var(--accent);border-radius:5px 5px 0 0"></div><div title="Sent ${sentBy[d]}" style="width:12px;height:${Math.max(2,Math.round((sentBy[d]/max)*120))}px;background:var(--green);border-radius:5px 5px 0 0"></div><div style="font-size:9px;color:var(--muted);transform:rotate(-35deg);height:24px;white-space:nowrap">${d.slice(5)}</div></div>`).join('')}</div><div style="display:flex;gap:12px;margin-top:8px;font-size:11px;color:var(--muted)"><span><b style="color:var(--green)">●</b> Sent</span><span><b style="color:var(--accent)">●</b> Real replies</span></div>`;
   }
   function logHtml(){ const rows=activityLog().slice(-12).reverse(); return rows.length?rows.map(r=>`<div style="display:flex;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding:6px 0"><span style="color:var(--faint);font-size:10px;white-space:nowrap">${new Date(r.at||Date.now()).toLocaleString()}</span><span style="font-size:11px;color:${r.type==='sent'?'var(--green)':r.type==='failed'||r.type==='error'?'var(--red)':r.type==='limit_stop'?'var(--amber)':'var(--muted)'};overflow:hidden;text-overflow:ellipsis">${esc(r.message || r.email || r.name || r.reason || r.type)}</span></div>`).join(''):'<div style="font-size:12px;color:var(--muted);padding:8px 0">No send activity yet.</div>'; }
-  function schedulesHtml(){ const list=safeJson(localStorage.getItem('scout_scheduled_batches_v62')||'[]',[])||[]; return list.slice(-8).reverse().map(s=>`<div style="display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding:6px 0"><span style="font-size:11px;color:var(--text)">${esc(new Date(s.runAt).toLocaleString())} · ${esc(s.limit||'')} from ${esc(s.senderEmail||s.senderKey||'Gmail')}</span><span style="font-size:11px;color:var(--muted)">${esc(String(s.status||'scheduled').replace('scheduled_v66','scheduled'))}</span></div>`).join('') || '<div style="font-size:12px;color:var(--muted);padding:8px 0">No scheduled batches.</div>'; }
+  function schedulesHtml(){ const doneRe=/done|complete|completed|sent|finished|cancelled|canceled/i; const list=(safeJson(localStorage.getItem('scout_scheduled_batches_v62')||'[]',[])||[]).filter(s=>!doneRe.test(String(s.status||''))); return list.slice(-8).reverse().map(s=>`<div style="display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding:6px 0"><span style="font-size:11px;color:var(--text)">${esc(new Date(s.runAt).toLocaleString())} · ${esc(s.limit||'')} from ${esc(s.senderEmail||s.senderKey||'Gmail')}</span><span style="font-size:11px;color:var(--muted)">${esc(String(s.status||'scheduled').replace('scheduled_v66','scheduled'))}</span></div>`).join('') || '<div style="font-size:12px;color:var(--muted);padding:8px 0">No scheduled batches.</div>'; }
   function renderDashboardStable(){
     const panel=q('dashboard-content'); if(!panel) return;
     const range=q('dash-range')?.value || localStorage.getItem('scout_dashboard_range') || 'today'; localStorage.setItem('scout_dashboard_range', range);
     const c=countData(range), top=templateStats(range);
     panel.style.overflow='auto';
     panel.innerHTML=`<div style="padding:18px;max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:14px">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div><h2 style="font-size:18px;font-weight:950">📊 Dashboard</h2><p style="font-size:12px;color:var(--muted);margin-top:3px">Real replies only. Delivery failures and Gmail limit notices are not counted as responses.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="dash-range" class="as-input" style="width:150px" onchange="window.renderScoutDashboard()"><option value="today" ${range==='today'?'selected':''}>Today</option><option value="yesterday" ${range==='yesterday'?'selected':''}>Yesterday</option><option value="7days" ${range==='7days'?'selected':''}>Last 7 days</option><option value="1month" ${range==='1month'?'selected':''}>Last 1 month</option><option value="all" ${range==='all'?'selected':''}>All time</option></select><button class="topbar-btn" onclick="window.v68CleanFalseReplies();window.renderScoutDashboard()">Clean false replies</button><button class="topbar-btn" onclick="window.renderScoutDashboard()">Refresh</button></div></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div><h2 style="font-size:18px;font-weight:950">📊 Dashboard</h2><p style="font-size:12px;color:var(--muted);margin-top:3px">One scrollable dashboard. Real replies only; delivery notices are separate.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="dash-range" class="as-input" style="width:150px" onchange="window.renderScoutDashboard()"><option value="today" ${range==='today'?'selected':''}>Today</option><option value="yesterday" ${range==='yesterday'?'selected':''}>Yesterday</option><option value="7days" ${range==='7days'?'selected':''}>Last 7 days</option><option value="1month" ${range==='1month'?'selected':''}>Last 1 month</option><option value="all" ${range==='all'?'selected':''}>All time</option></select><button class="topbar-btn" onclick="window.v68CleanFalseReplies();window.renderScoutDashboard()">Clean false replies</button><button class="topbar-btn" onclick="window.renderScoutDashboard()">Refresh</button></div></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">${card('Messages sent',c.sent.length,'Confirmed/contacted','var(--green)')}${card('Real responses',c.replies.length,c.responseRate+'% response rate','var(--accent)')}${card('Delivery notices',c.bounces.length,'Not counted as replies','var(--amber)')}${card('Follow-up due',c.follow.length,'Contacted, no real reply','var(--amber)')}${card('Ready to Send',c.ready.length,'Available contacts','var(--green)')}</div>
-      <div class="as-card"><h3>Sent vs Real Replies</h3>${graphHtml()}</div>
       <div class="as-card"><h3>Top 5 Messages</h3><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--muted);text-align:left"><th style="padding:8px;border-bottom:1px solid var(--border)">Message</th><th style="padding:8px;border-bottom:1px solid var(--border)">Sent</th><th style="padding:8px;border-bottom:1px solid var(--border)">Real replies</th><th style="padding:8px;border-bottom:1px solid var(--border)">Rate</th><th style="padding:8px;border-bottom:1px solid var(--border)">Bounces</th></tr></thead><tbody>${top.length?top.map(t=>`<tr><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${esc(t.name)}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.sent}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.replies}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.sent?Math.round((t.replies/t.sent)*1000)/10:0}%</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.bounces}</td></tr>`).join(''):`<tr><td colspan="5" style="padding:12px;color:var(--muted)">No template performance yet.</td></tr>`}</tbody></table></div></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px"><div class="as-card"><h3>Live Activity Log</h3><div style="max-height:240px;overflow:auto">${logHtml()}</div></div><div class="as-card"><h3>Schedule Status</h3><div style="max-height:240px;overflow:auto">${schedulesHtml()}</div></div></div>
     </div>`;
@@ -10892,8 +10901,452 @@ function manualPollReplies() {
   window.renderScoutDashboard = renderDashboardStable;
 
   function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent=VERSION; document.title='Scout App v68'; }
-  function init(){ patchVersion(); cleanupFalseReplies(); renderNow(); if(q('dashboard-content')) renderDashboardStable(); setInterval(()=>{ if(q('dashboard-content')?.classList.contains('active')) renderDashboardStable(); }, 15000); }
+  function init(){ patchVersion(); cleanupFalseReplies(); renderNow(); if(q('dashboard-content')) renderDashboardStable(); /* v70: old v68 dashboard interval disabled */ }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
+})();
+</script>
+
+<script>
+/* Scout App v69 — Single Dashboard Renderer + Sender Tagging
+   - Stops older dashboard renderers from replacing the real dashboard.
+   - Keeps graph, top messages, delivery notices, schedules, and live log on screen.
+   - Tags every contacted lead with the Gmail account used to contact it. */
+(function(){
+  const VERSION = 'v70 — Clean Dashboard + Contact Timeline';
+  const LOG_KEY = 'scout_send_activity_log_v63';
+  const ROOT_ID = 'v69-dashboard-root';
+  let rendering = false;
+  let observerStarted = false;
+
+  function q(id){ return document.getElementById(id); }
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function norm(v){ return String(v||'').trim().toLowerCase(); }
+  function normEmail(v){ return norm(v).replace(/^mailto:/,'').split('?')[0].replace(/[.,;:)><\]\[]+$/g,'').replace(/^[<(\[]+/,''); }
+  function safeJson(v,fb){ try { const x=JSON.parse(v); return x==null?fb:x; } catch(e){ return fb; } }
+  function safeArr(v){ return Array.isArray(v) ? v : []; }
+  function nowIso(){ return new Date().toISOString(); }
+  function businessesSafe(){ try { if(typeof businesses !== 'undefined' && Array.isArray(businesses)) return businesses; } catch(e){} return Array.isArray(window.businesses) ? window.businesses : []; }
+  function statusOf(b){ return norm(b && (b.status || b.contactStatus || '')).replace(/[\s-]+/g,'_'); }
+  function emailOf(b){ return normEmail(b && (b.email || b.best_email || b.validatedEmail1 || b.email1 || (Array.isArray(b.emails)?b.emails[0]:''))); }
+  function dateVal(v){ const d=new Date(v||0); return Number.isNaN(d.getTime()) ? 0 : d.getTime(); }
+  function dayKey(v){ const d=new Date(v||0); if(Number.isNaN(d.getTime())) return ''; return d.toISOString().slice(0,10); }
+  function activityLog(){ return safeArr(safeJson(localStorage.getItem(LOG_KEY)||'[]', [])); }
+  function addLocalActivity(type, data){ try { const list=activityLog(); list.push({ at:nowIso(), type, ...(data||{}) }); localStorage.setItem(LOG_KEY, JSON.stringify(list.slice(-1000))); } catch(e){} }
+  function toastSafe(msg,type){ try { if(typeof toast === 'function') toast(msg,type); else console.log(msg); } catch(e){ console.log(msg); } }
+  function saveLead(b){ try { if(typeof scoutDbPutLead === 'function') scoutDbPutLead(b); } catch(e){} }
+  function saveAll(){ try { if(typeof save === 'function') save(); } catch(e){} }
+
+  function senderOf(b){
+    return normEmail(b && (
+      b.emailUsedToContact || b.contactedByEmail || b.lastContactedByEmail || b.sentFromEmail || b.gmailUsed || b.sentBy || b.senderEmail || b.actualSender || b.replyTrackingGmail || b.gmailAccount || b.fromEmail || ''
+    ));
+  }
+  function applySenderTag(b, sender){
+    sender = normEmail(sender); if(!b || !sender) return false;
+    let changed = false;
+    const fields = ['emailUsedToContact','contactedByEmail','lastContactedByEmail','sentFromEmail','replyTrackingGmail','gmailUsed','sentBy','senderEmail'];
+    fields.forEach(k => { if(!normEmail(b[k])) { b[k] = sender; changed = true; } });
+    return changed;
+  }
+  function tagSenderAccounts(silent){
+    const bs = businessesSafe();
+    const eventsByEmail = {};
+    activityLog().forEach(a => {
+      if(a && (a.type === 'sent' || a.type === 'reply_sent' || a.type === 'dry_run')) {
+        const e = normEmail(a.email); const s = normEmail(a.senderEmail || a.fromEmail || a.gmailUsed || a.sentBy || '');
+        if(e && s && !eventsByEmail[e]) eventsByEmail[e] = s;
+      }
+    });
+    let count = 0;
+    bs.forEach(b => {
+      const e = emailOf(b);
+      const existing = senderOf(b);
+      const fromActivity = e ? eventsByEmail[e] : '';
+      const sender = existing || fromActivity;
+      const contactedProof = b.sentAt || b.contactedAt || b.gmailMessageId || b.gmailThreadId || ['contacted','replied','closed','bounced'].includes(statusOf(b));
+      if(contactedProof && sender && applySenderTag(b, sender)) { count++; b.updatedAt = nowIso(); saveLead(b); }
+    });
+    if(count){ saveAll(); if(!silent) toastSafe(`Tagged ${count} contacted lead${count>1?'s':''} with the Gmail used.`, 'ok'); }
+    return count;
+  }
+  window.v69TagSenderAccounts = tagSenderAccounts;
+
+  function deliveryText(x){ return norm([x?.replyFrom,x?.replyFromHeader,x?.from,x?.fromHeader,x?.replySubject,x?.subject,x?.theirReply,x?.body,x?.snippet,x?.lastReplySnippet,x?.lastSendError,x?.bounceReason].filter(Boolean).join('\n')); }
+  function isAutomatedDeliveryNotice(x){
+    const t = deliveryText(x);
+    const from = norm([x?.replyFrom,x?.replyFromHeader,x?.from,x?.fromHeader].filter(Boolean).join(' '));
+    return (
+      /mailer-daemon|mail-daemon|postmaster|mail delivery subsystem|no-reply@google|noreply@google|delivery subsystem/.test(from) ||
+      /delivery status notification|delivery failure|undeliverable|returned mail|failure notice|address not found|message not delivered|mail delivery failed|your message wasn'?t delivered/.test(t) ||
+      /you have reached a limit for sending mail|limit for sending mail|your message was not sent|recipient address rejected|couldn'?t be found|unable to receive mail|no such user|user unknown|5\.1\.1|5\.2\.2|5\.7\.0/.test(t)
+    );
+  }
+  function bounceType(x){
+    const t=deliveryText(x);
+    if(/you have reached a limit for sending mail|limit for sending mail|daily user sending quota|user-rate limit|rate limit|quota exceeded|too many messages/.test(t)) return 'sender_limit';
+    if(/address not found|couldn'?t be found|recipient address rejected|does not exist|no such user|user unknown|invalid recipient|5\.1\.1|unable to receive mail/.test(t)) return 'invalid_recipient';
+    if(/mailbox full|over quota|5\.2\.2/.test(t)) return 'mailbox_full';
+    if(/blocked|rejected|policy|spam|5\.7\.0|5\.7\.1/.test(t)) return 'delivery_blocked';
+    return 'delivery_failed';
+  }
+  function hasBounce(b){ return !!(b && (b.bouncedAt || b.bounceType || b.emailStatus === 'BOUNCED' || statusOf(b)==='bounced' || isAutomatedDeliveryNotice(b))); }
+  function isRealReply(b){ return !!(b && (statusOf(b)==='replied' || b.theirReply || b.repliedAt || b.lastReplyAt) && !isAutomatedDeliveryNotice(b) && !hasBounce(b)); }
+  function isReady(b){ const s=statusOf(b); return ['ready','ready_to_send','verified_ready'].includes(s) || b.readyToSend===true || b.verificationStatus==='READY'; }
+
+  function cleanFalseRepliesV69(silent){
+    let count = 0;
+    businessesSafe().forEach(b => {
+      if((statusOf(b)==='replied' || b.theirReply || b.repliedAt || b.lastReplyAt) && isAutomatedDeliveryNotice(b)){
+        const type = bounceType(b);
+        b.theirReply = ''; b.repliedAt = null; b.lastReplyAt = null; b.replyFrom = ''; b.replyFromHeader = ''; b.replySubject = ''; b.replyClassification = ''; b.suggestedResponse = '';
+        b.bounceType = type; b.bounceReason = b.bounceReason || (type==='sender_limit' ? 'Gmail sending limit reached; message was not sent' : type==='invalid_recipient' ? 'Recipient address not found / invalid' : 'Delivery failure / automated mail notification');
+        b.bouncedAt = b.bouncedAt || nowIso(); b.emailStatus = 'BOUNCED'; b.lastSendError = b.bounceReason;
+        if(type === 'sender_limit') { b.status='ready_to_send'; b.contactedAt=null; b.sentAt=null; }
+        else if(type === 'invalid_recipient') { b.status='invalid'; b.verificationStatus='INVALID'; }
+        else { b.status='bounced'; }
+        b.updatedAt = nowIso(); saveLead(b); count++;
+      }
+    });
+    if(count){ saveAll(); addLocalActivity('cleanup', { message:`Cleaned ${count} automated delivery notice${count>1?'s':''} from Replies.` }); if(!silent) toastSafe(`Cleaned ${count} false repl${count>1?'ies':'y'} from delivery notices.`, 'warn'); }
+    return count;
+  }
+  window.v69CleanFalseReplies = cleanFalseRepliesV69;
+
+  function inRange(ts, range){
+    const ms = dateVal(ts); if(!ms) return range === 'all';
+    const now = new Date(); const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if(range === 'today') return ms >= startToday && ms < startToday + 86400000;
+    if(range === 'yesterday') return ms >= startToday - 86400000 && ms < startToday;
+    if(range === '7days') return ms >= Date.now() - 7*86400000;
+    if(range === '1month') return ms >= Date.now() - 31*86400000;
+    return true;
+  }
+  function metricData(range){
+    const bs = businessesSafe();
+    const sent = bs.filter(b => inRange(b.sentAt || b.contactedAt, range) && (b.sentAt || b.contactedAt || ['contacted','replied','closed'].includes(statusOf(b))) && !hasBounce(b));
+    const replies = bs.filter(b => isRealReply(b) && inRange(b.repliedAt || b.lastReplyAt, range));
+    const bounces = bs.filter(b => hasBounce(b) && inRange(b.bouncedAt || b.sendFailedAt || b.repliedAt || b.sentAt || b.contactedAt, range));
+    const follow = bs.filter(b => statusOf(b)==='contacted' && !isRealReply(b) && !hasBounce(b) && dateVal(b.contactedAt || b.sentAt) && Date.now() - dateVal(b.contactedAt || b.sentAt) > 86400000);
+    const ready = bs.filter(isReady);
+    const contactedNoReply = bs.filter(b => (b.sentAt || b.contactedAt || statusOf(b)==='contacted') && !isRealReply(b) && !hasBounce(b));
+    return { sent, replies, bounces, follow, ready, contactedNoReply, responseRate: sent.length ? Math.round((replies.length/sent.length)*1000)/10 : 0 };
+  }
+  function card(title,num,sub,color){ return `<div class="as-card v69-card" style="padding:14px;min-height:92px"><div style="font-size:11px;color:var(--muted);font-weight:850;text-transform:uppercase;letter-spacing:.4px">${esc(title)}</div><div style="font-size:28px;font-weight:950;color:${color||'var(--text)'};margin-top:6px">${esc(num)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${esc(sub||'')}</div></div>`; }
+  function lastDays(n){ const arr=[]; const today=new Date(); for(let i=n-1;i>=0;i--){ const d=new Date(today.getFullYear(), today.getMonth(), today.getDate()-i); arr.push(dayKey(d)); } return arr; }
+  function graphHtml(){
+    const days = lastDays(14), bs = businessesSafe(); const sentBy={}, replyBy={}, bounceBy={};
+    days.forEach(d => { sentBy[d]=0; replyBy[d]=0; bounceBy[d]=0; });
+    bs.forEach(b => { const s=dayKey(b.sentAt||b.contactedAt); if(s in sentBy && !hasBounce(b)) sentBy[s]++; const r=dayKey(b.repliedAt||b.lastReplyAt); if(r in replyBy && isRealReply(b)) replyBy[r]++; const bo=dayKey(b.bouncedAt||b.sendFailedAt); if(bo in bounceBy && hasBounce(b)) bounceBy[bo]++; });
+    const max=Math.max(1, ...days.flatMap(d => [sentBy[d], replyBy[d], bounceBy[d]]));
+    return `<div style="display:flex;gap:8px;align-items:end;height:190px;border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--bg);overflow-x:auto">${days.map(d=>`<div style="min-width:42px;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:end"><div style="display:flex;gap:3px;align-items:end;height:130px"><div title="Sent ${sentBy[d]}" style="width:10px;height:${Math.max(2,Math.round((sentBy[d]/max)*125))}px;background:var(--green);border-radius:5px 5px 0 0"></div><div title="Real replies ${replyBy[d]}" style="width:10px;height:${Math.max(2,Math.round((replyBy[d]/max)*125))}px;background:var(--accent);border-radius:5px 5px 0 0"></div><div title="Delivery notices ${bounceBy[d]}" style="width:10px;height:${Math.max(2,Math.round((bounceBy[d]/max)*125))}px;background:var(--amber);border-radius:5px 5px 0 0"></div></div><div style="font-size:9px;color:var(--muted);transform:rotate(-35deg);height:24px;white-space:nowrap">${d.slice(5)}</div></div>`).join('')}</div><div style="display:flex;gap:12px;margin-top:8px;font-size:11px;color:var(--muted);flex-wrap:wrap"><span><b style="color:var(--green)">●</b> Sent</span><span><b style="color:var(--accent)">●</b> Real replies</span><span><b style="color:var(--amber)">●</b> Delivery notices</span></div>`;
+  }
+  function templateStats(range){
+    const map = {};
+    businessesSafe().forEach(b => {
+      const sentAt = b.sentAt || b.contactedAt;
+      const inPeriod = inRange(sentAt || b.repliedAt || b.lastReplyAt || b.bouncedAt, range);
+      if(!inPeriod && range !== 'all') return;
+      const key = b.sentTemplateId || b.sentTemplateName || (b.sentTemplateIndex != null ? 'template_'+b.sentTemplateIndex : 'Unknown');
+      const name = b.sentTemplateName || (b.sentTemplateIndex != null ? 'Template '+(Number(b.sentTemplateIndex)+1) : 'Unknown / deleted template');
+      if(!map[key]) map[key] = { name, sent:0, replies:0, bounces:0 };
+      if(sentAt && !hasBounce(b)) map[key].sent++;
+      if(isRealReply(b)) map[key].replies++;
+      if(hasBounce(b)) map[key].bounces++;
+    });
+    return Object.values(map).filter(x => x.sent || x.replies || x.bounces).sort((a,b) => (b.replies/(b.sent||1)) - (a.replies/(a.sent||1)) || b.replies-a.replies || b.sent-a.sent).slice(0,5);
+  }
+  function topMessagesTable(range){
+    const top = templateStats(range);
+    return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--muted);text-align:left"><th style="padding:8px;border-bottom:1px solid var(--border)">Message</th><th style="padding:8px;border-bottom:1px solid var(--border)">Sent</th><th style="padding:8px;border-bottom:1px solid var(--border)">Real replies</th><th style="padding:8px;border-bottom:1px solid var(--border)">Rate</th><th style="padding:8px;border-bottom:1px solid var(--border)">Delivery notices</th></tr></thead><tbody>${top.length ? top.map(t => `<tr><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${esc(t.name)}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.sent}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.replies}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.sent?Math.round((t.replies/t.sent)*1000)/10:0}%</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.bounces}</td></tr>`).join('') : `<tr><td colspan="5" style="padding:12px;color:var(--muted)">No template performance yet.</td></tr>`}</tbody></table></div>`;
+  }
+  function senderTable(range){
+    const map = {};
+    businessesSafe().forEach(b => {
+      const sender = senderOf(b) || 'unknown';
+      const relevant = inRange(b.sentAt||b.contactedAt||b.repliedAt||b.lastReplyAt||b.bouncedAt, range);
+      if(!relevant && range !== 'all') return;
+      if(!map[sender]) map[sender] = { sender, sent:0, replies:0, bounces:0, follow:0 };
+      if((b.sentAt || b.contactedAt) && !hasBounce(b)) map[sender].sent++;
+      if(isRealReply(b)) map[sender].replies++;
+      if(hasBounce(b)) map[sender].bounces++;
+      if(statusOf(b)==='contacted' && !isRealReply(b) && !hasBounce(b) && dateVal(b.contactedAt||b.sentAt) && Date.now()-dateVal(b.contactedAt||b.sentAt)>86400000) map[sender].follow++;
+    });
+    const rows = Object.values(map).filter(x => x.sender !== 'unknown' || x.sent || x.replies || x.bounces).sort((a,b)=>b.sent-a.sent).slice(0,10);
+    return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--muted);text-align:left"><th style="padding:8px;border-bottom:1px solid var(--border)">Gmail used</th><th style="padding:8px;border-bottom:1px solid var(--border)">Sent</th><th style="padding:8px;border-bottom:1px solid var(--border)">Replies</th><th style="padding:8px;border-bottom:1px solid var(--border)">Delivery notices</th><th style="padding:8px;border-bottom:1px solid var(--border)">Follow-up due</th></tr></thead><tbody>${rows.length ? rows.map(r=>`<tr><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${esc(r.sender)}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${r.sent}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${r.replies}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${r.bounces}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${r.follow}</td></tr>`).join('') : `<tr><td colspan="5" style="padding:12px;color:var(--muted)">No sender tracking yet.</td></tr>`}</tbody></table></div>`;
+  }
+  function activityHtml(){
+    const rows = activityLog().slice(-14).reverse();
+    return rows.length ? rows.map(r => `<div style="display:grid;grid-template-columns:130px 86px 1fr 190px;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding:7px 0;align-items:center"><span style="color:var(--faint);font-size:10px;white-space:nowrap">${esc(new Date(r.at||Date.now()).toLocaleString())}</span><span style="font-size:11px;color:${r.type==='sent'?'var(--green)':r.type==='failed'||r.type==='error'?'var(--red)':r.type==='limit_stop'?'var(--amber)':r.type==='cleanup'?'var(--accent)':'var(--muted)'}">${esc(r.type||'info')}</span><span style="font-size:11px;overflow:hidden;text-overflow:ellipsis">${esc(r.message || r.email || r.name || r.reason || '')}</span><span style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">${esc(r.senderEmail || '')}</span></div>`).join('') : '<div style="font-size:12px;color:var(--muted);padding:8px 0">No send activity yet.</div>';
+  }
+  function schedulesHtml(){
+    const doneRe = /done|complete|completed|sent|finished|cancelled|canceled/i;
+    const list = safeArr(safeJson(localStorage.getItem('scout_scheduled_batches_v62') || '[]', []))
+      .filter(s => !doneRe.test(String(s.status || '')))
+      .filter(s => {
+        const t = new Date(s.runAt || s.time || s.scheduledAt || 0).getTime();
+        return !t || t >= Date.now() - 5 * 60 * 1000 || /running|active|pending|scheduled/i.test(String(s.status || ''));
+      });
+    return list.slice(-10).reverse().map(s => `<div style="display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding:7px 0"><span style="font-size:11px;color:var(--text)">${esc(new Date(s.runAt||s.time||s.scheduledAt).toLocaleString())} · ${esc(s.limit||'')} from ${esc(s.senderEmail||s.senderKey||'Gmail')}</span><span style="font-size:11px;color:var(--muted)">${esc(String(s.status||'scheduled').replace('scheduled_v66','scheduled'))}</span></div>`).join('') || '<div style="font-size:12px;color:var(--muted);padding:8px 0">No active scheduled batches.</div>';
+  }
+  function renderDashboardV69(){
+    const panel = q('dashboard-content'); if(!panel) return;
+    rendering = true;
+    try {
+      tagSenderAccounts(true);
+      const range = q('dash-range')?.value || localStorage.getItem('scout_dashboard_range') || 'today';
+      localStorage.setItem('scout_dashboard_range', range);
+      const c = metricData(range);
+      panel.style.overflow = 'auto';
+      panel.style.flex = '1 1 auto';
+      panel.style.minHeight = '0';
+      panel.innerHTML = `<div id="${ROOT_ID}" style="padding:18px;max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:14px;min-height:100%;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap"><div><h2 style="font-size:18px;font-weight:950">📊 Dashboard</h2><p style="font-size:12px;color:var(--muted);margin-top:3px">Single dashboard view. Real prospect replies only; delivery notices are separated.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="dash-range" class="as-input" style="width:150px" onchange="window.renderScoutDashboard()"><option value="today" ${range==='today'?'selected':''}>Today</option><option value="yesterday" ${range==='yesterday'?'selected':''}>Yesterday</option><option value="7days" ${range==='7days'?'selected':''}>Last 7 days</option><option value="1month" ${range==='1month'?'selected':''}>Last 1 month</option><option value="all" ${range==='all'?'selected':''}>All time</option></select><button class="topbar-btn" onclick="window.v69CleanFalseReplies(false);window.renderScoutDashboard()">Clean false replies</button><button class="topbar-btn" onclick="window.v69TagSenderAccounts(false);window.renderScoutDashboard()">Tag Gmail used</button><button class="topbar-btn" onclick="window.renderScoutDashboard()">Refresh</button></div></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">${card('Messages sent',c.sent.length,'Confirmed/contacted','var(--green)')}${card('Real responses',c.replies.length,c.responseRate+'% response rate','var(--accent)')}${card('Delivery notices',c.bounces.length,'Not counted as replies','var(--amber)')}${card('Contacted no reply',c.contactedNoReply.length,'Follow-up pool','var(--text)')}${card('Follow-up due',c.follow.length,'Contacted, no real reply','var(--amber)')}${card('Ready to Send',c.ready.length,'Available contacts','var(--green)')}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px"><div class="as-card"><h3>Top 5 Messages</h3>${topMessagesTable(range)}</div><div class="as-card"><h3>Gmail Used Per Contact</h3>${senderTable(range)}</div></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px"><div class="as-card"><h3>Live Activity Log</h3><div style="max-height:260px;overflow:auto">${activityHtml()}</div></div><div class="as-card"><h3>Schedule Status</h3><div style="max-height:260px;overflow:auto">${schedulesHtml()}</div></div></div>
+      </div>`;
+    } finally {
+      setTimeout(()=>{ rendering = false; }, 50);
+    }
+  }
+  window.renderScoutDashboard = renderDashboardV69;
+
+  function startDashboardGuard(){
+    const panel = q('dashboard-content'); if(!panel || observerStarted) return;
+    observerStarted = true;
+    const obs = new MutationObserver(() => {
+      if(rendering) return;
+      if(panel.classList.contains('active') && !q(ROOT_ID)) setTimeout(()=>window.renderScoutDashboard&&window.renderScoutDashboard(), 20);
+    });
+    obs.observe(panel, { childList:true, subtree:false });
+    /* v70: old v69 dashboard interval disabled */
+  }
+  function wrapTabNavigation(){
+    try {
+      if(typeof showContentTab === 'function' && !showContentTab.__v69Wrapped){
+        const old = showContentTab;
+        showContentTab = function(id, el){ const out = old.apply(this, arguments); if(id === 'dashboard-content') setTimeout(()=>window.renderScoutDashboard&&window.renderScoutDashboard(), 30); return out; };
+        showContentTab.__v69Wrapped = true;
+      }
+      if(typeof showTabMobile === 'function' && !showTabMobile.__v69Wrapped){
+        const oldM = showTabMobile;
+        showTabMobile = function(id, el){ const out = oldM.apply(this, arguments); if(id === 'dashboard' || id === 'dashboard-content') setTimeout(()=>window.renderScoutDashboard&&window.renderScoutDashboard(), 30); return out; };
+        showTabMobile.__v69Wrapped = true;
+      }
+    } catch(e){}
+  }
+  function patchDetailSenderBadge(){
+    // The v65 reply panel already uses gmailUsed/sentBy. This makes sure those fields are populated before details render.
+    try { tagSenderAccounts(true); } catch(e){}
+  }
+  function patchVersion(){
+    const title = q('topbar-title'); if(title) title.textContent = VERSION;
+    document.title = 'Scout App v70';
+    const logo = q('topbar-logo'); if(logo && /QuickBook|Airtable/i.test(logo.textContent||'')) logo.textContent = '🧭 Scout App';
+  }
+  function init(){
+    patchVersion(); wrapTabNavigation(); cleanFalseRepliesV69(true); tagSenderAccounts(true); patchDetailSenderBadge(); startDashboardGuard();
+    if(q('dashboard-content')) renderDashboardV69();
+    try { if(typeof renderQueue === 'function') renderQueue(); } catch(e){}
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+
+<script>
+/* Scout App v70 — cleaned dashboard, contact timeline, no built-in playbook suggestions. */
+(function(){
+  const VERSION='v70 — Clean Dashboard + Contact Timeline';
+  const ROOT='scout-dashboard-v69';
+  const SCHEDULE_KEY='scout_scheduled_batches_v62';
+  const LOG_KEY='scout_send_activity_v63';
+  function q(id){return document.getElementById(id)}
+  function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+  function norm(s){return String(s||'').trim().toLowerCase()}
+  function arr(v){return Array.isArray(v)?v:[]}
+  function parseJson(s,f){try{return JSON.parse(s)}catch(e){return f}}
+  function businesses(){ try { if(Array.isArray(window.businesses)) return window.businesses; } catch(e){} try { return parseJson(localStorage.getItem('sv13_businesses')||'[]',[])||[]; } catch(e){ return [] } }
+  function statusOf(b){return norm(b&&b.status).replace(/[- ]/g,'_')}
+  function emailOf(b){return norm((b&& (b.email||b.best_email||b.validatedEmail1||b.email1||(arr(b.emails)[0])))||'')}
+  function senderOf(b){return (b&&(b.emailUsedToContact||b.contactedByEmail||b.lastContactedByEmail||b.sentFromEmail||b.replyTrackingGmail||b.gmailUsed||b.sentBy||b.senderEmail||b.actualSender||b.gmailAccount||b.fromEmail))||''}
+  function sentAtOf(b){return b&&(b.sentAt||b.contactedAt||b.lastSentAt||b.contacted_at)||''}
+  function fmt(t){ if(!t) return '—'; const d=new Date(t); return Number.isNaN(d.getTime()) ? String(t) : d.toLocaleString(); }
+  function saveNow(){try{if(typeof save==='function')save()}catch(e){} }
+  function patchBiz(b,patch){ try { if(typeof updateBiz==='function'&&b.id) updateBiz(b.id,patch); else Object.assign(b,patch); } catch(e){ Object.assign(b,patch); } }
+  function isDeliveryNoticeText(txt){ const t=String(txt||'').toLowerCase(); return /mail delivery subsystem|delivery status notification|address not found|message not delivered|message was not sent|you have reached a limit for sending mail|mailer-daemon|postmaster|undeliverable/.test(t); }
+  function isBounce(b){return !!(b&&(b.bouncedAt||b.bounceType||b.emailStatus==='BOUNCED'||statusOf(b)==='bounced'||isDeliveryNoticeText((b.theirReply||'')+' '+(b.replySubject||'')+' '+(b.replyFrom||''))))}
+  function hasRealReply(b){return !!(b&&(statusOf(b)==='replied'||b.repliedAt||b.lastReplyAt||b.theirReply)&&!isBounce(b))}
+  function inRange(ts,range){ const ms=new Date(ts||0).getTime(); if(!ms||Number.isNaN(ms)) return range==='all'; const now=new Date(); const start=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime(); if(range==='today') return ms>=start&&ms<start+86400000; if(range==='yesterday') return ms>=start-86400000&&ms<start; if(range==='7days') return ms>=Date.now()-7*86400000; if(range==='1month') return ms>=Date.now()-31*86400000; return true; }
+  function card(label,val,hint,color){return `<div class="as-stat" style="text-align:left"><div class="as-stat-num" style="color:${color||'var(--text)'}">${esc(val)}</div><div class="as-stat-label">${esc(label)}</div><div style="font-size:10.5px;color:var(--muted);margin-top:4px">${esc(hint||'')}</div></div>`}
+  function cleanSchedules(){ const list=arr(parseJson(localStorage.getItem(SCHEDULE_KEY)||'[]',[])); const done=/done|complete|completed|sent|finished|cancelled|canceled/i; const kept=list.filter(s=>!done.test(String(s.status||''))); if(kept.length!==list.length) localStorage.setItem(SCHEDULE_KEY,JSON.stringify(kept)); return kept; }
+  window.v70CleanCompletedSchedules=function(){ cleanSchedules(); renderDashboardV70(); };
+  function schedulesHtml(){ const list=cleanSchedules(); return list.length ? list.slice(-10).reverse().map(s=>`<div style="display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding:7px 0"><span style="font-size:11px;color:var(--text)">${esc(fmt(s.runAt||s.time||s.scheduledAt))} · ${esc(s.limit||'')} from ${esc(s.senderEmail||s.senderKey||'Gmail')}</span><span style="font-size:11px;color:var(--muted)">${esc(String(s.status||'scheduled').replace('scheduled_v66','scheduled'))}</span></div>`).join('') : '<div style="font-size:12px;color:var(--muted);padding:8px 0">No active scheduled batches.</div>'; }
+  function logsHtml(){ const rows=arr(parseJson(localStorage.getItem(LOG_KEY)||'[]',[])).slice(-12).reverse(); return rows.length?rows.map(r=>`<div style="display:grid;grid-template-columns:130px 90px 1fr 170px;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding:7px 0;align-items:center"><span style="color:var(--faint);font-size:10px;white-space:nowrap">${esc(fmt(r.at))}</span><span style="font-size:11px;color:${r.type==='sent'?'var(--green)':r.type==='failed'||r.type==='error'?'var(--red)':r.type==='limit_stop'?'var(--amber)':'var(--muted)'}">${esc(r.type||'info')}</span><span style="font-size:11px;overflow:hidden;text-overflow:ellipsis">${esc(r.message||r.email||r.name||r.reason||'')}</span><span style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">${esc(r.senderEmail||'')}</span></div>`).join(''):'<div style="font-size:12px;color:var(--muted);padding:8px 0">No activity yet.</div>'; }
+  function metrics(range){ const all=businesses(); const sent=all.filter(b=>(sentAtOf(b)||statusOf(b)==='contacted'||statusOf(b)==='replied')&&!isBounce(b)&&inRange(sentAtOf(b),range)); const replies=all.filter(b=>hasRealReply(b)&&inRange(b.repliedAt||b.lastReplyAt,range)); const bounces=all.filter(b=>isBounce(b)&&inRange(b.bouncedAt||b.repliedAt||b.lastReplyAt,range)); const contactedNoReply=all.filter(b=>(statusOf(b)==='contacted'||sentAtOf(b))&&!hasRealReply(b)&&!isBounce(b)); const follow=contactedNoReply.filter(b=>{const t=new Date(sentAtOf(b)||0).getTime(); return t&&Date.now()-t>86400000}); const ready=all.filter(b=>['ready','ready_to_send'].includes(statusOf(b))); return {all,sent,replies,bounces,contactedNoReply,follow,ready,responseRate:sent.length?Math.round(replies.length/sent.length*1000)/10:0}; }
+  function templateTable(range){ const map={}; businesses().forEach(b=>{ const t=sentAtOf(b); if(!inRange(t||b.repliedAt||b.bouncedAt,range)) return; const key=b.sentTemplateId||b.templateId||b.sentTemplateName||'unknown'; const name=b.sentTemplateName||b.templateName||b.messageName||(key==='unknown'?'Unknown/deleted template':key); if(!map[key])map[key]={name,sent:0,replies:0,bounces:0}; if(t&&!isBounce(b))map[key].sent++; if(hasRealReply(b))map[key].replies++; if(isBounce(b))map[key].bounces++; }); const rows=Object.values(map).filter(x=>x.sent||x.replies||x.bounces).sort((a,b)=>(b.replies/(b.sent||1))-(a.replies/(a.sent||1))||b.replies-a.replies||b.sent-a.sent).slice(0,5); return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--muted);text-align:left"><th style="padding:8px;border-bottom:1px solid var(--border)">Message</th><th style="padding:8px;border-bottom:1px solid var(--border)">Sent</th><th style="padding:8px;border-bottom:1px solid var(--border)">Real replies</th><th style="padding:8px;border-bottom:1px solid var(--border)">Rate</th><th style="padding:8px;border-bottom:1px solid var(--border)">Delivery notices</th></tr></thead><tbody>${rows.length?rows.map(t=>`<tr><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${esc(t.name)}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.sent}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.replies}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.sent?Math.round(t.replies/t.sent*1000)/10:0}%</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${t.bounces}</td></tr>`).join(''):`<tr><td colspan="5" style="padding:12px;color:var(--muted)">No message performance yet.</td></tr>`}</tbody></table></div>`; }
+  function senderTable(range){ const map={}; businesses().forEach(b=>{ const s=senderOf(b)||'unknown'; const ts=sentAtOf(b)||b.repliedAt||b.bouncedAt; if(!inRange(ts,range)&&range!=='all') return; if(!map[s])map[s]={s,sent:0,replies:0,bounces:0,follow:0}; if(sentAtOf(b)&&!isBounce(b))map[s].sent++; if(hasRealReply(b))map[s].replies++; if(isBounce(b))map[s].bounces++; if((statusOf(b)==='contacted'||sentAtOf(b))&&!hasRealReply(b)&&!isBounce(b)&&new Date(sentAtOf(b)||0).getTime()&&Date.now()-new Date(sentAtOf(b)||0).getTime()>86400000)map[s].follow++; }); const rows=Object.values(map).filter(r=>r.s!=='unknown'||r.sent||r.replies||r.bounces).sort((a,b)=>b.sent-a.sent).slice(0,10); return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--muted);text-align:left"><th style="padding:8px;border-bottom:1px solid var(--border)">Gmail used</th><th style="padding:8px;border-bottom:1px solid var(--border)">Sent</th><th style="padding:8px;border-bottom:1px solid var(--border)">Real replies</th><th style="padding:8px;border-bottom:1px solid var(--border)">Delivery notices</th><th style="padding:8px;border-bottom:1px solid var(--border)">Follow-up due</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${esc(r.s)}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${r.sent}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${r.replies}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${r.bounces}</td><td style="padding:8px;border-bottom:1px solid rgba(255,255,255,.05)">${r.follow}</td></tr>`).join(''):`<tr><td colspan="5" style="padding:12px;color:var(--muted)">No sender activity yet.</td></tr>`}</tbody></table></div>`; }
+  function renderDashboardV70(){ const panel=q('dashboard-content'); if(!panel)return; const range=q('dash-range')?.value||localStorage.getItem('scout_dashboard_range')||'today'; localStorage.setItem('scout_dashboard_range',range); const c=metrics(range); panel.style.overflow='auto'; panel.style.minHeight='0'; panel.style.height='100%'; panel.innerHTML=`<div id="${ROOT}" style="padding:18px;max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:14px;min-height:100%;"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap"><div><h2 style="font-size:18px;font-weight:950">📊 Dashboard</h2><p style="font-size:12px;color:var(--muted);margin-top:3px">One scrollable dashboard. Real prospect replies only; delivery notices are separate.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="dash-range" class="as-input" style="width:150px" onchange="window.renderScoutDashboard()"><option value="today" ${range==='today'?'selected':''}>Today</option><option value="yesterday" ${range==='yesterday'?'selected':''}>Yesterday</option><option value="7days" ${range==='7days'?'selected':''}>Last 7 days</option><option value="1month" ${range==='1month'?'selected':''}>Last 1 month</option><option value="all" ${range==='all'?'selected':''}>All time</option></select><button class="topbar-btn" onclick="window.v68CleanFalseReplies&&window.v68CleanFalseReplies(false);window.renderScoutDashboard()">Clean false replies</button><button class="topbar-btn" onclick="window.v70CleanCompletedSchedules()">Clean done schedules</button><button class="topbar-btn" onclick="window.renderScoutDashboard()">Refresh</button></div></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">${card('Messages sent',c.sent.length,'Confirmed/contacted','var(--green)')}${card('Real responses',c.replies.length,c.responseRate+'% response rate','var(--accent)')}${card('Delivery notices',c.bounces.length,'Not responses','var(--amber)')}${card('Contacted no reply',c.contactedNoReply.length,'Follow-up pool','var(--text)')}${card('Follow-up due',c.follow.length,'No real reply yet','var(--amber)')}${card('Ready to Send',c.ready.length,'Available contacts','var(--green)')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px"><div class="as-card"><h3>Top 5 Messages</h3>${templateTable(range)}</div><div class="as-card"><h3>Gmail Used Per Contact</h3>${senderTable(range)}</div></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px"><div class="as-card"><h3>Live Activity Log</h3><div style="max-height:260px;overflow:auto">${logsHtml()}</div></div><div class="as-card"><h3>Active Schedule Status</h3><div style="max-height:260px;overflow:auto">${schedulesHtml()}</div></div></div></div>`; }
+  window.renderScoutDashboard=renderDashboardV70;
+  window.renderDashboardStable=renderDashboardV70;
+  window.responseBasedSuggestion=function(replyText,biz){ const t=String(replyText||'').trim(); const name=(biz&&String(biz.name||biz.businessName||'').trim())||'there'; if(!t)return''; if(/not interested|no thanks|not now|don't|do not|unsubscribe/i.test(t)) return `Hi ${name},\n\nNo problem, thanks for letting me know. I will not follow up again.\n\nBest regards,`; if(/cost|price|pricing|how much|fee/i.test(t)) return `Hi ${name},\n\nThanks for replying. I can send a simple breakdown, but I would first need to understand exactly what you want improved so I do not give you a random price.\n\nWhat is the main thing you want help with right now?`; if(/send|yes|sure|interested|okay|ok|go ahead/i.test(t)) return `Hi ${name},\n\nThanks for replying. I can send the breakdown. I will keep it short and focus only on what looks useful from what you shared.\n\nBest regards,`; return `Hi ${name},\n\nThanks for getting back to me. I understand.\n\nBased on your reply, the best next step is for me to keep this simple: I can send a short, specific breakdown and you can decide if it is useful.\n\nBest regards,`; };
+  try{ window.suggestResponseNoAI=function(biz,replyText){return window.responseBasedSuggestion(replyText,biz)}; }catch(e){}
+  function addTimelineCard(){ const b=(typeof getActiveBiz==='function'?getActiveBiz():null); const panel=q('detail-panel'); if(!b||!panel)return; const old=q('v70-contact-timeline'); if(old)old.remove(); const history=arr(b.replyHistory).filter(x=>!isDeliveryNoticeText((x.body||'')+' '+(x.subject||'')+' '+(x.replyFrom||''))); const latestFallback=(!history.length && (b.theirReply||b.repliedAt))?[{receivedAt:b.repliedAt||b.lastReplyAt,body:b.theirReply||'',replyFrom:b.replyFrom||b.replyFromHeader||'',gmailAccount:b.replyFromAccount||b.replyTrackingGmail||senderOf(b),subject:b.replySubject||''}]:[]; const rows=history.length?history:latestFallback; const card=document.createElement('div'); card.className='detail-section'; card.id='v70-contact-timeline'; card.innerHTML=`<div class="detail-section-head"><span class="detail-section-title">Contact Timeline</span></div><div class="detail-section-body"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:12px"><div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">Message sent</div><div style="font-size:12px;margin-top:4px">${esc(fmt(sentAtOf(b)))}</div></div><div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">Email used</div><div style="font-size:12px;margin-top:4px;color:var(--green)">${esc(senderOf(b)||'—')}</div></div><div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">Responses tracked</div><div style="font-size:12px;margin-top:4px;color:var(--accent)">${rows.length}</div></div></div><div style="font-size:11px;color:var(--muted);margin-bottom:6px">Every real prospect response is tracked here. Delivery notices are not counted as responses.</div>${rows.length?rows.slice().reverse().map((r,i)=>`<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:8px;background:rgba(255,255,255,.02)"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px"><strong style="font-size:12px">Response ${rows.length-i}</strong><span style="font-size:11px;color:var(--muted)">${esc(fmt(r.receivedAt))}</span></div><div style="font-size:11px;color:var(--muted);margin-bottom:6px">From: ${esc(r.replyFrom||'prospect')} · Tracked through: ${esc(r.gmailAccount||senderOf(b)||'Gmail')}</div><div style="font-size:12px;line-height:1.6;white-space:pre-wrap">${esc(r.body||'')}</div></div>`).join(''):'<div style="font-size:12px;color:var(--muted);padding:8px 0">No real prospect response tracked yet.</div>'}</div>`; const header=panel.querySelector('.detail-header'); if(header&&header.nextSibling) header.insertAdjacentElement('afterend',card); else panel.prepend(card); }
+  function wrapDetail(){ if(typeof window.renderDetail==='function'&&!window.renderDetail.__v70){ const old=window.renderDetail; window.renderDetail=function(){ const out=old.apply(this,arguments); setTimeout(addTimelineCard,40); return out; }; window.renderDetail.__v70=true; } }
+  function cleanupPlaybookUi(){ document.querySelectorAll('.settings-card').forEach(c=>{ if(/Claude AI Integration|playbook|Airtable/i.test(c.textContent||'')) c.style.display='none'; }); document.querySelectorAll('[class*="industry-badge"]').forEach(e=>{ if(/Airtable|QuickBook/i.test(e.textContent||'')) e.style.display='none'; }); }
+  function patchVersion(){ const title=q('topbar-title'); if(title)title.textContent=VERSION; document.title='Scout App v70'; const logo=q('topbar-logo'); if(logo)logo.textContent='🧭 Scout App'; }
+  function init(){ patchVersion(); cleanSchedules(); wrapDetail(); cleanupPlaybookUi(); if(q('dashboard-content')) renderDashboardV70(); setInterval(()=>{ if(q('dashboard-content')?.classList.contains('active')) renderDashboardV70(); cleanupPlaybookUi(); },8000); }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init); else init();
+})();
+</script>
+
+
+
+<script>
+/* Scout App v71 — business detail shows full conversation thread, not only prospect responses. */
+(function(){
+  const VERSION = 'v71 — Conversation Thread View';
+  function q(id){ return document.getElementById(id); }
+  function esc(s){ return String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+  function arr(v){ return Array.isArray(v) ? v : []; }
+  function norm(s){ return String(s || '').trim().toLowerCase(); }
+  function fmt(t){ if(!t) return '—'; const d = new Date(t); return Number.isNaN(d.getTime()) ? String(t) : d.toLocaleString(); }
+  function statusOf(b){ return norm(b && b.status).replace(/[- ]/g,'_'); }
+  function sentAtOf(b){ return b && (b.sentAt || b.contactedAt || b.lastSentAt || b.contacted_at || ''); }
+  function senderOf(b){ return (b && (b.emailUsedToContact || b.contactedByEmail || b.lastContactedByEmail || b.sentFromEmail || b.replyTrackingGmail || b.gmailUsed || b.sentBy || b.senderEmail || b.actualSender || b.gmailAccount || b.fromEmail)) || ''; }
+  function isDeliveryNoticeText(txt){ const t = String(txt || '').toLowerCase(); return /mail delivery subsystem|delivery status notification|address not found|message not delivered|message was not sent|you have reached a limit for sending mail|mailer-daemon|postmaster|undeliverable/.test(t); }
+  function bodyPreview(s){ const t = String(s || '').trim(); return t || 'No message body recorded for this older contact.'; }
+  function getActiveBusiness(){ try { if(typeof getActiveBiz === 'function') return getActiveBiz(); } catch(e){} try { if(window.activeBizId && Array.isArray(window.businesses)) return window.businesses.find(b => b.id === window.activeBizId); } catch(e){} return null; }
+  function buildMessages(b){
+    const msgs=[];
+    const firstSentAt = sentAtOf(b);
+    const firstSubject = b.subjectSent || b.sentSubject || b.originalSubject || '';
+    const firstBody = b.messageSent || b.sentMessage || b.generatedMessage || b.originalMessage || '';
+    if(firstSentAt || firstBody || firstSubject){
+      msgs.push({
+        side:'me',
+        label:'You',
+        at:firstSentAt,
+        email:senderOf(b) || 'Gmail',
+        subject:firstSubject,
+        body:firstBody,
+        kind:'Initial message'
+      });
+    }
+    arr(b.replyHistory).forEach((r, idx) => {
+      const text = (r.body || r.text || r.snippet || '').trim();
+      const meta = [r.subject, r.replyFrom, r.from, r.fromEmail].join(' ');
+      if(isDeliveryNoticeText(text + ' ' + meta)) return;
+      msgs.push({
+        side:'prospect',
+        label:r.replyFrom || r.from || 'Prospect',
+        at:r.receivedAt || r.repliedAt || r.date || r.internalDate || b.repliedAt || b.lastReplyAt || '',
+        email:r.gmailAccount || r.replyTrackingGmail || senderOf(b) || 'Gmail',
+        subject:r.subject || b.replySubject || '',
+        body:text,
+        kind:'Prospect response',
+        msgId:r.gmailMessageId || r.messageId || ''
+      });
+    });
+    if(!arr(b.replyHistory).length && (b.theirReply || b.repliedAt || b.lastReplyAt) && !isDeliveryNoticeText((b.theirReply||'') + ' ' + (b.replySubject||'') + ' ' + (b.replyFrom||''))){
+      msgs.push({
+        side:'prospect',
+        label:b.replyFrom || b.replyFromHeader || 'Prospect',
+        at:b.repliedAt || b.lastReplyAt || '',
+        email:b.replyFromAccount || b.replyTrackingGmail || senderOf(b) || 'Gmail',
+        subject:b.replySubject || '',
+        body:b.theirReply || '',
+        kind:'Prospect response'
+      });
+    }
+    if(b.lastReplySentAt || b.lastReplyBody){
+      msgs.push({
+        side:'me',
+        label:'You',
+        at:b.lastReplySentAt || b.replySentAt || '',
+        email:b.lastReplyFromAccount || senderOf(b) || 'Gmail',
+        subject:b.lastReplySubject || b.replySubject || firstSubject || '',
+        body:b.lastReplyBody || b.replySentBody || '',
+        kind:'Your reply'
+      });
+    }
+    if(b.followUpSent || b.followUpBody){
+      msgs.push({
+        side:'me',
+        label:'You',
+        at:b.followUpSent || b.followUpAt || '',
+        email:b.followUpFromAccount || senderOf(b) || 'Gmail',
+        subject:b.followUpSubject || firstSubject || '',
+        body:b.followUpBody || b.followUpMessage || 'Follow-up sent. Body was not recorded in this older record.',
+        kind:'Follow-up'
+      });
+    }
+    msgs.sort((a,b) => {
+      const ta = new Date(a.at || 0).getTime() || 0;
+      const tb = new Date(b.at || 0).getTime() || 0;
+      return ta - tb;
+    });
+    return msgs;
+  }
+  function bubble(m){
+    const mine = m.side === 'me';
+    const align = mine ? 'flex-end' : 'flex-start';
+    const bg = mine ? 'rgba(34,211,165,.10)' : 'rgba(109,123,255,.10)';
+    const border = mine ? 'rgba(34,211,165,.28)' : 'rgba(109,123,255,.28)';
+    const titleColor = mine ? 'var(--green)' : 'var(--accent)';
+    return `<div style="display:flex;justify-content:${align};margin:10px 0">
+      <div style="max-width:min(760px,92%);background:${bg};border:1px solid ${border};border-radius:14px;padding:11px 13px;box-shadow:0 2px 10px rgba(0,0,0,.10)">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px">
+          <div style="font-size:12px;font-weight:800;color:${titleColor}">${esc(m.kind || (mine ? 'Your message' : 'Prospect response'))}</div>
+          <div style="font-size:10.5px;color:var(--muted);white-space:nowrap">${esc(fmt(m.at))}</div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:7px">
+          ${mine ? 'Sent from' : 'Tracked through'}: <span style="color:var(--text)">${esc(m.email || 'Gmail')}</span>
+          ${m.label ? ` · ${mine ? 'Sender' : 'From'}: <span style="color:var(--text)">${esc(m.label)}</span>` : ''}
+          ${m.subject ? `<br>Subject: <span style="color:var(--text)">${esc(m.subject)}</span>` : ''}
+        </div>
+        <div style="font-size:12.5px;line-height:1.68;white-space:pre-wrap;color:var(--text)">${esc(bodyPreview(m.body))}</div>
+      </div>
+    </div>`;
+  }
+  function addConversationCard(){
+    const b = getActiveBusiness();
+    const panel = q('detail-panel');
+    if(!b || !panel) return;
+    ['v70-contact-timeline','v71-conversation-thread'].forEach(id => { const old = q(id); if(old) old.remove(); });
+    const messages = buildMessages(b);
+    const realReplies = messages.filter(m => m.side === 'prospect').length;
+    const card = document.createElement('div');
+    card.className = 'detail-section';
+    card.id = 'v71-conversation-thread';
+    card.innerHTML = `<div class="detail-section-head"><span class="detail-section-title">Conversation</span><span style="font-size:11px;color:var(--muted)">${realReplies} real response${realReplies===1?'':'s'} tracked</span></div>
+      <div class="detail-section-body">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:12px">
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">First sent</div><div style="font-size:12px;margin-top:4px">${esc(fmt(sentAtOf(b)))}</div></div>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">Email used</div><div style="font-size:12px;margin-top:4px;color:var(--green)">${esc(senderOf(b)||'—')}</div></div>
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">Conversation messages</div><div style="font-size:12px;margin-top:4px;color:var(--accent)">${messages.length}</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">This shows your sent message and the prospect replies in one thread. Gmail delivery notices are excluded from the conversation and do not count as responses.</div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:12px;max-height:560px;overflow:auto">
+          ${messages.length ? messages.map(bubble).join('') : '<div style="font-size:12px;color:var(--muted);padding:10px">No conversation recorded yet.</div>'}
+        </div>
+      </div>`;
+    const header = panel.querySelector('.detail-header');
+    if(header && header.nextSibling) header.insertAdjacentElement('afterend', card); else panel.prepend(card);
+  }
+  function wrapDetail(){
+    if(typeof window.renderDetail === 'function' && !window.renderDetail.__v71){
+      const old = window.renderDetail;
+      window.renderDetail = function(){ const out = old.apply(this, arguments); setTimeout(addConversationCard, 60); return out; };
+      window.renderDetail.__v71 = true;
+    }
+  }
+  function patchVersion(){
+    const title = q('topbar-title'); if(title) title.textContent = VERSION;
+    document.title = 'Scout App v71';
+  }
+  function init(){ patchVersion(); wrapDetail(); setTimeout(addConversationCard,100); }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 </script>
 
