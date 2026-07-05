@@ -141,3 +141,8 @@ Preview rows
 ## Notes
 
 This is a foundation build. It keeps the old backend and extension separate so the app can be stabilized without breaking Gmail or browser automation.
+
+## Vercel install fix
+
+This package intentionally does not commit `package-lock.json`. A previous lock file was generated in a non-public build environment and caused Vercel `npm install` to fail before `next build`. Dependencies are pinned in `package.json`, and `.npmrc` forces installs through the public npm registry.
+
