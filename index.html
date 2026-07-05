@@ -9475,10 +9475,9 @@ function manualPollReplies() {
   function patchVersion(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent=VERSION; }
   function init(){
     patchVersion(); patchFollowupFilter(); installSendEnhancements(); renderSchedules();
-    if (q('dashboard-content')) renderDashboardV62();
+    /* v75: old v62 dashboard render disabled */
     setInterval(refreshSenderSelect.bind(null,'v51-gmail-account'), 5000);
-    setInterval(renderSchedules, 15000);
-    setInterval(runDueSchedules, 30000);
+    /* v75: old v62 duplicate schedule intervals disabled */
     setTimeout(runDueSchedules, 5000);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
@@ -9852,15 +9851,14 @@ function manualPollReplies() {
     card.innerHTML = `<h3>Live Send Activity</h3><p style="font-size:12px;color:var(--muted);margin-bottom:8px">Latest Gmail API send events. This updates while sending.</p><div style="overflow:auto;max-height:260px"><table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>${rows.length ? rows.map(r => `<tr><td style="padding:8px;border-bottom:1px solid var(--border);color:var(--muted);white-space:nowrap">${esc(new Date(r.at).toLocaleTimeString())}</td><td style="padding:8px;border-bottom:1px solid var(--border);color:${colorForType(r.type)}">${esc(r.type)}</td><td style="padding:8px;border-bottom:1px solid var(--border)">${esc(r.name || r.email || r.message || '')}</td><td style="padding:8px;border-bottom:1px solid var(--border);color:var(--muted)">${esc(r.senderEmail || '')}</td></tr>`).join('') : '<tr><td style="padding:12px;color:var(--muted)">No live send activity yet.</td></tr>'}</tbody></table></div>`;
   }
   const previousDashboard = window.renderScoutDashboard;
-  window.renderScoutDashboard = function(){ try { if (typeof previousDashboard === 'function') previousDashboard(); } catch(e){} injectDashboardActivity(); };
+  /* v75: legacy v63 dashboard injector disabled */ window.renderScoutDashboard = previousDashboard || function(){};
 
   function patchVersion(){ const title=q('topbar-title'); if (title) title.textContent = VERSION; }
   function init(){
     patchVersion(); ensureLiveSendPanel(); renderLiveSendLog(); migrateSchedules(); renderSchedulesV63(); injectDashboardActivity();
     if (!v63RunnerInstalled) {
       v63RunnerInstalled = true;
-      setInterval(runDueSchedulesV63, 15000);
-      setInterval(renderSchedulesV63, 6000);
+      /* v75: old v63 duplicate schedule intervals disabled */
       /* v70: old dashboard live activity injector disabled */
       setTimeout(runDueSchedulesV63, 3000);
     }
@@ -10182,7 +10180,7 @@ function manualPollReplies() {
     setTimeout(()=>blockKnownScouted({}), 1500);
     setInterval(()=>seedRegistryFromContacted(true), 10*60*1000);
     setInterval(()=>blockKnownScouted({ readyOnly:true }), 90*1000);
-    setInterval(runDueSchedulesV64, 15000);
+    /* v75: old v64 duplicate schedule interval disabled */
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
@@ -10901,7 +10899,7 @@ function manualPollReplies() {
   window.renderScoutDashboard = renderDashboardStable;
 
   function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent=VERSION; document.title='Scout App v68'; }
-  function init(){ patchVersion(); cleanupFalseReplies(); renderNow(); if(q('dashboard-content')) renderDashboardStable(); /* v70: old v68 dashboard interval disabled */ }
+  function init(){ patchVersion(); cleanupFalseReplies(); renderNow(); /* v75: old v68 dashboard render disabled */ /* v70: old v68 dashboard interval disabled */ }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
 })();
 </script>
@@ -11111,16 +11109,7 @@ function manualPollReplies() {
   }
   window.renderScoutDashboard = renderDashboardV69;
 
-  function startDashboardGuard(){
-    const panel = q('dashboard-content'); if(!panel || observerStarted) return;
-    observerStarted = true;
-    const obs = new MutationObserver(() => {
-      if(rendering) return;
-      if(panel.classList.contains('active') && !q(ROOT_ID)) setTimeout(()=>window.renderScoutDashboard&&window.renderScoutDashboard(), 20);
-    });
-    obs.observe(panel, { childList:true, subtree:false });
-    /* v70: old v69 dashboard interval disabled */
-  }
+  function startDashboardGuard(){ /* v75: old v69 mutation observer disabled */ }
   function wrapTabNavigation(){
     try {
       if(typeof showContentTab === 'function' && !showContentTab.__v69Wrapped){
@@ -11141,12 +11130,12 @@ function manualPollReplies() {
   }
   function patchVersion(){
     const title = q('topbar-title'); if(title) title.textContent = VERSION;
-    document.title = 'Scout App v70';
+    document.title = 'Scout App v75';
     const logo = q('topbar-logo'); if(logo && /QuickBook|Airtable/i.test(logo.textContent||'')) logo.textContent = '🧭 Scout App';
   }
   function init(){
     patchVersion(); wrapTabNavigation(); cleanFalseRepliesV69(true); tagSenderAccounts(true); patchDetailSenderBadge(); startDashboardGuard();
-    if(q('dashboard-content')) renderDashboardV69();
+    /* v75: old v69 dashboard render disabled */
     try { if(typeof renderQueue === 'function') renderQueue(); } catch(e){}
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
@@ -11195,7 +11184,7 @@ function manualPollReplies() {
   function wrapDetail(){ if(typeof window.renderDetail==='function'&&!window.renderDetail.__v70){ const old=window.renderDetail; window.renderDetail=function(){ const out=old.apply(this,arguments); setTimeout(addTimelineCard,40); return out; }; window.renderDetail.__v70=true; } }
   function cleanupPlaybookUi(){ document.querySelectorAll('.settings-card').forEach(c=>{ if(/Claude AI Integration|playbook|Airtable/i.test(c.textContent||'')) c.style.display='none'; }); document.querySelectorAll('[class*="industry-badge"]').forEach(e=>{ if(/Airtable|QuickBook/i.test(e.textContent||'')) e.style.display='none'; }); }
   function patchVersion(){ const title=q('topbar-title'); if(title)title.textContent=VERSION; document.title='Scout App v70'; const logo=q('topbar-logo'); if(logo)logo.textContent='🧭 Scout App'; }
-  function init(){ patchVersion(); cleanSchedules(); wrapDetail(); cleanupPlaybookUi(); if(q('dashboard-content')) renderDashboardV70(); setInterval(()=>{ if(q('dashboard-content')?.classList.contains('active')) renderDashboardV70(); cleanupPlaybookUi(); },8000); }
+  function init(){ patchVersion(); cleanSchedules(); wrapDetail(); cleanupPlaybookUi(); /* v75: old v70 dashboard render disabled */ /* v75: old v70 dashboard interval disabled */ }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init); else init();
 })();
 </script>
@@ -11548,7 +11537,7 @@ function manualPollReplies() {
     patchVersion(); compactCopy(); normalizeContactTags();
     try { if(typeof renderQueue === 'function') renderQueue(); } catch(e){}
     try { if(typeof renderDetail === 'function') renderDetail(); } catch(e){}
-    setInterval(() => { try { enhanceQueueItems(); compactCopy(); } catch(e){} }, 5000);
+    /* v75: old v72 frequent queue interval disabled */
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
@@ -11722,11 +11711,11 @@ function manualPollReplies() {
     #${ROOT} .v73-row em{font-style:normal;font-size:11px;color:var(--accent);flex-shrink:0;}
   `; document.head.appendChild(css);
   function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent=VERSION; document.title='Scout App v73'; }
-  function init(){ patchVersion(); patchNav(); installObserver(); cleanSchedules(); normalizeContactTags(); if(q('dashboard-content')?.classList.contains('active')) renderDashboard(); setInterval(()=>{cleanSchedules();dashboardGuard();},4000); }
+  function init(){ patchVersion(); patchNav(); cleanSchedules(); normalizeContactTags(); /* v75: old v73 dashboard render disabled */ /* v75: old v73 observer/interval disabled */ }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
 })();
 
-/* Scout App v74 — dashboard performance, strict reply timing, and locked reply sender.
+/* Scout App v75 — dashboard performance, strict reply timing, and locked reply sender.
    Fixes: dashboard range controls, strict Ready count, no reply-before-sent, lightweight dashboard, queue/detail sender tags, and in-app replies forced from original sender. */
 (function(){
   const VERSION = 'v74 — Clean Dashboard + Locked Reply Sender';
@@ -11853,12 +11842,319 @@ function manualPollReplies() {
   `; document.head.appendChild(css);
   function compactText(){ document.body.classList.add('v72-compact'); const noisy=/This is a Scout App tab|No upload happens here|Subject lines are controlled|Upload\/import leads|Search engines can still block|Used to generate personalized|daily export|separate app|playbook|QuickBook|Airtable|One dashboard only/i; document.querySelectorAll('p,.claude-key-note,.as-hint').forEach(el=>{const t=(el.textContent||'').trim(); if(t.length>120||noisy.test(t)) el.classList.add('v74-hidden-copy');}); }
   function patchNav(){ const old=window.showContentTab; if(typeof old==='function'&&!old.__v74){ window.showContentTab=function(id,el){ const out=old.apply(this,arguments); if(id==='dashboard-content') setTimeout(()=>renderDashboard(true),0); else setTimeout(enhanceQueue,0); return out; }; window.showContentTab.__v74=true; } }
-  function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent=VERSION; document.title='Scout App v74'; }
-  function init(){ patchVersion(); patchNav(); normalizeContactTags(); compactText(); if(q('dashboard-content')?.classList.contains('active')) renderDashboard(true); setTimeout(enhanceQueue,0); setTimeout(enhanceDetail,0); setInterval(()=>{ if(q('dashboard-content')?.classList.contains('active')) renderDashboard(false); else { enhanceQueue(); compactText(); } }, 15000); }
+  function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent=VERSION; document.title='Scout App v75'; }
+  function init(){ patchVersion(); patchNav(); normalizeContactTags(); compactText(); /* v75: old v74 dashboard render disabled */ setTimeout(enhanceQueue,0); setTimeout(enhanceDetail,0); /* v75: old v74 dashboard interval disabled */ setTimeout(()=>{ try{ enhanceQueue(); compactText(); }catch(e){} }, 500); }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
 })();
 
 </script>
 
+
+<script>
+/* Scout App v75 — single lightweight dashboard hard reset.
+   Goal: one dashboard only, no graph, no duplicate renderers, no auto re-render loop. */
+(function(){
+  const VERSION='v75 — Clean Single Dashboard';
+  const ROOT='v75-dashboard-root';
+  const SCHEDULE_KEY='scout_scheduled_batches_v62';
+  const ACTIVITY_KEYS=['scout_send_activity_log_v63','scout_send_activity_v63'];
+  const RANGE_KEY='scout_dashboard_range';
+  function q(id){return document.getElementById(id)}
+  function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+  function norm(s){return String(s||'').trim().toLowerCase()}
+  function arr(v){return Array.isArray(v)?v:[]}
+  function json(k,f){try{return JSON.parse(localStorage.getItem(k)||'')||f}catch(e){return f}}
+  function businesses(){try{if(Array.isArray(window.businesses))return window.businesses}catch(e){} return json('sv13_businesses',[])}
+  function st(b){return norm(b&&b.status).replace(/[- ]/g,'_')}
+  function parseTs(t){const d=new Date(t||0).getTime();return Number.isFinite(d)?d:0}
+  function fmt(t){const ms=parseTs(t);return ms?new Date(ms).toLocaleString():'—'}
+  function fmtSmall(t){const ms=parseTs(t);return ms?new Date(ms).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—'}
+  function inRange(ts,r){const ms=parseTs(ts); if(!ms) return r==='all'; const now=new Date(), start=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime(); if(r==='today')return ms>=start&&ms<start+86400000; if(r==='yesterday')return ms>=start-86400000&&ms<start; if(r==='7days')return ms>=Date.now()-7*86400000; if(r==='1month')return ms>=Date.now()-31*86400000; return true}
+  function emailOf(b){const vals=[b&&b.email,b&&b.best_email,b&&b.validatedEmail1,b&&b.validatedEmail2,b&&b.validatedEmail3,b&&b.email1,b&&b.email2,b&&b.email3,b&&b.contactEmail]; if(Array.isArray(b&&b.emails)) vals.push(...b.emails); return String(vals.find(v=>/@/.test(String(v||'')))||'').replace(/^mailto:/i,'').trim()}
+  function sentAt(b){return b&&(b.sentAt||b.contactedAt||b.lastSentAt||b.sent_time||b.contacted_at)||''}
+  function senderOf(b){return (b&&(b.emailUsedToContact||b.contactedByEmail||b.lastContactedByEmail||b.sentFromEmail||b.replyTrackingGmail||b.gmailUsed||b.sentBy||b.senderEmail||b.actualSender||b.gmailAccount||b.fromEmail))||''}
+  function replyTrackedBy(b,e){return (e&&(e.trackedByGmail||e.viaGmail||e.gmailUsed||e.replyTrackingGmail||e.accountEmail)) || (b&&(b.replyTrackingGmail||b.lastReplyTrackedBy||senderOf(b))) || ''}
+  function isDeliveryText(x){const t=String(x||'').toLowerCase();return /mail delivery subsystem|delivery status notification|mailer-daemon|postmaster|address not found|undeliverable|message wasn't delivered|message was not delivered|message not delivered|message was not sent|you have reached a limit for sending mail|mailbox unavailable|recipient address rejected|delivery failed|failure notice/.test(t)}
+  function eventText(e){return [e&&e.from,e&&e.subject,e&&e.body,e&&e.text,e&&e.snippet,e&&e.message].filter(Boolean).join(' ')}
+  function realReplyEvents(b){
+    const sAt=parseTs(sentAt(b)); const out=[];
+    arr(b&&b.conversationHistory).forEach(e=>{
+      const dir=norm(e&& (e.dir||e.direction||e.type));
+      const isIn=['in','inbound','reply','prospect','from_prospect'].includes(dir) || (e&&e.isProspectReply===true);
+      if(!isIn) return;
+      const at=e.at||e.date||e.time||e.repliedAt||e.receivedAt;
+      const ms=parseTs(at); if(sAt && (!ms || ms<=sAt)) return;
+      if(isDeliveryText(eventText(e))) return;
+      out.push({at, from:e.from||b.replyFrom||emailOf(b), subject:e.subject||b.replySubject||'', body:e.body||e.text||e.message||'', via:replyTrackedBy(b,e)});
+    });
+    const fallbackAt=b&& (b.repliedAt||b.lastReplyAt); const fms=parseTs(fallbackAt);
+    if((b&&(b.theirReply||b.replyFrom)) && (!sAt || fms>sAt) && !isDeliveryText([b.replyFrom,b.replySubject,b.theirReply].join(' '))){
+      if(!out.some(e=>parseTs(e.at)===fms)) out.push({at:fallbackAt,from:b.replyFrom||'',subject:b.replySubject||'',body:b.theirReply||'',via:replyTrackedBy(b,{})});
+    }
+    return out.sort((a,b)=>parseTs(b.at)-parseTs(a.at));
+  }
+  function deliveryEvents(b){
+    const out=[];
+    arr(b&&b.conversationHistory).forEach(e=>{ if(isDeliveryText(eventText(e))){ out.push({at:e.at||e.date||e.time||b.bouncedAt||b.repliedAt, subject:e.subject||b.replySubject||'', via:replyTrackedBy(b,e)}); } });
+    if(b&&(b.bouncedAt||b.bounceType||b.emailStatus==='BOUNCED'||st(b)==='bounced'||isDeliveryText([b.replyFrom,b.replySubject,b.theirReply].join(' ')))) out.push({at:b.bouncedAt||b.repliedAt||b.lastReplyAt||'',subject:b.replySubject||b.bounceType||'Delivery notice',via:senderOf(b)});
+    return out;
+  }
+  function isSent(b){return !!(b&&(sentAt(b)||['contacted','replied','closed'].includes(st(b))||b.gmailMessageId||b.gmailThreadId))}
+  function isReady(b){return ['ready','ready_to_send'].includes(st(b)) && !isSent(b) && /@/.test(emailOf(b))}
+  function isFollowupDue(b){const s=parseTs(sentAt(b)); return isSent(b) && !realReplyEvents(b).length && !deliveryEvents(b).length && s && Date.now()-s>24*3600000}
+  function cleanSchedules(){const list=json(SCHEDULE_KEY,[]); const done=/done|complete|completed|sent|finished|cancelled|canceled/i; const kept=arr(list).filter(s=>!done.test(String(s.status||''))); if(kept.length!==arr(list).length)localStorage.setItem(SCHEDULE_KEY,JSON.stringify(kept)); return kept}
+  function activity(){let rows=[]; ACTIVITY_KEYS.forEach(k=>{rows=rows.concat(arr(json(k,[])))}); const seen=new Set(); return rows.filter(r=>{const key=[r.at,r.type,r.email,r.senderEmail,r.message].join('|'); if(seen.has(key))return false; seen.add(key); return true}).sort((a,b)=>parseTs(b.at)-parseTs(a.at)).slice(0,10)}
+  function metric(range){const all=businesses(); let sent=0, real=0, contactsWithReplies=0, notices=0; all.forEach(b=>{ if(isSent(b)&&inRange(sentAt(b),range))sent++; const re=realReplyEvents(b).filter(e=>inRange(e.at,range)); if(re.length){real+=re.length; contactsWithReplies++;} notices+=deliveryEvents(b).filter(e=>inRange(e.at,range)).length; }); const ready=all.filter(isReady).length; const cnr=all.filter(b=>isSent(b)&&!realReplyEvents(b).length&&!deliveryEvents(b).length).length; const follow=all.filter(isFollowupDue).length; return {sent,real,contactsWithReplies,notices,ready,cnr,follow};}
+  function card(label,val,hint,cls){return `<div class="v75-card"><div>${esc(label)}</div><strong class="${cls||''}">${esc(val)}</strong><span>${esc(hint||'')}</span></div>`}
+  function templateHtml(range){const map={}; businesses().forEach(b=>{ if(!isSent(b)||!inRange(sentAt(b),range)) return; const key=b.sentTemplateId||b.templateId||b.sentTemplateName||b.templateName||'Unknown/deleted'; const name=b.sentTemplateName||b.templateName||b.messageName||key; if(!map[key])map[key]={name,sent:0,replies:0,notices:0}; map[key].sent++; map[key].replies+=realReplyEvents(b).filter(e=>inRange(e.at,range)).length; map[key].notices+=deliveryEvents(b).filter(e=>inRange(e.at,range)).length;}); const rows=Object.values(map).sort((a,b)=>(b.replies/(b.sent||1))-(a.replies/(a.sent||1))||b.replies-a.replies||b.sent-a.sent).slice(0,5); return rows.length?rows.map(r=>`<div class="v75-row"><div><b>${esc(r.name)}</b><span>${r.sent} sent · ${r.replies} real replies · ${r.notices} notices</span></div><em>${r.sent?Math.round(r.replies/r.sent*100):0}%</em></div>`).join(''):'<div class="v75-empty">No message performance yet.</div>'}
+  function senderHtml(range){const map={}; businesses().forEach(b=>{const s=senderOf(b)||'Unknown sender'; const ts=sentAt(b); if(!inRange(ts||b.repliedAt||b.bouncedAt,range)&&range!=='all') return; if(!map[s])map[s]={s,sent:0,replies:0,notices:0}; if(isSent(b)&&inRange(ts,range))map[s].sent++; map[s].replies+=realReplyEvents(b).filter(e=>inRange(e.at,range)).length; map[s].notices+=deliveryEvents(b).filter(e=>inRange(e.at,range)).length;}); const rows=Object.values(map).filter(r=>r.sent||r.replies||r.notices).sort((a,b)=>b.sent-a.sent).slice(0,8); return rows.length?rows.map(r=>`<div class="v75-row"><div><b>${esc(r.s)}</b><span>${r.sent} sent · ${r.replies} replies · ${r.notices} notices</span></div><em>${r.sent?Math.round(r.replies/r.sent*100):0}%</em></div>`).join(''):'<div class="v75-empty">No Gmail sender activity yet.</div>'}
+  function scheduleHtml(){const rows=cleanSchedules().sort((a,b)=>parseTs(a.runAt||a.time||a.scheduledAt)-parseTs(b.runAt||b.time||b.scheduledAt)).slice(0,8); return rows.length?rows.map(s=>`<div class="v75-row"><div><b>${esc(fmtSmall(s.runAt||s.time||s.scheduledAt))}</b><span>${esc(s.limit||'')} messages · ${esc(s.senderEmail||s.senderKey||'Gmail')} · ${esc(String(s.status||'scheduled').replace('scheduled_v66','scheduled'))}</span></div></div>`).join(''):'<div class="v75-empty">No active schedules.</div>'}
+  function logHtml(){const rows=activity(); return rows.length?rows.map(r=>`<div class="v75-row"><div><b>${esc(fmtSmall(r.at))} · ${esc(r.type||'info')}</b><span>${esc(r.message||r.name||r.email||r.reason||'')} ${r.senderEmail?'· '+esc(r.senderEmail):''}</span></div></div>`).join(''):'<div class="v75-empty">No recent activity.</div>'}
+  function rangeButtons(range){return [['today','Today'],['yesterday','Yesterday'],['7days','Last 7 days'],['1month','Last 1 month'],['all','All time']].map(([v,l])=>`<button class="topbar-btn ${range===v?'primary':''}" onclick="window.v75SetDashboardRange('${v}')">${l}</button>`).join('')}
+  function removeOldDashboardNoise(panel){[...panel.children].forEach(el=>{if(el.id!==ROOT)el.remove()})}
+  function renderDashboard(force){const panel=q('dashboard-content'); if(!panel) return; const range=localStorage.getItem(RANGE_KEY)||'today'; const m=metric(range); panel.classList.add('v75-dashboard-panel'); panel.innerHTML=`<div id="${ROOT}"><div class="v75-head"><div><h2>📊 Dashboard</h2><p>Simple activity summary. No graph, no duplicate dashboard.</p></div><div class="v75-ranges">${rangeButtons(range)}</div></div><div class="v75-metrics">${card('Messages sent',m.sent,'Confirmed contacted','ok')}${card('Real response messages',m.real,`${m.contactsWithReplies} contacts replied`,'accent')}${card('Delivery notices',m.notices,'Not real responses','warn')}${card('Contacted no reply',m.cnr,'Follow-up pool','')}${card('Follow-up due',m.follow,'Needs next touch','warn')}${card('Ready to Send',m.ready,'Strict ready only','ok')}</div><div class="v75-grid"><section><h3>Top 5 Messages</h3>${templateHtml(range)}</section><section><h3>Gmail Used Per Contact</h3>${senderHtml(range)}</section><section><h3>Active Schedule Status</h3>${scheduleHtml()}</section><section><h3>Live Activity Log</h3>${logHtml()}</section></div></div>`; removeOldDashboardNoise(panel)}
+  window.v75SetDashboardRange=function(r){localStorage.setItem(RANGE_KEY,r); renderDashboard(true)};
+  window.renderScoutDashboard=function(force){renderDashboard(!!force)};
+  window.renderDashboardStable=window.renderScoutDashboard;
+  window.v75CleanDashboard=function(){cleanSchedules(); try{if(window.v68CleanFalseReplies)window.v68CleanFalseReplies(false)}catch(e){} renderDashboard(true)};
+  function patchNav(){const old=window.showContentTab; if(typeof old==='function'&&!old.__v75){window.showContentTab=function(id,el){const out=old.apply(this,arguments); if(id==='dashboard-content')setTimeout(()=>renderDashboard(true),0); return out}; window.showContentTab.__v75=true} const oldM=window.showTabMobile; if(typeof oldM==='function'&&!oldM.__v75){window.showTabMobile=function(id,el){const out=oldM.apply(this,arguments); if(id==='dashboard'||id==='dashboard-content')setTimeout(()=>renderDashboard(true),0); return out}; window.showTabMobile.__v75=true}}
+  function patchVersion(){const title=q('topbar-title'); if(title)title.textContent=VERSION; document.title='Scout App v75'}
+  function addCss(){if(q('v75-css'))return; const css=document.createElement('style'); css.id='v75-css'; css.textContent=`#dashboard-content.v75-dashboard-panel{overflow:auto!important;height:100%!important;min-height:0!important;padding:0!important;display:block!important}#dashboard-content.v75-dashboard-panel>*:not(#${ROOT}){display:none!important;visibility:hidden!important;height:0!important;overflow:hidden!important}#${ROOT}{padding:18px;max-width:1120px;margin:0 auto;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}#${ROOT} .v75-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}#${ROOT} h2{font-size:18px;font-weight:950;margin:0 0 4px}#${ROOT} p{font-size:12px;color:var(--muted);margin:0}#${ROOT} .v75-ranges{display:flex;gap:7px;flex-wrap:wrap}#${ROOT} .v75-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px}#${ROOT} .v75-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px}#${ROOT} .v75-card div{font-size:11px;color:var(--muted);font-weight:850;text-transform:uppercase;letter-spacing:.35px}#${ROOT} .v75-card strong{display:block;font-size:25px;font-weight:950;line-height:1;margin:7px 0;color:var(--text)}#${ROOT} .v75-card strong.ok{color:var(--green)}#${ROOT} .v75-card strong.warn{color:var(--amber)}#${ROOT} .v75-card strong.accent{color:var(--accent)}#${ROOT} .v75-card span,#${ROOT} .v75-empty{font-size:11px;color:var(--muted)}#${ROOT} .v75-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}#${ROOT} section{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;min-height:150px}#${ROOT} section h3{font-size:14px;margin:0 0 10px;font-weight:900}#${ROOT} .v75-row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);min-width:0}#${ROOT} .v75-row:last-child{border-bottom:none}#${ROOT} .v75-row div{min-width:0}#${ROOT} .v75-row b{display:block;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#${ROOT} .v75-row span{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#${ROOT} .v75-row em{font-style:normal;font-size:11px;color:var(--accent);flex-shrink:0}`; document.head.appendChild(css)}
+  function init(){addCss(); patchVersion(); patchNav(); cleanSchedules(); if(q('dashboard-content')?.classList.contains('active')) renderDashboard(true)}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init); else init();
+})();
+</script>
+
 </body>
 </html>
+
+
+<!-- SCOUT APP v76 - Personal emails Ready + No Inbox filter -->
+<script>
+(function(){
+  const VERSION = 'Scout App v76';
+  const PROTECTED = new Set(['contacted','replied','closed','team_scouted']);
+  const FREE = new Set(['gmail.com','googlemail.com','yahoo.com','yahoo.co.uk','outlook.com','hotmail.com','live.com','msn.com','icloud.com','me.com','aol.com','proton.me','protonmail.com','gmx.de','gmx.com','web.de','zoho.com','mail.com','yandex.com','tutanota.com']);
+  const ROLE = new Set(['info','contact','hello','sales','support','admin','office','shop','team','service','customerservice','help','booking','reservations','orders','mail','post','marketing','press','hr','jobs','career','careers','enquiries','inquiry','inquiries','noreply','no-reply','donotreply']);
+  const DISPOSABLE = new Set(['mailinator.com','tempmail.com','10minutemail.com','guerrillamail.com','yopmail.com','trashmail.com','getnada.com','temp-mail.org','sharklasers.com','dispostable.com','maildrop.cc','fakeinbox.com']);
+  function q(id){ return document.getElementById(id); }
+  function esc(v){ try { return String(v == null ? '' : v).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); } catch(e){ return ''; } }
+  function toastSafe(msg,type){ try { if (typeof toast === 'function') toast(msg,type||'ok'); else console.log(msg); } catch(e){} }
+  function settingsSafe(){ return (window.settings && typeof window.settings === 'object') ? window.settings : {}; }
+  function backendUrl(){ const st=settingsSafe(); return String((q('backend-url-input')&&q('backend-url-input').value) || st.backendUrl || localStorage.getItem('backendUrl') || localStorage.getItem('scoutBackendUrl') || '').trim().replace(/\/+$/,''); }
+  function normEmail(email){ return String(email||'').trim().toLowerCase().replace(/^mailto:/,'').split('?')[0].replace(/[;,.)\]>"']+$/g,'').replace(/^[<(\[]+/g,''); }
+  function emailOf(b){ return normEmail((b && (b.email || b.validatedEmail || b.validatedEmail1 || b.email1 || (Array.isArray(b.emails)?b.emails[0]:''))) || ''); }
+  function parts(email){ const e=normEmail(email); const m=e.match(/^([a-z0-9._%+\-]{1,64})@([a-z0-9.\-]+\.[a-z]{2,63})$/i); return {email:e, local:m?m[1]:'', domain:m?m[2]:'', valid:!!m}; }
+  function baseLocal(local){ return String(local||'').toLowerCase().split(/[+._-]/)[0]; }
+  function isRole(local){ const b=baseLocal(local); return ROLE.has(b) || /^(info|contact|sales|support|admin|office|team|booking|enquir|noreply|no-reply)/i.test(String(local||'')); }
+  function normDomain(raw){ let v=String(raw||'').trim().toLowerCase(); if(!v) return ''; v=v.replace(/^https?:\/\//,'').replace(/^www\./,'').split(/[\/?#]/)[0].split(':')[0].replace(/[;,.)\]]+$/g,''); return /^[a-z0-9.-]+\.[a-z]{2,63}$/.test(v)?v:''; }
+  function bizDomain(b){ return normDomain((b && (b.website || b.domain || b.url || b.site)) || ''); }
+  function related(a,b){ return !!(a && b && (a===b || a.endsWith('.'+b) || b.endsWith('.'+a))); }
+  function duplicateCounts(){ const c={}; (Array.isArray(window.businesses)?window.businesses:[]).forEach(b=>{ const e=emailOf(b); if(e)c[e]=(c[e]||0)+1; }); return c; }
+  function providerResultFor(email, map){ return map && map[normEmail(email)] ? map[normEmail(email)] : null; }
+  function inboxFromProvider(r){
+    if (!r) return { inboxStatus:'unknown', mailboxExists:null, providerStatus:'not_checked', providerReason:'Local verification only' };
+    const status = String(r.status || r.verificationStatus || '').toLowerCase();
+    const pstatus = String(r.providerStatus || r.result || '').toLowerCase();
+    const reason = String(r.providerReason || r.reason || '').toLowerCase();
+    const raw = `${status} ${pstatus} ${reason}`;
+    if (r.mailboxExists === true || r.inboxStatus === 'exists' || /\b(valid|deliverable)\b/.test(raw)) return { inboxStatus:'exists', mailboxExists:true, providerStatus:r.providerStatus||r.status||'valid', providerReason:r.providerReason||'' };
+    if (r.mailboxExists === false || r.inboxStatus === 'no_inbox' || /invalid|undeliverable|mailbox_not_found|does not exist|no_mx|no mx|recipient_not_found|address_not_found|do_not_mail|disposable/.test(raw)) return { inboxStatus:'no_inbox', mailboxExists:false, providerStatus:r.providerStatus||r.status||'invalid', providerReason:r.providerReason||reason||'No inbox/mailbox found' };
+    return { inboxStatus:'unknown', mailboxExists:null, providerStatus:r.providerStatus||r.status||'unknown', providerReason:r.providerReason||'Could not confirm mailbox-level inbox' };
+  }
+  function classifyLead(b, dup, providerResult){
+    const e=emailOf(b); const p=parts(e); const web=bizDomain(b); const role=p.valid && isRole(p.local); const free=p.valid && FREE.has(p.domain); const disp=p.valid && DISPOSABLE.has(p.domain); const match=p.valid && web && related(p.domain, web); const inbox=inboxFromProvider(providerResult);
+    const reasons=[]; let score=0;
+    if(!e) return {email:'', status:'NO_EMAIL', ready:false, score:0, inboxStatus:'unknown', mailboxExists:null, providerStatus:'', providerReason:'No email'};
+    if(!p.valid) return {email:e, status:'INVALID', ready:false, score:0, isFreeProvider:false, isRoleBased:false, inboxStatus:'invalid_format', mailboxExists:false, providerStatus:'bad_format', providerReason:'Invalid email format', reasons:'Invalid email format'};
+    if(disp) return {email:e, status:'INVALID', ready:false, score:0, isFreeProvider:free, isRoleBased:role, inboxStatus:'no_inbox', mailboxExists:false, providerStatus:'disposable', providerReason:'Disposable/temp email', reasons:'Disposable/temp email'};
+    if(dup>1) return {email:e, status:'DUPLICATE', ready:false, score:20, isFreeProvider:free, isRoleBased:role, inboxStatus:inbox.inboxStatus, mailboxExists:inbox.mailboxExists, providerStatus:inbox.providerStatus, providerReason:inbox.providerReason, reasons:'Duplicate email'};
+    if(inbox.inboxStatus==='no_inbox') return {email:e, status:'NO_INBOX', ready:false, score:0, isFreeProvider:free, isRoleBased:role, inboxStatus:'no_inbox', mailboxExists:false, providerStatus:inbox.providerStatus, providerReason:inbox.providerReason, reasons:'Mailbox/inbox not found'};
+    if(inbox.inboxStatus==='exists') { score=92; reasons.push('mailbox/inbox confirmed'); return {email:e, status:'READY', ready:true, score, isFreeProvider:free, isRoleBased:role, domainMatch:match, inboxStatus:'exists', mailboxExists:true, providerStatus:inbox.providerStatus, providerReason:inbox.providerReason, reasons:reasons.join('; ')}; }
+    // No external mailbox proof yet. Treat valid personal/free provider addresses as ready instead of review.
+    if(free && !role) { score=82; reasons.push('valid personal/free-provider address'); reasons.push('mailbox not externally confirmed'); return {email:e, status:'READY', ready:true, score, isFreeProvider:true, isRoleBased:false, domainMatch:false, inboxStatus:'unknown', mailboxExists:null, providerStatus:inbox.providerStatus, providerReason:inbox.providerReason, reasons:reasons.join('; ')}; }
+    if(match && !role) { score=84; reasons.push('email domain matches website'); return {email:e, status:'READY', ready:true, score, isFreeProvider:false, isRoleBased:false, domainMatch:true, inboxStatus:'unknown', mailboxExists:null, providerStatus:inbox.providerStatus, providerReason:inbox.providerReason, reasons:reasons.join('; ')}; }
+    if(role) { score=55; reasons.push('role inbox'); return {email:e, status:'REVIEW', ready:false, score, isFreeProvider:free, isRoleBased:true, domainMatch:match, inboxStatus:'unknown', mailboxExists:null, providerStatus:inbox.providerStatus, providerReason:inbox.providerReason, reasons:reasons.join('; ')}; }
+    score=62; reasons.push('valid format, needs stronger context'); return {email:e, status:'REVIEW', ready:false, score, isFreeProvider:free, isRoleBased:role, domainMatch:match, inboxStatus:'unknown', mailboxExists:null, providerStatus:inbox.providerStatus, providerReason:inbox.providerReason, reasons:reasons.join('; ')};
+  }
+  async function fetchBackendVerification(emailList){
+    const url=backendUrl(); if(!url || !emailList.length) return {};
+    try{
+      const res=await fetch(url + '/batch-verify-emails', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({emails:emailList, delayMs:80}) });
+      const data=await res.json();
+      const results=Array.isArray(data.results)?data.results:[]; const map={};
+      results.forEach(r=>{ if(r && r.email) map[normEmail(r.email)]=r; });
+      return map;
+    }catch(e){ console.warn('v76 backend inbox verification failed', e); return {}; }
+  }
+  function applyStatus(b,v){
+    b.email = v.email || emailOf(b) || b.email;
+    b.emailVerification = v;
+    b.inboxStatus = v.inboxStatus || 'unknown';
+    b.mailboxExists = v.mailboxExists;
+    b.readyToSend = v.status === 'READY';
+    b.readyToEmailScout = v.status === 'READY';
+    b.needsVerification = !!v.email && !['READY','NO_INBOX','INVALID','DUPLICATE'].includes(v.status);
+    if(!PROTECTED.has(b.status)){
+      if(v.status==='READY') b.status='ready_to_send';
+      else if(v.status==='NO_INBOX') b.status='no_inbox';
+      else if(v.status==='REVIEW') b.status='review';
+      else if(v.status==='RISKY') b.status='risky';
+      else if(v.status==='INVALID') b.status='invalid';
+      else if(v.status==='DUPLICATE') b.status='duplicate';
+      else if(v.status==='NO_EMAIL' && ['found','ready','ready_to_send','review','risky','invalid','duplicate','no_inbox'].includes(b.status)) b.status='pending';
+    }
+    b.verifiedAt = new Date().toISOString(); b.updatedAt = new Date().toISOString();
+  }
+  async function verifyQueue76(){
+    if(!Array.isArray(window.businesses)){ toastSafe('Business queue not loaded yet','err'); return; }
+    const candidates=window.businesses.filter(b=>!PROTECTED.has(b.status) && emailOf(b));
+    const emails=[...new Set(candidates.map(emailOf).filter(Boolean))];
+    const status=q('sv36-verify-status'); if(status) status.textContent=`Checking ${emails.length} unique email(s)…`;
+    const providerMap=await fetchBackendVerification(emails);
+    const counts=duplicateCounts(); const stats={checked:0,ready:0,review:0,risky:0,invalid:0,duplicate:0,noInbox:0};
+    candidates.forEach(b=>{
+      const e=emailOf(b); const v=classifyLead(b, counts[e]||0, providerResultFor(e, providerMap)); applyStatus(b,v); stats.checked++;
+      if(v.status==='READY') stats.ready++; else if(v.status==='NO_INBOX') stats.noInbox++; else if(v.status==='REVIEW') stats.review++; else if(v.status==='RISKY') stats.risky++; else if(v.status==='INVALID') stats.invalid++; else if(v.status==='DUPLICATE') stats.duplicate++;
+    });
+    try{ if(typeof save==='function') save(); }catch(e){}
+    try{ if(typeof renderQueue==='function') renderQueue(); }catch(e){}
+    try{ if(typeof sv59SyncSendContactsFromReady==='function') sv59SyncSendContactsFromReady(); }catch(e){}
+    renderVerify76();
+    const msg=`Verified ${stats.checked}: ${stats.ready} Ready, ${stats.noInbox} No Inbox, ${stats.review} Review, ${stats.invalid} Invalid, ${stats.duplicate} Duplicate.`;
+    if(status) status.textContent=msg; toastSafe(msg,'ok'); return stats;
+  }
+  function statusLabel(st){ return ({ready_to_send:'Ready to Send',ready:'Ready to Send',review:'Review',risky:'Risky',invalid:'Invalid',duplicate:'Duplicate',no_inbox:'No Inbox',pending:'Pending',found:'Email Found',contacted:'Contacted',replied:'Replied',closed:'Closed',no_email:'No Email'}[st]) || st || ''; }
+  function renderVerify76(){
+    const panel=q('verify-send-panel'); if(!panel || !Array.isArray(window.businesses)) return;
+    const rows=window.businesses.filter(b=>emailOf(b)).map(b=>({b,v:b.emailVerification||classifyLead(b, duplicateCounts()[emailOf(b)]||0, null)}));
+    const c={ready:0,noInbox:0,review:0,invalid:0,duplicate:0,total:rows.length};
+    rows.forEach(({b,v})=>{ if(b.status==='ready_to_send'||v.status==='READY')c.ready++; else if(b.status==='no_inbox'||v.status==='NO_INBOX')c.noInbox++; else if(b.status==='review'||v.status==='REVIEW')c.review++; else if(b.status==='invalid'||v.status==='INVALID')c.invalid++; else if(b.status==='duplicate'||v.status==='DUPLICATE')c.duplicate++; });
+    const card=(label,num,sub,color)=>`<div class="as-stat" style="text-align:left"><div class="as-stat-label">${esc(label)}</div><div class="as-stat-num" style="color:${color||'var(--text)'}">${num}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${esc(sub||'')}</div></div>`;
+    panel.innerHTML=`
+      <div style="margin-bottom:14px"><h2 style="font-size:18px;font-weight:900;margin-bottom:3px">🧪 Verify</h2><p style="font-size:12px;color:var(--muted);line-height:1.5">Valid personal emails now go straight to Ready to Send. Emails with no confirmed inbox go to No Inbox, so you can delete them without manual review.</p></div>
+      <div class="as-card" style="margin-bottom:14px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="topbar-btn primary" onclick="sv36VerifyQueue()">Verify Queue</button><button class="topbar-btn" onclick="sv36RenderVerifySendTab()">Refresh</button><button class="topbar-btn" onclick="setFilter('ready_to_send', this)">Open Ready</button><button class="topbar-btn" onclick="setFilter('no_inbox', this)">Open No Inbox</button><button class="topbar-btn danger" onclick="sv76DeleteNoInbox()">Delete No Inbox</button><button class="topbar-btn" onclick="showContentTab('email-scout-content', document.getElementById('tab-emailscout'))">Open Send Message</button><span id="sv36-verify-status" style="font-size:12px;color:var(--muted)"></span></div></div>
+      <div class="as-stats-grid" style="grid-template-columns:repeat(5,minmax(120px,1fr));margin-bottom:14px">${card('Ready to Send',c.ready,'Strict ready only','var(--green)')}${card('No Inbox',c.noInbox,'Delete safely','var(--red)')}${card('Review',c.review,'Needs manual decision','var(--amber)')}${card('Invalid',c.invalid,'Bad format/temp','var(--red)')}${card('Duplicate',c.duplicate,'Repeated emails','var(--muted)')}</div>
+      <div class="as-card"><h3>Verification results</h3><div style="overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:10px"><table id="sv36-results-table" style="width:100%;border-collapse:collapse;font-size:11px"><tr style="position:sticky;top:0;background:var(--card2);z-index:1"><th style="text-align:left;padding:8px;color:var(--muted)">Business</th><th style="text-align:left;padding:8px;color:var(--muted)">Email</th><th style="text-align:left;padding:8px;color:var(--muted)">Status</th><th style="text-align:left;padding:8px;color:var(--muted)">Inbox</th><th style="text-align:left;padding:8px;color:var(--muted)">Reason</th></tr>${rows.slice(0,250).map(({b,v})=>`<tr><td style="padding:8px;border-top:1px solid var(--border);color:var(--text)">${esc(b.name||b.business||b.company||b.domain||'')}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--green)">${esc(emailOf(b))}</td><td style="padding:8px;border-top:1px solid var(--border);font-weight:800;color:${(b.status==='ready_to_send'||v.status==='READY')?'var(--green)':(b.status==='no_inbox'||v.status==='NO_INBOX'||b.status==='invalid')?'var(--red)':'var(--amber)'}">${esc(statusLabel(b.status)||v.status)}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--muted)">${esc(b.inboxStatus||v.inboxStatus||'unknown')}</td><td style="padding:8px;border-top:1px solid var(--border);color:var(--muted)">${esc(v.providerReason||v.reasons||'')}</td></tr>`).join('')}</table></div></div>`;
+  }
+  window.sv36VerifyQueue = verifyQueue76;
+  window.sv41VerifyEmailFound = verifyQueue76;
+  window.sv36RenderVerifySendTab = renderVerify76;
+  window.sv76DeleteNoInbox = function(){
+    if(!Array.isArray(window.businesses)) return;
+    const before=window.businesses.length; window.businesses = window.businesses.filter(b=>b.status!=='no_inbox' && !(b.emailVerification && b.emailVerification.status==='NO_INBOX'));
+    const removed=before-window.businesses.length; try{ if(typeof save==='function') save(); }catch(e){} try{ if(typeof renderQueue==='function') renderQueue(); }catch(e){} renderVerify76(); toastSafe(`Deleted ${removed} No Inbox lead(s).`, 'ok');
+  };
+  function injectNoInboxFilter(){
+    const area=q('qp-actions'); if(area && !q('sv76-no-inbox-filter')){
+      const btn=document.createElement('button'); btn.id='sv76-no-inbox-filter'; btn.className='qp-action'; btn.textContent='🚫 No Inbox'; btn.onclick=function(){ if(typeof setFilter==='function') setFilter('no_inbox', btn); };
+      area.appendChild(btn);
+    }
+    const stats=q('qp-stats');
+    if(stats && Array.isArray(window.businesses) && !q('sv76-no-inbox-stat')){
+      const n=window.businesses.filter(b=>b.status==='no_inbox').length; if(n){ const d=document.createElement('div'); d.id='sv76-no-inbox-stat'; d.className='qp-stat'; d.innerHTML='<span class="qp-stat-dot" style="color:var(--red)"></span><span class="qp-stat-count">'+n+'</span><span class="qp-stat-label">No Inbox</span>'; stats.appendChild(d); }
+    }
+  }
+  const oldRenderQueue=window.renderQueue; window.renderQueue=function(){ const r=oldRenderQueue?oldRenderQueue.apply(this,arguments):undefined; setTimeout(injectNoInboxFilter,0); return r; };
+  const oldShow=window.showContentTab; window.showContentTab=function(id,el){ const r=oldShow?oldShow.apply(this,arguments):undefined; if(id==='verify-send-content') setTimeout(renderVerify76,0); return r; };
+  function rename(){ const logo=q('topbar-logo'), title=q('topbar-title'); if(logo) logo.textContent='🧭 Scout App'; if(title) title.textContent=VERSION + ' — Personal Ready + No Inbox'; document.title='Scout App v76'; injectNoInboxFilter(); }
+  document.addEventListener('DOMContentLoaded', rename); setTimeout(rename,300); setTimeout(rename,1500);
+})();
+</script>
+
+
+<!-- SCOUT APP v77 - Bounce to No Inbox, Real Replies Only, Live Send Timestamps -->
+<script>
+(function(){
+  const VERSION='v77 — Bounce Cleanup + Live Send Times';
+  const DASH_ROOT='v73-dashboard-root';
+  const RANGE_KEY='scout_dashboard_range';
+  const LOG_KEY='scout_send_activity_log_v63';
+  const SCHEDULE_KEY='scout_scheduled_batches_v62';
+  const q=id=>document.getElementById(id);
+  const arr=v=>Array.isArray(v)?v:[];
+  const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const norm=v=>String(v||'').trim().toLowerCase();
+  const nowIso=()=>new Date().toISOString();
+  function businesses(){ try{return Array.isArray(window.businesses)?window.businesses:[]}catch(e){return []} }
+  function saveNow(){ try{ if(typeof save==='function') save(); }catch(e){} }
+  function refreshNow(){ try{ if(typeof renderQueue==='function') renderQueue(); }catch(e){} try{ if(typeof renderDetail==='function') renderDetail(); }catch(e){} try{ if(typeof updateEsSendStats==='function') updateEsSendStats(); }catch(e){} }
+  function parseEmail(v){ const s=String(v||'').trim().toLowerCase(); const m=s.match(/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/i); return m?m[0].toLowerCase():''; }
+  function emailOf(b){ return parseEmail(b&& (b.email || b.best_email || b.validatedEmail || b.validatedEmail1 || (Array.isArray(b.emails)?b.emails[0]:''))); }
+  function statusOf(b){ return norm(b&&(b.status||b.emailStatus))||'pending'; }
+  function ts(v){ const d=v?new Date(v):null; return d&&!isNaN(d.getTime())?d.getTime():0; }
+  function sentAtOf(b){ return b&&(b.sentAt||b.contactedAt||b.lastSentAt||b.sent_at||''); }
+  function senderOf(b){ return parseEmail(b&&(b.emailUsedToContact||b.contactedByEmail||b.lastContactedByEmail||b.sentFromEmail||b.gmailUsed||b.sentBy||b.senderEmail||b.actualSender||b.fromEmail||b.gmailAccount||'')); }
+  function fmt(v){ if(!v)return '—'; const d=new Date(v); if(isNaN(d.getTime()))return String(v).slice(0,19).replace('T',' '); const today=d.toDateString()===new Date().toDateString(); return today?d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}):d.toLocaleDateString([], {month:'short', day:'numeric'})+' '+d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+  function shortEmail(v){ v=parseEmail(v); if(!v)return ''; if(v.length<34)return v; const [u,d]=v.split('@'); return (u.slice(0,13)+'…@'+d); }
+  function lowerText(x){ return norm([x&&x.replyFrom,x&&x.from,x&&x.replyFromHeader,x&&x.fromHeader,x&&x.subject,x&&x.replySubject,x&&x.body,x&&x.theirReply,x&&x.snippet,x&&x.bounceReason,x&&x.bounceType,x&&x.emailStatus,x&&x.lastSendError].filter(Boolean).join('\n')); }
+  function isMailerDaemonText(t){ return /mailer-daemon@googlemail\.com|mailer-daemon@google\.com|mail delivery subsystem|delivery status notification|delivery failure|address not found|message not delivered|your message wasn'?t delivered|your message was not sent|you have reached a limit for sending mail|undeliverable|returned mail|recipient address rejected|550 |5\.1\.1|no such user|user unknown|couldn'?t be found|unable to receive mail/i.test(t||''); }
+  function deliveryKind(x){ const t=lowerText(x); if(!isMailerDaemonText(t))return ''; if(/you have reached a limit for sending mail|limit for sending mail|daily user sending|quota|rate limit|too many messages/i.test(t)) return 'sender_limit'; if(/address not found|couldn'?t be found|no such user|user unknown|does not exist|invalid recipient|recipient address rejected|5\.1\.1|unable to receive mail/i.test(t)) return 'no_inbox'; return 'no_inbox'; }
+  function replyAt(r,b){ return (r&&(r.receivedAt||r.at||r.date||r.internalDate))||(b&&(b.repliedAt||b.lastReplyAt))||''; }
+  function isAfterSent(r,b){ const s=ts(sentAtOf(b)), rts=ts(replyAt(r,b)); if(!s||!rts)return true; return rts>=s; }
+  function realReplyEvents(b){ const out=[]; arr(b&&b.replyHistory).forEach(r=>{ if(!deliveryKind(r)&&isAfterSent(r,b)) out.push(r); }); if(!out.length && b&&(b.theirReply||b.repliedAt||b.lastReplyAt)){ const r={body:b.theirReply||'',subject:b.replySubject||'',replyFrom:b.replyFrom||b.replyFromHeader||'',receivedAt:b.repliedAt||b.lastReplyAt||'',gmailAccount:b.replyTrackingGmail||b.replyFromAccount||senderOf(b)}; if(!deliveryKind(r)&&isAfterSent(r,b)) out.push(r); } return out.sort((a,b)=>ts(replyAt(a))-ts(replyAt(b))); }
+  function deliveryEvents(b){ const out=[]; arr(b&&b.replyHistory).forEach(r=>{ const kind=deliveryKind(r); if(kind) out.push({...r, kind}); }); arr(b&&b.bounces).forEach(r=>out.push({...r, kind:deliveryKind(r)||'no_inbox'})); const ownKind=deliveryKind(b); if(ownKind) out.push({at:b.bouncedAt||b.repliedAt||b.updatedAt||sentAtOf(b), body:b.theirReply||b.bounceReason||b.lastSendError||'', kind:ownKind}); return out; }
+  function markNoInbox(b, ev){ const at=(ev&&(ev.receivedAt||ev.at))||nowIso(); b.status='no_inbox'; b.emailStatus='no_inbox'; b.inboxStatus='no_inbox'; b.mailboxExists=false; b.readyToSend=false; b.readyToEmailScout=false; b.noInboxAt=b.noInboxAt||at; b.bouncedAt=b.bouncedAt||at; b.bounceType=(ev&&ev.bounceType)||'no_inbox'; b.bounceReason=(ev&&(ev.bounceReason||ev.reason||ev.body||ev.snippet))||'Delivery notice / no inbox'; b.updatedAt=nowIso(); }
+  function markSenderLimitNotContacted(b, ev){ b.status='ready_to_send'; b.emailStatus='ready'; b.readyToSend=true; b.readyToEmailScout=true; b.senderLimitNoticeAt=(ev&&(ev.receivedAt||ev.at))||nowIso(); b.lastSendError='Gmail sender limit notice; message was not sent.'; b.updatedAt=nowIso(); }
+  function clearFalseReplyFields(b){ b.theirReply=''; b.repliedAt=''; b.lastReplyAt=''; b.replyClassification=''; b.suggestedResponse=''; b.replySubject=''; b.replyFrom=''; b.replyFromHeader=''; b.replyCount=0; b.realReplyCount=0; }
+  function cleanupBounceAndResponses(showToast){ let noInbox=0, senderLimit=0, falseReplies=0, exact=0; businesses().forEach(b=>{
+    const events=deliveryEvents(b); const real=realReplyEvents(b); const hadFalse=statusOf(b)==='replied' && !real.length;
+    if(events.length){ const lim=events.find(e=>e.kind==='sender_limit'); const ni=events.find(e=>e.kind!=='sender_limit')||events[0]; if(lim && !ni){ markSenderLimitNotContacted(b, lim); senderLimit++; } else { markNoInbox(b, ni); noInbox++; } if(hadFalse || b.theirReply){ clearFalseReplyFields(b); falseReplies++; } }
+    else if(hadFalse){ b.status=sentAtOf(b)?'contacted':'ready_to_send'; clearFalseReplyFields(b); falseReplies++; }
+    const finalReal=realReplyEvents(b); if(finalReal.length){ b.status='replied'; b.realReplyCount=finalReal.length; b.replyCount=finalReal.length; b.repliedAt=replyAt(finalReal[finalReal.length-1],b); b.lastReplyAt=b.repliedAt; b.theirReply=finalReal[finalReal.length-1].body||finalReal[finalReal.length-1].snippet||b.theirReply||''; exact++; }
+  }); saveNow(); refreshNow(); if(showToast!==false){ try{toast(`Cleaned: ${noInbox} No Inbox, ${senderLimit} sender-limit back to Ready, ${falseReplies} false replies removed. Real responses now: ${exact}`,'ok')}catch(e){} } return {noInbox,senderLimit,falseReplies,realResponses:exact}; }
+  function inRange(v,range){ if(range==='all')return true; const t=ts(v); if(!t)return false; const d=new Date(); const start=new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime(); if(range==='today')return t>=start; if(range==='yesterday')return t>=start-86400000&&t<start; if(range==='7days')return t>=Date.now()-7*86400000; if(range==='1month')return t>=Date.now()-31*86400000; return true; }
+  function isNoInbox(b){ return statusOf(b)==='no_inbox'||b.inboxStatus==='no_inbox'||b.emailStatus==='no_inbox'||b.mailboxExists===false; }
+  function isActualContacted(b){ return !!sentAtOf(b)&&!isNoInbox(b)&&!deliveryEvents(b).length&&['contacted','replied','closed'].includes(statusOf(b)); }
+  function isReady(b){ const st=statusOf(b); return ['ready','ready_to_send'].includes(st)&&!!emailOf(b)&&!isNoInbox(b)&&!sentAtOf(b); }
+  function isFollowDue(b){ const s=ts(sentAtOf(b)); return isActualContacted(b)&&!realReplyEvents(b).length&&s&&Date.now()-s>24*3600000; }
+  function cleanSchedules(){ let list=[]; try{list=JSON.parse(localStorage.getItem(SCHEDULE_KEY)||'[]')}catch(e){} if(!Array.isArray(list))return []; const keep=list.filter(s=>!/complete|completed|done|sent|finished|cancel|cancelled|canceled/i.test(String(s.status||''))); if(keep.length!==list.length)localStorage.setItem(SCHEDULE_KEY,JSON.stringify(keep)); return keep; }
+  function metrics(range){ const all=businesses(); const actual=all.filter(b=>isActualContacted(b)&&inRange(sentAtOf(b),range)); let realCount=0, realContacts=0; all.forEach(b=>{ const r=realReplyEvents(b).filter(x=>inRange(replyAt(x,b),range)); if(r.length){ realContacts++; realCount+=r.length; } }); let notices=0; all.forEach(b=>{ notices+=deliveryEvents(b).filter(e=>inRange(e.receivedAt||e.at||b.bouncedAt||sentAtOf(b),range)).length; }); return {actual, realCount, realContacts, notices, noReply:all.filter(b=>isActualContacted(b)&&!realReplyEvents(b).length), follow:all.filter(isFollowDue), ready:all.filter(isReady), noInbox:all.filter(isNoInbox)}; }
+  function card(label,num,hint,cls){ return `<div class="v77-card"><div>${esc(label)}</div><strong class="${cls||''}">${esc(num)}</strong><span>${esc(hint||'')}</span></div>`; }
+  function rangeButtons(r){ return [['today','Today'],['yesterday','Yesterday'],['7days','Last 7 days'],['1month','Last 1 month'],['all','All time']].map(([v,l])=>`<button class="topbar-btn ${r===v?'primary':''}" onclick="v77SetDashboardRange('${v}')">${l}</button>`).join(''); }
+  function templateHtml(range){ const map={}; businesses().forEach(b=>{ if(!isActualContacted(b)||!inRange(sentAtOf(b),range))return; const key=b.sentTemplateId||b.templateId||b.sentTemplateName||b.templateName||'Unknown/deleted'; const name=b.sentTemplateName||b.templateName||b.subjectSent||key; if(!map[key])map[key]={name,sent:0,replies:0,notices:0}; map[key].sent++; map[key].replies+=realReplyEvents(b).filter(r=>inRange(replyAt(r,b),range)).length; map[key].notices+=deliveryEvents(b).filter(e=>inRange(e.receivedAt||e.at,range)).length; }); const rows=Object.values(map).sort((a,b)=>(b.replies/(b.sent||1))-(a.replies/(a.sent||1))||b.sent-a.sent).slice(0,5); return rows.length?rows.map(r=>`<div class="v77-row"><div><b>${esc(r.name)}</b><span>${r.sent} contacted · ${r.replies} real replies · ${r.notices} notices</span></div><em>${r.sent?Math.round(r.replies/r.sent*100):0}%</em></div>`).join(''):'<div class="v77-empty">No message data yet.</div>'; }
+  function senderHtml(range){ const map={}; businesses().forEach(b=>{ const s=senderOf(b)||'Unknown sender'; if(!inRange(sentAtOf(b)||b.repliedAt||b.bouncedAt,range)&&range!=='all')return; if(!map[s])map[s]={sent:0,replies:0,notices:0}; if(isActualContacted(b)&&inRange(sentAtOf(b),range))map[s].sent++; map[s].replies+=realReplyEvents(b).filter(r=>inRange(replyAt(r,b),range)).length; map[s].notices+=deliveryEvents(b).filter(e=>inRange(e.receivedAt||e.at,range)).length; }); const rows=Object.entries(map).filter(([_,v])=>v.sent||v.replies||v.notices).sort((a,b)=>b[1].sent-a[1].sent).slice(0,8); return rows.length?rows.map(([email,r])=>`<div class="v77-row"><div><b>${esc(shortEmail(email))}</b><span>${r.sent} contacted · ${r.replies} replies · ${r.notices} notices</span></div><em>${r.sent?Math.round(r.replies/r.sent*100):0}%</em></div>`).join(''):'<div class="v77-empty">No Gmail sender activity yet.</div>'; }
+  function activityHtml(){ let rows=[]; try{rows=JSON.parse(localStorage.getItem(LOG_KEY)||'[]')}catch(e){} rows=arr(rows).slice(-10).reverse(); return rows.length?rows.map(r=>`<div class="v77-row"><div><b>${esc(fmt(r.at))} · ${esc(r.type||'info')}</b><span>${esc(r.message||r.email||r.name||r.reason||'')} ${r.senderEmail?'· '+esc(shortEmail(r.senderEmail)):''}</span></div></div>`).join(''):'<div class="v77-empty">No recent activity.</div>'; }
+  function schedulesHtml(){ const rows=cleanSchedules().sort((a,b)=>ts(a.runAt||a.time||a.scheduledAt)-ts(b.runAt||b.time||b.scheduledAt)).slice(0,8); return rows.length?rows.map(s=>`<div class="v77-row"><div><b>${esc(fmt(s.runAt||s.time||s.scheduledAt))}</b><span>${esc(s.limit||'')} messages · ${esc(shortEmail(s.senderEmail||s.senderKey||''))} · ${esc(String(s.status||'scheduled').replace('scheduled_v66','scheduled'))}</span></div></div>`).join(''):'<div class="v77-empty">No active schedules.</div>'; }
+  function renderDashboard(){ const panel=q('dashboard-content'); if(!panel)return; cleanupBounceAndResponses(false); const range=localStorage.getItem(RANGE_KEY)||'today'; const m=metrics(range); panel.classList.add('v77-dashboard-panel'); panel.innerHTML=`<div id="${DASH_ROOT}"><div class="v77-head"><div><h2>📊 Dashboard</h2><p>Actual contacted only means sent and no delivery/no-inbox notice. Mailer-daemon notices are not responses.</p></div><div class="v77-ranges">${rangeButtons(range)}<button class="topbar-btn" onclick="v77CleanNow()">Clean</button><button class="topbar-btn" onclick="renderScoutDashboard()">Refresh</button></div></div><div class="v77-metrics">${card('Actual contacted',m.actual.length,'Sent with inbox, no bounce','ok')}${card('Real response messages',m.realCount,`${m.realContacts} contacts replied`,'accent')}${card('Delivery / No Inbox',m.notices,'Not counted as response','warn')}${card('Contacted no reply',m.noReply.length,'Follow-up pool','')}${card('Follow-up due',m.follow.length,'Needs next touch','warn')}${card('Ready to Send',m.ready.length,'Strict ready only','ok')}</div><div class="v77-grid"><section><h3>Top 5 Messages</h3>${templateHtml(range)}</section><section><h3>Gmail Used Per Contact</h3>${senderHtml(range)}</section><section><h3>Active Schedule Status</h3>${schedulesHtml()}</section><section><h3>Live Activity Log</h3>${activityHtml()}</section></div></div>`; }
+  window.v77SetDashboardRange=function(r){localStorage.setItem(RANGE_KEY,r); renderDashboard();};
+  window.v77CleanNow=function(){ const x=cleanupBounceAndResponses(true); renderDashboard(); return x; };
+  window.renderScoutDashboard=function(){ renderDashboard(); };
+  window.renderDashboardStable=window.renderScoutDashboard;
+  function patchVersion(){ const t=q('topbar-title'); if(t)t.textContent='Scout App v77 — Clean Contacted + No Inbox'; document.title='Scout App v77'; }
+  function addCss(){ if(q('v77-css'))return; const style=document.createElement('style'); style.id='v77-css'; style.textContent=`#dashboard-content.v77-dashboard-panel{overflow:auto!important;height:100%!important;min-height:0!important;padding:0!important;display:block!important}#dashboard-content.v77-dashboard-panel>*:not(#${DASH_ROOT}){display:none!important;height:0!important;overflow:hidden!important;visibility:hidden!important}#${DASH_ROOT}{padding:18px;max-width:1120px;margin:0 auto;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}#${DASH_ROOT} .v77-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}#${DASH_ROOT} h2{font-size:18px;font-weight:950;margin:0 0 4px}#${DASH_ROOT} p{font-size:12px;color:var(--muted);margin:0}#${DASH_ROOT} .v77-ranges{display:flex;gap:7px;flex-wrap:wrap}#${DASH_ROOT} .v77-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px}#${DASH_ROOT} .v77-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px}#${DASH_ROOT} .v77-card div{font-size:11px;color:var(--muted);font-weight:850;text-transform:uppercase;letter-spacing:.35px}#${DASH_ROOT} .v77-card strong{display:block;font-size:25px;font-weight:950;line-height:1;margin:7px 0;color:var(--text)}#${DASH_ROOT} .v77-card strong.ok{color:var(--green)}#${DASH_ROOT} .v77-card strong.warn{color:var(--amber)}#${DASH_ROOT} .v77-card strong.accent{color:var(--accent)}#${DASH_ROOT} .v77-card span,#${DASH_ROOT} .v77-empty{font-size:11px;color:var(--muted)}#${DASH_ROOT} .v77-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}#${DASH_ROOT} section{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;min-height:130px}#${DASH_ROOT} section h3{font-size:14px;margin:0 0 10px;font-weight:900}#${DASH_ROOT} .v77-row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);min-width:0}#${DASH_ROOT} .v77-row:last-child{border-bottom:none}#${DASH_ROOT} .v77-row div{min-width:0}#${DASH_ROOT} .v77-row b{display:block;font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#${DASH_ROOT} .v77-row span{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#${DASH_ROOT} .v77-row em{font-style:normal;font-size:11px;color:var(--accent);flex-shrink:0}.v77-no-inbox-pill{display:inline-flex;align-items:center;gap:4px;border:1px solid rgba(245,73,92,.45);background:rgba(245,73,92,.10);color:var(--red);border-radius:8px;padding:3px 7px;font-size:10px;font-weight:800;margin-top:5px}`; document.head.appendChild(style); }
+  function addActivity(type,data){ let list=[]; try{list=JSON.parse(localStorage.getItem(LOG_KEY)||'[]')}catch(e){} list.push({at:nowIso(),type,...(data||{})}); localStorage.setItem(LOG_KEY,JSON.stringify(list.slice(-1000))); }
+  function markSentWithExactTime(row,result,sender){ const b=businesses().find(x=>String(x.id||'')===String(row.businessId||row.id||'')||emailOf(x)===parseEmail(row.email)); if(!b)return; const sentAt=result.sentAt||nowIso(); Object.assign(b,{status:'contacted',contactedAt:sentAt,sentAt:sentAt,emailUsedToContact:sender,contactedByEmail:sender,lastContactedByEmail:sender,sentFromEmail:sender,gmailUsed:sender,sentBy:sender,senderEmail:sender,subjectSent:row.subject,messageSent:row.message,sentTemplateId:row.templateId||'',sentTemplateName:row.templateName||'',sentTemplateIndex:row.templateIndex,gmailMessageId:result.gmailMessageId||result.messageId||'',gmailThreadId:result.gmailThreadId||result.threadId||'',updatedAt:sentAt}); }
+  // Live exact sender: send one selected contact per backend call so Scout logs immediately and stores exact Gmail sentAt.
+  const oldStart=window.startEsSend;
+  window.startEsSend=async function(){
+    if(typeof buildRows!=='function' || typeof selectedGmail!=='function'){ return oldStart?oldStart.apply(this,arguments):undefined; }
+    const backend=(typeof getBackendUrl==='function'?getBackendUrl():'').replace(/\/$/,''); if(!backend){ try{toast('Backend URL missing','err')}catch(e){} return; }
+    const entry=selectedGmail('v51-gmail-account'); if(!entry){ try{toast('Select a connected Gmail','err')}catch(e){} return; }
+    const account=entry.token||entry; const limit=Math.max(1,parseInt(q('v51-send-limit')?.value||'50',10)); const delayMs=Math.max(0,parseInt(q('v51-send-delay')?.value||'1500',10)); const dryRun=!!q('v51-dry-run')?.checked; const rows=buildRows(limit, q('v62-template-choice')?.value||'current');
+    if(!rows.length){ try{toast('No Ready to Send contacts','warn')}catch(e){} return; }
+    const log=(msg,type)=>{ addActivity(type||'info',{message:msg,senderEmail:entry.email||entry.key}); try{ if(window.v63RenderLiveSendLog)window.v63RenderLiveSendLog(); }catch(e){} try{renderDashboard();}catch(e){} };
+    const startBtn=q('es-start-btn'); if(startBtn)startBtn.disabled=true; log(`${dryRun?'Dry run':'Live send'} starting for ${rows.length} from ${entry.email||entry.key}`,'info');
+    let sent=0,failed=0,skipped=0;
+    for(let i=0;i<rows.length;i++){
+      const row=rows[i];
+      try{
+        const res=await fetch(backend+'/email-scout/send-selected-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contacts:[row],limit:1,delayMs:0,dryRun,senderEmail:entry.email||entry.key||'',access_token:account.access_token||'',refresh_token:account.refresh_token||'',expires_at:account.expires_at||0,client_id:(typeof getClientId==='function'?getClientId():'')})});
+        const data=await res.json().catch(()=>({})); if(data.access_token&&entry.token){ entry.token.access_token=data.access_token; entry.token.expires_at=Date.now()+55*60000; }
+        const r=(data.results&&data.results[0])||{}; const sender=data.senderEmail||entry.email||entry.key||'';
+        if(data.forceStopped||data.senderPaused||r.code==='gmail_send_limit_reached'){ failed++; log(`STOP: Gmail limit reached for ${sender}. Remaining contacts not sent.`,'limit_stop'); break; }
+        if(r.status==='sent'){ sent++; markSentWithExactTime(row,r,sender); log(`Sent ${sent}/${rows.length}: ${row.email} from ${sender} at ${fmt(r.sentAt||nowIso())}`,'sent'); }
+        else if(r.status==='dry_run'){ skipped++; log(`Dry run ${i+1}/${rows.length}: ${row.email}`,'dry_run'); }
+        else if(r.status==='skipped'||r.status==='not_sent'){ skipped++; log(`Skipped ${row.email}: ${r.reason||'skipped'}`,'skipped'); }
+        else { failed++; log(`Failed ${row.email}: ${r.reason||data.error||'failed'}`,'failed'); }
+      }catch(e){ failed++; log(`Failed ${row.email}: ${e.message||e}`,'failed'); }
+      saveNow(); refreshNow(); if(delayMs&&i<rows.length-1) await new Promise(r=>setTimeout(r,delayMs));
+    }
+    saveNow(); refreshNow(); cleanupBounceAndResponses(false); renderDashboard(); if(startBtn)startBtn.disabled=false; try{toast(`Send finished: ${sent} sent, ${failed} failed, ${skipped} skipped`, failed?'warn':'ok')}catch(e){};
+  };
+  function patchNav(){ const old=window.showContentTab; if(typeof old==='function'&&!old.__v77){ window.showContentTab=function(id,el){ const out=old.apply(this,arguments); if(id==='dashboard-content')setTimeout(renderDashboard,0); return out; }; window.showContentTab.__v77=true; } }
+  function init(){ addCss(); patchVersion(); patchNav(); cleanupBounceAndResponses(false); cleanSchedules(); if(q('dashboard-content')?.classList.contains('active'))renderDashboard(); }
+  window.v77CleanBounceNoInbox=cleanupBounceAndResponses;
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init); else init(); setTimeout(init,500); setTimeout(init,1800);
+})();
+</script>
