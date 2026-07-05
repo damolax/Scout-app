@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Scout App">
 <meta name="theme-color" content="#0d0f14">
 <link rel="manifest" href="manifest.json">
-<title>Scout App v61</title>
+<title>Scout App v74</title>
 <style>
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
@@ -426,7 +426,7 @@ body{
 <!-- TOP BAR -->
 <div id="topbar">
   <span id="topbar-logo">🧭 Scout App</span>
-  <span id="topbar-title">v61 — Premium design, latest Scout workflow</span>
+  <span id="topbar-title">Scout App v74 — Dashboard + Reply Sender Fix</span>
   <button class="topbar-btn" onclick="showTab('upload')">📁 Upload List</button>
   <button class="topbar-btn" onclick="showTab('verify')">🧪 Verify</button>
   <button class="topbar-btn" onclick="showTab('autoscout')">🤖 Auto-Scout</button>
@@ -5443,7 +5443,7 @@ function manualPollReplies() {
     try {
       const logo = q('topbar-logo'); const title = q('topbar-title');
       if (logo) logo.textContent = '🧭 Scout App';
-      if (title) title.textContent = 'Scout App v42 — Business Scouting System';
+      if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix';
       injectBatchSourceControls();
       const p = q('sv36-batch-result');
       if (p) p.textContent = 'To send 200 from Email Found: set Source = Email Found tab, Batch limit = 200, then Ready contacts auto-load in Send Message.';
@@ -5795,7 +5795,7 @@ function manualPollReplies() {
     installStyles(); installFilterButtons();
     const logo = q('topbar-logo'), title = q('topbar-title');
     if (logo) logo.textContent = '🧭 Scout App';
-    if (title) title.textContent = VERSION + ' — Business Scouting System';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix' + ' — Business Scouting System';
     const verifyBtn = q('sv36-verify-status');
     if (verifyBtn) verifyBtn.textContent = 'Email Found must be verified before it becomes Ready to Send.';
     if (typeof renderQueue === 'function') renderQueue();
@@ -6040,7 +6040,7 @@ function manualPollReplies() {
     cleanupOldAutoBatch('page load');
     const logo = q('topbar-logo'), title = q('topbar-title');
     if (logo) logo.textContent = '🧭 Scout App';
-    if (title) title.textContent = VERSION + ' — Correct Workflow';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix' + ' — Correct Workflow';
     const autoCard = Array.from(document.querySelectorAll('#autoscout-panel .as-card p')).find(p => /Processes each business|researches pending businesses/i.test(p.textContent || ''));
     if (autoCard) autoCard.textContent = 'Auto-Scout only researches Pending businesses. If an email is found, the lead moves to Email Found and must be verified before Ready to Send.';
     const batchBtn = q('batch-btn');
@@ -6189,7 +6189,7 @@ function manualPollReplies() {
   function initV43(){
     const logo = q('topbar-logo'), title = q('topbar-title');
     if (logo) logo.textContent = '🧭 Scout App';
-    if (title) title.textContent = VERSION + ' — Resource-Safe Workflow';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix' + ' — Resource-Safe Workflow';
     renderStorageBadge();
     if (typeof renderQueue === 'function') renderQueue();
     try { if (typeof updateAsStats === 'function') updateAsStats(); } catch(e) {}
@@ -6454,7 +6454,7 @@ function manualPollReplies() {
     installStyle(); installReviewMovePanel();
     const logo = q('topbar-logo'), title = q('topbar-title');
     if (logo) logo.textContent = '🧭 Scout App';
-    if (title) title.textContent = VERSION + ' — Resource-Safe Workflow';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix' + ' — Resource-Safe Workflow';
     const search = q('qp-search');
     if (search && !search.__v45_patched) { search.__v45_patched = true; search.addEventListener('input', () => { window.scoutQueueLimit = PAGE_SIZE; window.__scoutLastQueueRenderKey=''; setTimeout(renderQueue,0); }); }
     rerender();
@@ -6888,7 +6888,7 @@ function manualPollReplies() {
     });
     const logo = q('topbar-logo'), title = q('topbar-title');
     if (logo) logo.textContent = '🧭 Scout App';
-    if (title) title.textContent = VERSION + ' — Message Subjects Clean Workflow';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix' + ' — Message Subjects Clean Workflow';
     const h2 = document.querySelector('#email-scout-content h2'); if (h2) h2.textContent = '📧 Send Message';
     const uploadStatus = q('es-upload-status'); if (uploadStatus) uploadStatus.textContent = 'No upload here. Upload leads in Upload List, verify them, then send from this tab.';
   }
@@ -7132,7 +7132,7 @@ function manualPollReplies() {
   function renameVersion(){
     const logo = q('topbar-logo'), title = q('topbar-title');
     if (logo) logo.textContent = '🧭 Scout App';
-    if (title) title.textContent = VERSION + ' — Category Shortcode Fix';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix' + ' — Category Shortcode Fix';
   }
 
   function init(){
@@ -7410,7 +7410,7 @@ function manualPollReplies() {
   function renameVersion(){
     const logo = q('topbar-logo'), title = q('topbar-title');
     if (logo) logo.textContent = '🧭 Scout App';
-    if (title) title.textContent = VERSION + ' — Safe Manual Gmail Sending';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix' + ' — Safe Manual Gmail Sending';
   }
   function init(){ addSafetyNotice(); renameVersion(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
@@ -7603,7 +7603,7 @@ function manualPollReplies() {
   }
   window.startEsSend = function(){ sendAutomaticBatch(); };
   window.sendNextEs = function(){ sendAutomaticBatch(); };
-  function rename(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='v55 — Gmail API Auto Send + Contacted Tracking'; }
+  function rename(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix'; }
   function init(){ addApiControls(); rename(); setInterval(refreshGmailAccountSelect, 5000); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
@@ -8165,7 +8165,7 @@ function manualPollReplies() {
   function patchVersion(){
     const logo=q('topbar-logo'), title=q('topbar-title');
     if (logo) logo.textContent='🧭 Scout App';
-    if (title) title.textContent='v56 — Dashboard + Auto-Scout Diagnostics';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix';
   }
   function init(){ insertDashboard(); addAutoScoutDiagnosticButton(); patchVersion(); /* v70: old dashboard interval disabled */ }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
@@ -8358,7 +8358,7 @@ function manualPollReplies() {
   }
   window.startEsSend = sendSelectedGmailBatch;
   window.sendNextEs = sendSelectedGmailBatch;
-  function patchVersion(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='v57 — Selected Gmail Sender Fix'; }
+  function patchVersion(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix'; }
   function init(){ renderSelectedGmailOptions(); patchVersion(); setInterval(renderSelectedGmailOptions, 1000); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
@@ -8603,7 +8603,7 @@ function manualPollReplies() {
     }, 100);
   });
   function patchAutoScoutUi(){
-    const title=q('topbar-title'); if (title) title.textContent='v58 — Compact Filters + Honest Auto-Scout Diagnostics';
+    const title=q('topbar-title'); if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix';
     const btn=q('v56-test-email-finder'); if (btn) btn.textContent='🔎 Test website email finder';
     const panel=q('autoscout-panel');
     if (panel && !q('sv58-autoscout-warning')) {
@@ -8683,7 +8683,7 @@ function manualPollReplies() {
   function installSimplifiedCopy(){
     const logo = q('topbar-logo'), title = q('topbar-title');
     if (logo) logo.textContent = '🧭 Scout App';
-    if (title) title.textContent = VERSION + ' — Simple Workflow';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix' + ' — Simple Workflow';
 
     // Rename tabs/buttons: Verify -> Verify, Send Message -> Send Message.
     document.querySelectorAll('button,.nav-tab,.tt-btn,.mob-nav-btn,h2,h3,p,span,label').forEach(el => {
@@ -9038,7 +9038,7 @@ function manualPollReplies() {
   function patchVersion(){
     const logo=q('topbar-logo'), title=q('topbar-title');
     if (logo) logo.textContent='🧭 Scout App';
-    if (title) title.textContent='v61 — Premium Design + Reply Tracking';
+    if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix';
   }
   function addReplyHint(){
     const btn = document.querySelector('button[onclick="manualPollReplies()"]');
@@ -9472,7 +9472,7 @@ function manualPollReplies() {
   function patchFollowupFilter(){
     window.getFollowUpsDue = function(){ return businessesSafe().filter(isFollowupDue); };
   }
-  function patchVersion(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent=VERSION; }
+  function patchVersion(){ const logo=q('topbar-logo'), title=q('topbar-title'); if (logo) logo.textContent='🧭 Scout App'; if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix'; }
   function init(){
     patchVersion(); patchFollowupFilter(); installSendEnhancements(); renderSchedules();
     if (q('dashboard-content')) renderDashboardV62();
@@ -9854,7 +9854,7 @@ function manualPollReplies() {
   const previousDashboard = window.renderScoutDashboard;
   window.renderScoutDashboard = function(){ try { if (typeof previousDashboard === 'function') previousDashboard(); } catch(e){} injectDashboardActivity(); };
 
-  function patchVersion(){ const title=q('topbar-title'); if (title) title.textContent = VERSION; }
+  function patchVersion(){ const title=q('topbar-title'); if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix'; }
   function init(){
     patchVersion(); ensureLiveSendPanel(); renderLiveSendLog(); migrateSchedules(); renderSchedulesV63(); injectDashboardActivity();
     if (!v63RunnerInstalled) {
@@ -10176,7 +10176,7 @@ function manualPollReplies() {
     const blockedBtn=[...document.querySelectorAll('.qp-action')].find(b => /blocked/.test(String(b.getAttribute('onclick') || '')));
     if (blockedBtn) blockedBtn.textContent = '🛡 Team Scouted';
   }
-  function patchVersion(){ const title=q('topbar-title'); if (title) title.textContent=VERSION; document.title='Scout App v64'; }
+  function patchVersion(){ const title=q('topbar-title'); if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix'; document.title='Scout App v74'; }
   function init(){
     patchVersion(); patchFilterLabel(); seedRegistryFromContacted(false); migrateSchedules();
     setTimeout(()=>blockKnownScouted({}), 1500);
@@ -10392,8 +10392,8 @@ function manualPollReplies() {
     wrapped.__v65Wrapped = true; window.renderDetail = wrapped;
   }
   function patchLabels(){
-    const title=q('topbar-title'); if (title) title.textContent = VERSION;
-    document.title = 'Scout App v65';
+    const title=q('topbar-title'); if (title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix';
+    document.title='Scout App v74';
     // Remove old Airtable-specific default subject/message where possible without deleting user templates.
     try {
       const templates = Array.isArray(window.esTemplates) ? window.esTemplates : (typeof esTemplates !== 'undefined' ? esTemplates : []);
@@ -10688,7 +10688,7 @@ function manualPollReplies() {
     cards.forEach(p => { if(/No upload happens here|Subject lines are controlled|Write up to 20 messages/i.test(p.textContent||'')) p.style.display='none'; });
   }
   function init(){
-    document.title='Scout App v67'; const title=q('topbar-title'); if(title) title.textContent=VERSION;
+    document.title='Scout App v74'; const title=q('topbar-title'); if(title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix';
     const rot=q('es-rotation-mode'); if(rot && !rot.value) rot.value='rotate';
     migrateSchedules(); refreshTemplateSelect('v62-template-choice'); refreshTemplateSelect('v62-schedule-template'); refreshSenderSelect('v51-gmail-account'); refreshSenderSelect('v62-schedule-sender'); renderSchedules(); ensureLogPanel(); stripBusyText();
     setInterval(runDueSchedules, 15000); setInterval(renderSchedules, 20000); setTimeout(runDueSchedules, 3000);
@@ -10900,7 +10900,7 @@ function manualPollReplies() {
   }
   window.renderScoutDashboard = renderDashboardStable;
 
-  function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent=VERSION; document.title='Scout App v68'; }
+  function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix'; document.title='Scout App v74'; }
   function init(){ patchVersion(); cleanupFalseReplies(); renderNow(); if(q('dashboard-content')) renderDashboardStable(); /* v70: old v68 dashboard interval disabled */ }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
 })();
@@ -11111,16 +11111,7 @@ function manualPollReplies() {
   }
   window.renderScoutDashboard = renderDashboardV69;
 
-  function startDashboardGuard(){
-    const panel = q('dashboard-content'); if(!panel || observerStarted) return;
-    observerStarted = true;
-    const obs = new MutationObserver(() => {
-      if(rendering) return;
-      if(panel.classList.contains('active') && !q(ROOT_ID)) setTimeout(()=>window.renderScoutDashboard&&window.renderScoutDashboard(), 20);
-    });
-    obs.observe(panel, { childList:true, subtree:false });
-    /* v70: old v69 dashboard interval disabled */
-  }
+  function startDashboardGuard(){ /* v74 strict: disabled old v69 dashboard observer */ }
   function wrapTabNavigation(){
     try {
       if(typeof showContentTab === 'function' && !showContentTab.__v69Wrapped){
@@ -11140,13 +11131,12 @@ function manualPollReplies() {
     try { tagSenderAccounts(true); } catch(e){}
   }
   function patchVersion(){
-    const title = q('topbar-title'); if(title) title.textContent = VERSION;
-    document.title = 'Scout App v70';
+    const title = q('topbar-title'); if(title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix';
+    document.title='Scout App v74';
     const logo = q('topbar-logo'); if(logo && /QuickBook|Airtable/i.test(logo.textContent||'')) logo.textContent = '🧭 Scout App';
   }
   function init(){
-    patchVersion(); wrapTabNavigation(); cleanFalseRepliesV69(true); tagSenderAccounts(true); patchDetailSenderBadge(); startDashboardGuard();
-    if(q('dashboard-content')) renderDashboardV69();
+    patchVersion(); wrapTabNavigation(); cleanFalseRepliesV69(true); tagSenderAccounts(true); patchDetailSenderBadge();
     try { if(typeof renderQueue === 'function') renderQueue(); } catch(e){}
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
@@ -11194,8 +11184,8 @@ function manualPollReplies() {
   function addTimelineCard(){ const b=(typeof getActiveBiz==='function'?getActiveBiz():null); const panel=q('detail-panel'); if(!b||!panel)return; const old=q('v70-contact-timeline'); if(old)old.remove(); const history=arr(b.replyHistory).filter(x=>!isDeliveryNoticeText((x.body||'')+' '+(x.subject||'')+' '+(x.replyFrom||''))); const latestFallback=(!history.length && (b.theirReply||b.repliedAt))?[{receivedAt:b.repliedAt||b.lastReplyAt,body:b.theirReply||'',replyFrom:b.replyFrom||b.replyFromHeader||'',gmailAccount:b.replyFromAccount||b.replyTrackingGmail||senderOf(b),subject:b.replySubject||''}]:[]; const rows=history.length?history:latestFallback; const card=document.createElement('div'); card.className='detail-section'; card.id='v70-contact-timeline'; card.innerHTML=`<div class="detail-section-head"><span class="detail-section-title">Contact Timeline</span></div><div class="detail-section-body"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:12px"><div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">Message sent</div><div style="font-size:12px;margin-top:4px">${esc(fmt(sentAtOf(b)))}</div></div><div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">Email used</div><div style="font-size:12px;margin-top:4px;color:var(--green)">${esc(senderOf(b)||'—')}</div></div><div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800">Responses tracked</div><div style="font-size:12px;margin-top:4px;color:var(--accent)">${rows.length}</div></div></div><div style="font-size:11px;color:var(--muted);margin-bottom:6px">Every real prospect response is tracked here. Delivery notices are not counted as responses.</div>${rows.length?rows.slice().reverse().map((r,i)=>`<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:8px;background:rgba(255,255,255,.02)"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px"><strong style="font-size:12px">Response ${rows.length-i}</strong><span style="font-size:11px;color:var(--muted)">${esc(fmt(r.receivedAt))}</span></div><div style="font-size:11px;color:var(--muted);margin-bottom:6px">From: ${esc(r.replyFrom||'prospect')} · Tracked through: ${esc(r.gmailAccount||senderOf(b)||'Gmail')}</div><div style="font-size:12px;line-height:1.6;white-space:pre-wrap">${esc(r.body||'')}</div></div>`).join(''):'<div style="font-size:12px;color:var(--muted);padding:8px 0">No real prospect response tracked yet.</div>'}</div>`; const header=panel.querySelector('.detail-header'); if(header&&header.nextSibling) header.insertAdjacentElement('afterend',card); else panel.prepend(card); }
   function wrapDetail(){ if(typeof window.renderDetail==='function'&&!window.renderDetail.__v70){ const old=window.renderDetail; window.renderDetail=function(){ const out=old.apply(this,arguments); setTimeout(addTimelineCard,40); return out; }; window.renderDetail.__v70=true; } }
   function cleanupPlaybookUi(){ document.querySelectorAll('.settings-card').forEach(c=>{ if(/Claude AI Integration|playbook|Airtable/i.test(c.textContent||'')) c.style.display='none'; }); document.querySelectorAll('[class*="industry-badge"]').forEach(e=>{ if(/Airtable|QuickBook/i.test(e.textContent||'')) e.style.display='none'; }); }
-  function patchVersion(){ const title=q('topbar-title'); if(title)title.textContent=VERSION; document.title='Scout App v70'; const logo=q('topbar-logo'); if(logo)logo.textContent='🧭 Scout App'; }
-  function init(){ patchVersion(); cleanSchedules(); wrapDetail(); cleanupPlaybookUi(); if(q('dashboard-content')) renderDashboardV70(); setInterval(()=>{ if(q('dashboard-content')?.classList.contains('active')) renderDashboardV70(); cleanupPlaybookUi(); },8000); }
+  function patchVersion(){ const title=q('topbar-title'); if(title)title.textContent='Scout App v74 — Dashboard + Reply Sender Fix'; document.title='Scout App v74'; const logo=q('topbar-logo'); if(logo)logo.textContent='🧭 Scout App'; }
+  function init(){ patchVersion(); cleanSchedules(); wrapDetail(); cleanupPlaybookUi(); /* v74 strict: v70 dashboard renderer disabled */ }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init); else init();
 })();
 </script>
@@ -11342,8 +11332,8 @@ function manualPollReplies() {
     }
   }
   function patchVersion(){
-    const title = q('topbar-title'); if(title) title.textContent = VERSION;
-    document.title = 'Scout App v71';
+    const title = q('topbar-title'); if(title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix';
+    document.title='Scout App v74';
   }
   function init(){ patchVersion(); wrapDetail(); setTimeout(addConversationCard,100); }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
@@ -11499,7 +11489,7 @@ function manualPollReplies() {
   }
 
   function patchVersion(){
-    const title = q('topbar-title'); if(title) title.textContent = VERSION;
+    const title = q('topbar-title'); if(title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix';
     const docTitle = document.querySelector('title'); if(docTitle) docTitle.textContent = 'Scout App v72';
   }
 
@@ -11721,8 +11711,8 @@ function manualPollReplies() {
     #${ROOT} .v73-row span{display:block;font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     #${ROOT} .v73-row em{font-style:normal;font-size:11px;color:var(--accent);flex-shrink:0;}
   `; document.head.appendChild(css);
-  function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent=VERSION; document.title='Scout App v73'; }
-  function init(){ patchVersion(); patchNav(); installObserver(); cleanSchedules(); normalizeContactTags(); if(q('dashboard-content')?.classList.contains('active')) renderDashboard(); setInterval(()=>{cleanSchedules();dashboardGuard();},4000); }
+  function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix'; document.title='Scout App v74'; }
+  function init(){ patchVersion(); patchNav(); cleanSchedules(); normalizeContactTags(); /* v74 strict: v73 observer/interval disabled */ }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
 })();
 
@@ -11853,11 +11843,71 @@ function manualPollReplies() {
   `; document.head.appendChild(css);
   function compactText(){ document.body.classList.add('v72-compact'); const noisy=/This is a Scout App tab|No upload happens here|Subject lines are controlled|Upload\/import leads|Search engines can still block|Used to generate personalized|daily export|separate app|playbook|QuickBook|Airtable|One dashboard only/i; document.querySelectorAll('p,.claude-key-note,.as-hint').forEach(el=>{const t=(el.textContent||'').trim(); if(t.length>120||noisy.test(t)) el.classList.add('v74-hidden-copy');}); }
   function patchNav(){ const old=window.showContentTab; if(typeof old==='function'&&!old.__v74){ window.showContentTab=function(id,el){ const out=old.apply(this,arguments); if(id==='dashboard-content') setTimeout(()=>renderDashboard(true),0); else setTimeout(enhanceQueue,0); return out; }; window.showContentTab.__v74=true; } }
-  function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent=VERSION; document.title='Scout App v74'; }
-  function init(){ patchVersion(); patchNav(); normalizeContactTags(); compactText(); if(q('dashboard-content')?.classList.contains('active')) renderDashboard(true); setTimeout(enhanceQueue,0); setTimeout(enhanceDetail,0); setInterval(()=>{ if(q('dashboard-content')?.classList.contains('active')) renderDashboard(false); else { enhanceQueue(); compactText(); } }, 15000); }
+  function patchVersion(){ const title=q('topbar-title'); if(title) title.textContent='Scout App v74 — Dashboard + Reply Sender Fix'; document.title='Scout App v74'; }
+  function init(){ patchVersion(); patchNav(); normalizeContactTags(); compactText(); if(q('dashboard-content')?.classList.contains('active')) renderDashboard(true); setTimeout(enhanceQueue,0); setTimeout(enhanceDetail,0); /* v74 strict: no dashboard auto-loop */ }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
 })();
 
+</script>
+
+
+<script id="v74-strict-final-queue-dashboard-fix">
+(function(){
+  const VERSION_TEXT='Scout App v74 — Dashboard + Reply Sender Fix';
+  const ROOT='v73-dashboard-root';
+  function q(id){return document.getElementById(id)}
+  function setVersion(){
+    try{ document.title='Scout App v74'; }catch(e){}
+    const title=q('topbar-title'); if(title) title.textContent=VERSION_TEXT;
+    const logo=q('topbar-logo'); if(logo) logo.textContent='🧭 Scout App';
+  }
+  function cleanDashboardPanel(){
+    const panel=q('dashboard-content'); if(!panel) return;
+    // Keep exactly one dashboard element. If old renderers append anything else, remove it.
+    const root=q(ROOT);
+    if(root){ [...panel.children].forEach(el=>{ if(el!==root) el.remove(); }); }
+    panel.classList.add('v74-dashboard-panel');
+    panel.style.overflow='auto';
+    panel.style.height='100%';
+    panel.style.minHeight='0';
+    panel.style.padding='0';
+  }
+  const previousRender = window.renderScoutDashboard;
+  window.renderScoutDashboard = function(force){
+    let out;
+    try{ if(typeof previousRender === 'function') out = previousRender.call(this, true); }catch(e){ console.warn('v74 dashboard render skipped:', e); }
+    setTimeout(cleanDashboardPanel,0);
+    setVersion();
+    return out;
+  };
+  const oldShow = window.showContentTab;
+  if(typeof oldShow === 'function' && !oldShow.__v74Strict){
+    window.showContentTab = function(id, el){
+      const out = oldShow.apply(this, arguments);
+      if(id === 'dashboard-content') setTimeout(()=>window.renderScoutDashboard(true),0);
+      if(id === 'detail' || id === 'business') setTimeout(()=>{ try{ if(typeof renderQueue==='function') renderQueue(); }catch(e){} },0);
+      setTimeout(setVersion,0);
+      return out;
+    };
+    window.showContentTab.__v74Strict = true;
+  }
+  const oldRenderQueue = window.renderQueue;
+  if(typeof oldRenderQueue === 'function' && !oldRenderQueue.__v74StrictRestore){
+    window.renderQueue = function(){
+      const out = oldRenderQueue.apply(this, arguments);
+      setTimeout(()=>{ try{ if(typeof enhanceQueue==='function') enhanceQueue(); }catch(e){} setVersion(); },0);
+      return out;
+    };
+    window.renderQueue.__v74StrictRestore = true;
+  }
+  function boot(){
+    setVersion();
+    try{ if(typeof renderQueue==='function') renderQueue(); }catch(e){ console.warn('v74 queue render warning:', e); }
+    if(q('dashboard-content')?.classList.contains('active')) window.renderScoutDashboard(true);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+  setTimeout(boot,500);
+})();
 </script>
 
 </body>
