@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-const protectedPrefixes = ['/dashboard', '/upload', '/businesses', '/verify', '/auto-scout', '/email-scout', '/replies', '/no-inbox', '/settings', '/data-safety', '/main-scout', '/classic'];
+const protectedPrefixes = ['/dashboard', '/upload', '/businesses', '/verify', '/auto-scout', '/email-scout', '/replies', '/no-inbox', '/settings', '/data-safety'];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -35,7 +35,7 @@ export async function middleware(request: NextRequest) {
 
   if ((path === '/login' || path === '/') && user) {
     const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = '/main-scout';
+    dashboardUrl.pathname = '/dashboard';
     dashboardUrl.search = '';
     return NextResponse.redirect(dashboardUrl);
   }

@@ -7,7 +7,7 @@ import { Business, BusinessStatus, Workspace } from '@/lib/types';
 const PAGE_SIZE = 100;
 const VERIFY_CHUNK_SIZE = 5000;
 const UPDATE_CONCURRENCY = 50;
-const MAX_DETECT_PER_RUN = 5000;
+const MAX_DETECT_PER_RUN = 50000;
 const DISPOSABLE_DOMAINS = new Set(['mailinator.com','10minutemail.com','tempmail.com','guerrillamail.com','yopmail.com','trashmail.com']);
 const FREE_PROVIDER_DOMAINS = new Set(['gmail.com','yahoo.com','outlook.com','hotmail.com','icloud.com','aol.com','proton.me','protonmail.com']);
 const ROLE_PREFIXES = new Set(['info','support','hello','contact','sales','admin','office','service','shop','orders','team','crm']);
@@ -35,6 +35,7 @@ type VerifySummary = {
   ready: number;
   review: number;
   invalid: number;
+  skippedAlreadyChecked: number;
   errors: number;
 };
 
@@ -54,6 +55,11 @@ function normalizeEmail(email: unknown) {
   return String(email || '').trim().toLowerCase();
 }
 
+function alreadyDetected(business: Business) {
+  const raw = (business.raw || {}) as Record<string, any>;
+  const checkedEmail = normalizeEmail(raw?.verification?.email || raw?.ready_email_detection?.email || '');
+  return Boolean(raw?.verification || raw?.verification_checked_at) && (!checkedEmail || checkedEmail === normalizeEmail(business.email));
+}
 
 function detectReadyEmail(emailValue: unknown): BackendVerifyResult {
   const email = normalizeEmail(emailValue);
@@ -73,7 +79,7 @@ function detectReadyEmail(emailValue: unknown): BackendVerifyResult {
   }
   const score = isRoleBased ? 90 : isFreeProvider ? 82 : 88;
   const reason = isRoleBased
-    ? 'Valid format and role/business inbox. Accepted for outreach.'
+    ? 'Valid format and role/business inbox style. Accepted for outreach.'
     : isFreeProvider
       ? 'Valid format and personal/free-mail inbox style. Accepted for outreach, but watch bounce/reply results.'
       : 'Valid format and business-domain email. Accepted for outreach.';
@@ -114,12 +120,11 @@ function statusFromVerification(result?: BackendVerifyResult): BusinessStatus {
 }
 
 function reasonFromVerification(result?: BackendVerifyResult) {
-  if (!result) return 'No verification result.';
+  if (!result) return 'No detection result.';
   return [
     result.status ? `status=${result.status}` : '',
     typeof result.score !== 'undefined' ? `score=${result.score}` : '',
     result.provider ? `provider=${result.provider}` : '',
-    result.providerStatus ? `provider_status=${result.providerStatus}` : '',
     result.providerReason ? `reason=${result.providerReason}` : '',
     result.isRoleBased ? 'role_email' : '',
     result.isFreeProvider ? 'free_provider' : ''
@@ -143,17 +148,23 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState<VerifyFilter>('needs_verification');
   const [search, setSearch] = useState('');
-  const [limit, setLimit] = useState(5000);
+  const [limitText, setLimitText] = useState('5000');
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<VerifyStats>({});
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [message, setMessage] = useState('Load contacts with emails, then detect ready emails. No paid verifier is used.');
+  const [message, setMessage] = useState('Load contacts with emails, then run Ready Email Detection. No paid verifier is used. Already-detected emails are skipped.');
   const [error, setError] = useState('');
   const [lastResults, setLastResults] = useState<Array<Record<string, unknown>>>([]);
   const selectedIds = Object.keys(selected).filter((id) => selected[id]);
+
+  function requestedLimit() {
+    const raw = limitText.trim();
+    if (!raw) return MAX_DETECT_PER_RUN;
+    return Math.max(1, Math.min(MAX_DETECT_PER_RUN, Number(raw) || 5000));
+  }
 
   function applyFilter(query: any) {
     if (filter === 'has_email') query = query.not('email', 'is', null).neq('email', '');
@@ -198,7 +209,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       setTotal(count || 0);
       setPage(nextPage);
       setSelected({});
-      setMessage(`Loaded ${(data || []).length.toLocaleString()} contact(s). Page size is ${PAGE_SIZE}; ready-email detection can run up to 5,000 at a time.`);
+      setMessage(`Loaded ${(data || []).length.toLocaleString()} contact(s). Detection can run up to ${MAX_DETECT_PER_RUN.toLocaleString()} at a time; blank number means all matching contacts up to that safety cap.`);
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -212,35 +223,43 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
-  const detectorNote = 'Free ready-email detector: no paid verifier. It marks valid-format business or personal emails Ready, rejects clearly bad/disposable emails, and leaves true inbox proof to bounce/reply tracking after sending.';
+  const detectorNote = 'Free ready-email detector: no paid verifier. It accepts business or personal emails with valid format and a usable domain. It cannot prove inbox delivery before sending; true no-inbox/bounce is caught after sending and will not count as a response.';
 
   async function refresh() {
     await Promise.all([loadBusinesses(page), loadStats()]);
   }
 
   async function fetchNextBatch() {
-    let query = supabase
-      .from('businesses')
-      .select('*')
-      .eq('workspace_id', workspace.id)
-      .not('email', 'is', null)
-      .neq('email', '')
-      .in('status', ['pending', 'found', 'review'])
-      .order('updated_at', { ascending: true })
-      .limit(Math.max(1, Math.min(MAX_DETECT_PER_RUN, limit)));
-    const cleanSearch = search.trim().replace(/[%_]/g, '');
-    if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
-    const { data, error: batchError } = await query;
-    if (batchError) throw batchError;
-    return (data || []) as Business[];
+    const max = requestedLimit();
+    const rows: Business[] = [];
+    for (let from = 0; rows.length < max; from += 1000) {
+      const to = from + 999;
+      let query = supabase
+        .from('businesses')
+        .select('*')
+        .eq('workspace_id', workspace.id)
+        .not('email', 'is', null)
+        .neq('email', '')
+        .in('status', ['pending', 'found', 'review'])
+        .order('updated_at', { ascending: true })
+        .range(from, to);
+      const cleanSearch = search.trim().replace(/[%_]/g, '');
+      if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
+      const { data, error: batchError } = await query;
+      if (batchError) throw batchError;
+      const chunk = (data || []) as Business[];
+      rows.push(...chunk.filter((b) => b.email && !alreadyDetected(b)));
+      if (chunk.length < 1000) break;
+    }
+    return rows.slice(0, max);
   }
 
-  async function persistVerification(targets: Business[], results: BackendVerifyResult[]) {
+  async function persistVerification(targets: Business[], results: BackendVerifyResult[], skippedAlreadyChecked = 0) {
     const byEmail = new Map(results.map((item) => [normalizeEmail(item.email), item]));
     const checkedAt = new Date().toISOString();
     const candidateRows: Array<Record<string, unknown>> = [];
     const rowsForDownload: Array<Record<string, unknown>> = [];
-    const summary: VerifySummary = { checked: 0, ready: 0, review: 0, invalid: 0, errors: 0 };
+    const summary: VerifySummary = { checked: 0, ready: 0, review: 0, invalid: 0, skippedAlreadyChecked, errors: 0 };
 
     await parallelLimit(targets, UPDATE_CONCURRENCY, async (business) => {
       const result = byEmail.get(normalizeEmail(business.email));
@@ -251,7 +270,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       }
       const nextStatus = statusFromVerification(result);
       const score = typeof result.score === 'number' ? result.score : business.score;
-      const raw = { ...(business.raw || {}), verification: result, verification_checked_at: checkedAt };
+      const raw = { ...(business.raw || {}), verification: result, ready_email_detection: result, verification_checked_at: checkedAt };
       const { error: updateError } = await supabase
         .from('businesses')
         .update({ status: nextStatus, score, raw })
@@ -271,22 +290,12 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       if (nextStatus === 'ready') summary.ready += 1;
       else if (nextStatus === 'invalid') summary.invalid += 1;
       else summary.review += 1;
-      rowsForDownload.push({
-        name: business.name,
-        email: business.email,
-        business_status: nextStatus,
-        verification_status: result.status || '',
-        score: score || '',
-        provider: result.provider || '',
-        reason: reasonFromVerification(result)
-      });
+      rowsForDownload.push({ name: business.name, email: business.email, business_status: nextStatus, detection_status: result.status || '', score: score || '', provider: result.provider || '', reason: reasonFromVerification(result) });
     });
 
     for (let i = 0; i < candidateRows.length; i += 500) {
       const chunk = candidateRows.slice(i, i + 500);
-      const { error: upsertError } = await supabase
-        .from('email_candidates')
-        .upsert(chunk, { onConflict: 'workspace_id,business_id,email' });
+      const { error: upsertError } = await supabase.from('email_candidates').upsert(chunk, { onConflict: 'workspace_id,business_id,email' });
       if (upsertError) throw upsertError;
     }
 
@@ -304,14 +313,17 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       if (mode === 'selected') targets = businesses.filter((b) => selected[b.id] && b.email);
       if (mode === 'page') targets = businesses.filter((b) => b.email);
       if (mode === 'next') targets = await fetchNextBatch();
+      const beforeSkip = targets.length;
+      targets = targets.filter((b) => !alreadyDetected(b));
+      const skippedAlreadyChecked = beforeSkip - targets.length;
       const byEmail = new Map<string, Business>();
       for (const business of targets) {
         const email = normalizeEmail(business.email);
         if (email && !byEmail.has(email)) byEmail.set(email, business);
       }
-      targets = Array.from(byEmail.values()).slice(0, Math.max(1, Math.min(MAX_DETECT_PER_RUN, limit)));
+      targets = Array.from(byEmail.values()).slice(0, requestedLimit());
       if (!targets.length) {
-        setMessage('No contacts with emails were found for this verification action.');
+        setMessage(skippedAlreadyChecked ? `No new emails to detect. ${skippedAlreadyChecked.toLocaleString()} already-detected contact(s) were skipped.` : 'No contacts with emails were found for this action. No-email businesses should go to Auto Scout.');
         return;
       }
 
@@ -326,11 +338,11 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       }
 
       setMessage('Saving ready-email detection results to Supabase...');
-      const summary = await persistVerification(targets, allResults);
+      const summary = await persistVerification(targets, allResults, skippedAlreadyChecked);
       const seconds = ((performance.now() - started) / 1000).toFixed(1);
       setProgress(100);
       setSelected({});
-      setMessage(`Detected ${summary.checked.toLocaleString()} email(s) in ${seconds}s. Ready: ${summary.ready.toLocaleString()}, Review: ${summary.review.toLocaleString()}, Invalid: ${summary.invalid.toLocaleString()}, Errors: ${summary.errors.toLocaleString()}. This is free preflight detection, not paid SMTP inbox verification.`);
+      setMessage(`Detected ${summary.checked.toLocaleString()} email(s) in ${seconds}s. Ready: ${summary.ready.toLocaleString()}, Review: ${summary.review.toLocaleString()}, Invalid: ${summary.invalid.toLocaleString()}, Already skipped: ${summary.skippedAlreadyChecked.toLocaleString()}, Errors: ${summary.errors.toLocaleString()}.`);
       await refresh();
     } catch (err) {
       setError(formatError(err));
@@ -362,13 +374,14 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
   }
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const nextLabel = limitText.trim() ? `Detect Next ${requestedLimit().toLocaleString()}` : 'Detect All Matching';
 
   return (
     <div className="stack">
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Has Email</div><div className="num">{(stats.has_email || 0).toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Found</div><div className="num">{(stats.found || 0).toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Ready</div><div className="num">{(stats.ready || 0).toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Review</div><div className="num">{(stats.review || 0).toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Invalid / No Inbox</div><div className="num">{((stats.invalid || 0) + (stats.no_inbox || 0) + (stats.bounced || 0)).toLocaleString()}</div></div>
       </div>
 
@@ -377,14 +390,14 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
           <div className="actions" style={{ flex: 1 }}>
             <input className="input" style={{ maxWidth: 320 }} placeholder="Search name, email, website..." value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') loadBusinesses(0); }} />
             <select className="select" style={{ maxWidth: 210 }} value={filter} onChange={(event) => { setFilter(event.target.value as VerifyFilter); setPage(0); }}>
-              <option value="needs_verification">Needs verification</option>
+              <option value="needs_verification">Needs detection</option>
               <option value="has_email">All with email</option>
               <option value="ready">Ready</option>
               <option value="review">Review</option>
               <option value="invalid">Invalid / No Inbox</option>
               <option value="all">All businesses</option>
             </select>
-            <input className="input" style={{ maxWidth: 120 }} type="number" min={1} max={5000} value={limit} onChange={(event) => setLimit(Number(event.target.value || 100))} />
+            <input className="input" style={{ maxWidth: 160 }} type="text" inputMode="numeric" placeholder="blank = all" value={limitText} onChange={(event) => setLimitText(event.target.value.replace(/[^0-9]/g, ''))} />
             <button className="btn secondary" type="button" disabled={loading || busy} onClick={() => loadBusinesses(0)}>Search</button>
           </div>
           <button className="btn secondary" type="button" disabled={loading || busy} onClick={refresh}>Refresh</button>
@@ -399,11 +412,11 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
           <span className="badge">Selected: {selectedIds.length.toLocaleString()}</span>
           <button className="btn" type="button" disabled={!selectedIds.length || busy} onClick={() => verifyContacts('selected')}>Detect Selected</button>
           <button className="btn secondary" type="button" disabled={!businesses.some((b) => b.email) || busy} onClick={() => verifyContacts('page')}>Detect Current Page</button>
-          <button className="btn secondary" type="button" disabled={busy} onClick={() => verifyContacts('next')}>Detect Next {Math.max(1, Math.min(MAX_DETECT_PER_RUN, limit)).toLocaleString()}</button>
+          <button className="btn secondary" type="button" disabled={busy} onClick={() => verifyContacts('next')}>{nextLabel}</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'ready')}>Mark Ready</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'review')}>Mark Review</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'invalid')}>Mark Invalid</button>
-          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-verification-results.csv', lastResults)}>Download Last Detection Results</button>
+          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-ready-email-detection-results.csv', lastResults)}>Download Last Results</button>
         </div>
 
         <div className="table-wrap">
@@ -411,25 +424,23 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
             <thead>
               <tr>
                 <th><input type="checkbox" checked={businesses.length > 0 && selectedIds.length === businesses.filter((b) => b.email).length} onChange={(event) => toggleAll(event.target.checked)} /></th>
-                <th>Business</th><th>Email</th><th>Status</th><th>Score</th><th>Verification</th><th>Website</th><th>Actions</th>
+                <th>Business</th><th>Email</th><th>Status</th><th>Score</th><th>Detection</th><th>Website</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {businesses.map((b) => {
-                const verification = (b.raw || {}) as Record<string, any>;
-                const verificationData = verification.verification as BackendVerifyResult | undefined;
+                const raw = (b.raw || {}) as Record<string, any>;
+                const verificationData = raw.verification as BackendVerifyResult | undefined;
                 return (
                   <tr key={b.id}>
                     <td><input type="checkbox" disabled={!b.email} checked={!!selected[b.id]} onChange={(event) => setSelected((current) => ({ ...current, [b.id]: event.target.checked }))} /></td>
                     <td><strong>{b.name || '-'}</strong><br /><span className="muted">{b.category || ''} {b.location ? `· ${b.location}` : ''}</span></td>
-                    <td>{b.email || <span className="muted">No email</span>}</td>
+                    <td>{b.email || <span className="muted">No email · send to Auto Scout</span>}</td>
                     <td><span className={`status ${b.status}`}>{b.status.replace('_', ' ')}</span></td>
                     <td>{b.score ?? '-'}</td>
-                    <td>{verificationData ? <span className="muted">{reasonFromVerification(verificationData)}</span> : <span className="muted">Not checked</span>}</td>
+                    <td>{verificationData ? <span className="muted">{reasonFromVerification(verificationData)}</span> : <span className="muted">Not detected</span>}</td>
                     <td>{b.website || b.domain || <span className="muted">No site</span>}</td>
-                    <td>
-                      <button className="btn secondary" type="button" disabled={!b.email || busy} onClick={() => { setSelected({ [b.id]: true }); setTimeout(() => verifyContacts('selected'), 0); }}>Detect</button>
-                    </td>
+                    <td><button className="btn secondary" type="button" disabled={!b.email || alreadyDetected(b) || busy} onClick={() => { setSelected({ [b.id]: true }); setTimeout(() => verifyContacts('selected'), 0); }}>{alreadyDetected(b) ? 'Checked' : 'Detect'}</button></td>
                   </tr>
                 );
               })}

@@ -19,9 +19,10 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => ({}));
     const workspaceId = String(body.workspaceId || '');
-    const limit = Math.max(1, Math.min(10000, Number(body.limit || 1000)));
+    const limit = Math.max(1, Math.min(50000, Number(body.limit || 5000)));
     const businessIds = Array.isArray(body.businessIds) ? body.businessIds.map(String).filter(Boolean).slice(0, limit) : [];
     const importBatchId = typeof body.importBatchId === 'string' ? body.importBatchId : '';
+    const noEmailOnly = Boolean(body.noEmailOnly);
 
     if (!workspaceId) return NextResponse.json({ success: false, error: 'Missing workspaceId.' }, { status: 400 });
 
@@ -39,8 +40,10 @@ export async function POST(request: NextRequest) {
       .from('businesses')
       .select('id')
       .eq('workspace_id', workspaceId)
-      .in('status', ['pending', 'review'])
+      .in('status', ['pending', 'review', 'found'])
       .limit(limit);
+
+    if (noEmailOnly) query = query.or('email.is.null,email.eq.');
 
     if (importBatchId) query = query.eq('import_batch_id', importBatchId);
     if (businessIds.length) query = supabase.from('businesses').select('id').eq('workspace_id', workspaceId).in('id', businessIds).limit(limit);

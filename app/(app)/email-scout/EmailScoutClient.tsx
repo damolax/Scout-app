@@ -194,6 +194,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
   const [manualAccessToken, setManualAccessToken] = useState('');
   const [manualRefreshToken, setManualRefreshToken] = useState('');
   const [manualClientId, setManualClientId] = useState('');
+  const [showAdvancedTokens, setShowAdvancedTokens] = useState(false);
   const [sendLimit, setSendLimit] = useState(50);
   const [delayMs, setDelayMs] = useState(0);
   const [dryRun, setDryRun] = useState(false);
@@ -746,7 +747,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Ready Contacts</div><div className="num">{readyContacts.length.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Connected Senders</div><div className="num">{accounts.filter((a) => a.status === 'connected' && !isPaused(a)).length.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Last 500 Sent</div><div className="num">{recentSent.filter((r) => r.status === 'sent').length.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Recent Sent Logs</div><div className="num">{recentSent.filter((r) => r.status === 'sent').length.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Real Replies</div><div className="num">{replies.filter((r) => r.is_real_reply !== false).length.toLocaleString()}</div></div>
       </div>
 
@@ -754,7 +755,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
         <div className="actions" style={{ justifyContent: 'space-between' }}>
           <div>
             <h3 style={{ margin: 0 }}>Backend + Gmail</h3>
-            <p className="muted" style={{ marginBottom: 0 }}>OAuth exchange and Gmail API sending still run through your backend. This app controls the queue, rotation, and Supabase tracking.</p>
+            <p className="muted" style={{ marginBottom: 0 }}>Gmail OAuth and Gmail API sending run through your backend. This Node app controls templates, selected senders, sender rotation, limits, and Supabase tracking.</p>
           </div>
           <button className="btn secondary" type="button" onClick={checkBackend} disabled={busy}>Check Backend</button>
         </div>
@@ -766,7 +767,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
           <h3>Gmail Senders</h3>
-          <p className="muted">Select only the Gmail accounts that should be in this batch rotation. A limited account is removed from rotation immediately.</p>
+          <p className="muted">Use <strong>Connect Gmail</strong>. You normally do not paste access tokens or refresh tokens; OAuth creates those behind the scenes so Gmail can send and read replies. Select only accounts that should join the rotation. If one hits a limit, it is removed immediately.</p>
           <label className="label">Google OAuth Client ID</label>
           <div className="actions">
             <input className="input" style={{ flex: 1, minWidth: 260 }} value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} placeholder="Google OAuth Client ID" />
@@ -774,19 +775,25 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
           </div>
           <p className="muted" style={{ fontSize: 12 }}>Authorized redirect URI in Google Cloud must be: <strong>{typeof window !== 'undefined' ? `${window.location.origin}/email-scout` : '/email-scout'}</strong></p>
 
-          <div className="grid grid-2" style={{ marginTop: 14 }}>
-            <div><label className="label">Manual sender email</label><input className="input" value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="sender@gmail.com" /></div>
-            <div><label className="label">Client ID</label><input className="input" value={manualClientId} onChange={(e) => setManualClientId(e.target.value)} placeholder="optional if saved above" /></div>
+          <div className="actions" style={{ marginTop: 14 }}>
+            <button className="btn secondary" type="button" onClick={() => setShowAdvancedTokens((value) => !value)}>{showAdvancedTokens ? 'Hide Advanced Sender Setup' : 'Advanced: Manual Sender Setup'}</button>
           </div>
-          <label className="label" style={{ marginTop: 10 }}>Access token</label>
-          <input className="input" value={manualAccessToken} onChange={(e) => setManualAccessToken(e.target.value)} placeholder="optional" />
-          <label className="label" style={{ marginTop: 10 }}>Refresh token</label>
-          <input className="input" value={manualRefreshToken} onChange={(e) => setManualRefreshToken(e.target.value)} placeholder="optional" />
-          <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={addManualAccount}>Add / Update Sender</button></div>
+          {showAdvancedTokens ? <div className="card" style={{ padding: 14, marginTop: 12 }}>
+            <p className="muted">Advanced fallback only. Use this only if the backend returned tokens manually. For normal use, click Connect Gmail instead.</p>
+            <div className="grid grid-2" style={{ marginTop: 14 }}>
+              <div><label className="label">Manual sender email</label><input className="input" value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="sender@gmail.com" /></div>
+              <div><label className="label">Client ID</label><input className="input" value={manualClientId} onChange={(e) => setManualClientId(e.target.value)} placeholder="optional if saved above" /></div>
+            </div>
+            <label className="label" style={{ marginTop: 10 }}>Access token</label>
+            <input className="input" value={manualAccessToken} onChange={(e) => setManualAccessToken(e.target.value)} placeholder="advanced only" />
+            <label className="label" style={{ marginTop: 10 }}>Refresh token</label>
+            <input className="input" value={manualRefreshToken} onChange={(e) => setManualRefreshToken(e.target.value)} placeholder="advanced only" />
+            <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={addManualAccount}>Add / Update Sender</button></div>
+          </div> : null}
 
           <div className="table-wrap" style={{ marginTop: 14 }}>
             <table>
-              <thead><tr><th>Use</th><th>Email</th><th>Status</th><th>Today</th><th>Action</th></tr></thead>
+              <thead><tr><th>Use</th><th>Email</th><th>Status</th><th>Sent Today</th><th>Action</th></tr></thead>
               <tbody>
                 {accounts.map((account) => (
                   <tr key={account.id}>
@@ -826,7 +833,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       <div className="card" style={{ padding: 18 }}>
         <h3>Batch Send</h3>
         <div className="grid grid-4">
-          <div><label className="label">Fixed number to send</label><input className="input" type="number" min={1} max={2000} value={sendLimit} onChange={(e) => setSendLimit(Number(e.target.value || 50))} /></div>
+          <div><label className="label">Fixed number to send</label><input className="input" type="number" min={1} max={2000} value={sendLimit} onChange={(e) => setSendLimit(Number(e.target.value || 50))} /><p className="muted" style={{ fontSize: 12 }}>If selected contacts are empty, Scout sends the next Ready contacts.</p></div>
           <div><label className="label">Delay per email/ms</label><input className="input" type="number" min={0} max={60000} value={delayMs} onChange={(e) => setDelayMs(Number(e.target.value || 0))} /></div>
           <div><label className="label">Selected contacts</label><div className="badge">{selectedContactIds.length ? selectedContactIds.length.toLocaleString() : 'Auto next Ready'}</div></div>
           <div><label className="label">Selected senders</label><div className="badge">{selectedAccountIds.length.toLocaleString()}</div></div>
@@ -835,7 +842,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
         <div className="actions">
           <button className="btn" type="button" onClick={sendBatch} disabled={busy || loading}>Start Fixed Batch</button>
           <button className="btn secondary" type="button" onClick={refreshAll} disabled={busy || loading}>Refresh</button>
-          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-v86-last-send-results.csv', lastResults)}>Download Last Results</button>
+          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-v89-last-send-results.csv', lastResults)}>Download Last Results</button>
         </div>
         <div className="grid grid-4" style={{ marginTop: 14 }}>
           <div className="card kpi"><div className="title">Requested</div><div className="num">{summary.requested}</div></div>

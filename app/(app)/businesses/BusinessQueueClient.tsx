@@ -6,17 +6,18 @@ import { Business, BusinessStatus, Workspace } from '@/lib/types';
 
 const STATUS_OPTIONS: BusinessStatus[] = ['pending', 'scanning', 'found', 'ready', 'review', 'contacted', 'responded', 'no_inbox', 'bounced', 'invalid', 'duplicate', 'archived'];
 const PAGE_SIZE = 100;
+const BULK_PAGE_SIZE = 1000;
 
 type StatusFilter = BusinessStatus | 'all';
-type QueueStats = Record<string, number> & { total?: number };
+type QueueStats = Record<string, number> & { total?: number; pending_no_email?: number };
 
 function formatError(error: unknown) {
   if (!error) return 'Unknown error.';
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   try {
-    const item = error as { message?: string; code?: string; details?: string; hint?: string };
-    return [item.message, item.code ? `Code: ${item.code}` : '', item.details ? `Details: ${item.details}` : '', item.hint ? `Hint: ${item.hint}` : ''].filter(Boolean).join(' | ') || JSON.stringify(error);
+    const item = error as { message?: string; code?: string; details?: string; hint?: string; error?: string };
+    return [item.message || item.error, item.code ? `Code: ${item.code}` : '', item.details ? `Details: ${item.details}` : '', item.hint ? `Hint: ${item.hint}` : ''].filter(Boolean).join(' | ') || JSON.stringify(error);
   } catch {
     return String(error);
   }
@@ -29,7 +30,7 @@ function csvEscape(value: unknown) {
 
 function downloadBusinesses(name: string, businesses: Business[]) {
   if (!businesses.length) return;
-  const headers = ['name', 'email', 'phone', 'website', 'domain', 'category', 'location', 'source', 'status', 'score', 'normalized_key', 'created_at', 'updated_at'];
+  const headers = ['id', 'name', 'email', 'phone', 'website', 'domain', 'category', 'location', 'source', 'status', 'score', 'normalized_key', 'created_at', 'updated_at'];
   const lines = [headers.join(',')];
   for (const b of businesses) lines.push(headers.map((h) => csvEscape((b as unknown as Record<string, unknown>)[h])).join(','));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -43,12 +44,17 @@ function downloadBusinesses(name: string, businesses: Business[]) {
   URL.revokeObjectURL(url);
 }
 
+function hasNoEmail(business: Business) {
+  return !String(business.email || '').trim();
+}
+
 export default function BusinessQueueClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
+  const [noEmailLimit, setNoEmailLimit] = useState(5000);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<QueueStats>({});
@@ -65,6 +71,15 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
       .select('id', { count: 'exact', head: true })
       .eq('workspace_id', workspace.id);
     next.total = totalCount || 0;
+
+    const { count: pendingNoEmail } = await supabase
+      .from('businesses')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspace.id)
+      .in('status', ['pending', 'review', 'found'])
+      .or('email.is.null,email.eq.');
+    next.pending_no_email = pendingNoEmail || 0;
+
     await Promise.all(STATUS_OPTIONS.map(async (item) => {
       const { count } = await supabase
         .from('businesses')
@@ -99,7 +114,7 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
       setBusinesses((data || []) as Business[]);
       setTotal(count || 0);
       setPage(nextPage);
-      setMessage(`Showing ${(data || []).length.toLocaleString()} of ${(count || 0).toLocaleString()} matching business(es). Page size is ${PAGE_SIZE}; the app never renders the full list at once.`);
+      setMessage(`Showing ${(data || []).length.toLocaleString()} of ${(count || 0).toLocaleString()} matching business(es). Select no-email rows and send them to Auto Scout, or use the bulk Pending No-Email controls.`);
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -161,6 +176,106 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
     }
   }
 
+  async function fetchPendingNoEmail(limit: number) {
+    const max = Math.max(1, Math.min(50000, limit));
+    const rows: Business[] = [];
+    for (let from = 0; rows.length < max; from += BULK_PAGE_SIZE) {
+      const to = from + Math.min(BULK_PAGE_SIZE, max - rows.length) - 1;
+      const { data, error: fetchError } = await supabase
+        .from('businesses')
+        .select('*')
+        .eq('workspace_id', workspace.id)
+        .in('status', ['pending', 'review', 'found'])
+        .or('email.is.null,email.eq.')
+        .order('created_at', { ascending: true })
+        .range(from, to);
+      if (fetchError) throw fetchError;
+      const chunk = (data || []) as Business[];
+      rows.push(...chunk.filter(hasNoEmail));
+      if (chunk.length < BULK_PAGE_SIZE) break;
+    }
+    return rows.slice(0, max);
+  }
+
+  async function queueForAutoScout(ids: string[], label = 'selected') {
+    if (!ids.length) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/research/enqueue', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, businessIds: ids, limit: ids.length })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json?.error || `Auto Scout queue failed with HTTP ${res.status}`);
+      setSelected({});
+      setMessage(`Sent ${Number(json.enqueued || 0).toLocaleString()} ${label} business(es) to Auto Scout. Open Auto Scout and click Start to begin finding emails.`);
+      await refresh();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function queuePendingNoEmail() {
+    const limit = Math.max(1, Math.min(50000, noEmailLimit));
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/research/enqueue', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, limit, noEmailOnly: true })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json?.error || `Auto Scout queue failed with HTTP ${res.status}`);
+      setMessage(`Queued ${Number(json.enqueued || 0).toLocaleString()} pending/no-email business(es) for Auto Scout. Checked ${Number(json.checked || 0).toLocaleString()}.`);
+      await refresh();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function exportPendingNoEmail() {
+    setBusy(true);
+    setError('');
+    try {
+      const rows = await fetchPendingNoEmail(noEmailLimit);
+      downloadBusinesses('scout-pending-no-email-for-auto-scout.csv', rows);
+      setMessage(`Exported ${rows.length.toLocaleString()} pending/no-email business(es) for Auto Scout.`);
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deletePendingNoEmail() {
+    const limit = Math.max(1, Math.min(50000, noEmailLimit));
+    const ok = confirm(`Delete up to ${limit.toLocaleString()} pending/no-email business(es)? Use export first if you may need them later.`);
+    if (!ok) return;
+    setBusy(true);
+    setError('');
+    try {
+      const rows = await fetchPendingNoEmail(limit);
+      const ids = rows.map((row) => row.id);
+      for (let i = 0; i < ids.length; i += 500) {
+        const { error: deleteError } = await supabase.from('businesses').delete().eq('workspace_id', workspace.id).in('id', ids.slice(i, i + 500));
+        if (deleteError) throw deleteError;
+      }
+      setMessage(`Deleted ${ids.length.toLocaleString()} pending/no-email business(es).`);
+      await refresh();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function archiveNoEmail() {
     const ok = confirm('Archive all pending/found/review businesses that have no email and no website/domain?');
     if (!ok) return;
@@ -169,7 +284,7 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
     try {
       const { error: rpcError } = await supabase.rpc('archive_empty_businesses', { target_workspace: workspace.id });
       if (rpcError) throw rpcError;
-      setMessage('Archived empty/no-contact businesses.');
+      setMessage('Archived empty/no-contact businesses. Businesses with website/domain remain available for Auto Scout.');
       await refresh();
     } catch (err) {
       setError(formatError(err));
@@ -184,14 +299,15 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
   }
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const selectedNoEmailIds = businesses.filter((b) => selected[b.id] && hasNoEmail(b)).map((b) => b.id);
 
   return (
     <div className="stack">
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Total</div><div className="num">{(stats.total || 0).toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Pending</div><div className="num">{(stats.pending || 0).toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Pending No Email</div><div className="num">{(stats.pending_no_email || 0).toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Ready</div><div className="num">{(stats.ready || 0).toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">No Inbox</div><div className="num">{((stats.no_inbox || 0) + (stats.bounced || 0)).toLocaleString()}</div></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
@@ -207,6 +323,18 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
           <button className="btn secondary" type="button" onClick={refresh} disabled={loading}>Refresh</button>
         </div>
         <div className={error ? 'error' : 'notice'} style={{ marginTop: 12 }}>{error || message}</div>
+      </div>
+
+      <div className="card" style={{ padding: 18 }}>
+        <h3>Send No-Email Businesses to Auto Scout</h3>
+        <p className="muted">Businesses without emails should stay Pending. From here you can send them to the Auto Scout queue, export them, or delete them after you are done.</p>
+        <div className="actions" style={{ marginBottom: 12 }}>
+          <input className="input" style={{ maxWidth: 160 }} type="number" min={1} max={50000} value={noEmailLimit} onChange={(event) => setNoEmailLimit(Math.max(1, Math.min(50000, Number(event.target.value) || 5000)))} />
+          <button className="btn" type="button" disabled={busy} onClick={queuePendingNoEmail}>Queue Pending No-Email</button>
+          <button className="btn secondary" type="button" disabled={!selectedNoEmailIds.length || busy} onClick={() => queueForAutoScout(selectedNoEmailIds, 'selected no-email')}>Queue Selected No-Email</button>
+          <button className="btn secondary" type="button" disabled={busy} onClick={exportPendingNoEmail}>Export Pending No-Email</button>
+          <button className="btn danger" type="button" disabled={busy} onClick={deletePendingNoEmail}>Delete Pending No-Email</button>
+        </div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
@@ -240,9 +368,12 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
                   <td>{b.source || '-'}</td>
                   <td>{new Date(b.created_at).toLocaleString()}</td>
                   <td>
-                    <select className="select" value={b.status} onChange={(event) => updateStatus([b.id], event.target.value as BusinessStatus)} disabled={busy}>
-                      {STATUS_OPTIONS.map((item) => <option key={item} value={item}>{item.replace('_', ' ')}</option>)}
-                    </select>
+                    <div className="actions">
+                      <select className="select" value={b.status} onChange={(event) => updateStatus([b.id], event.target.value as BusinessStatus)} disabled={busy}>
+                        {STATUS_OPTIONS.map((item) => <option key={item} value={item}>{item.replace('_', ' ')}</option>)}
+                      </select>
+                      {hasNoEmail(b) ? <button className="btn secondary" type="button" disabled={busy} onClick={() => queueForAutoScout([b.id], 'single no-email')}>Auto Scout</button> : null}
+                    </div>
                   </td>
                 </tr>
               ))}

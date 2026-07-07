@@ -30,25 +30,32 @@ function bestEmailFromPayload(payload: any): string {
 async function callBackendFindEmail(business: any) {
   const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
   if (!backend) throw new Error('NEXT_PUBLIC_BACKEND_URL is not configured.');
-  const target = new URL('/find-email', backend.endsWith('/') ? backend : `${backend}/`);
-  const response = await fetch(target, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      name: business.name,
-      businessName: business.name,
-      website: business.website,
-      domain: business.domain,
-      location: business.location,
-      category: business.category,
-      raw: business.raw
-    })
-  });
-  const text = await response.text();
-  let json: any = null;
-  try { json = text ? JSON.parse(text) : {}; } catch { json = { rawText: text }; }
-  if (!response.ok) throw new Error(json?.error || json?.message || `Backend ${response.status}: ${text.slice(0, 240)}`);
-  return json;
+  const base = backend.endsWith('/') ? backend : `${backend}/`;
+  const paths = ['/find-email', '/email-finder/find', '/api/find-email', '/research/find-email'];
+  const payload = {
+    name: business.name,
+    businessName: business.name,
+    website: business.website,
+    domain: business.domain,
+    location: business.location,
+    category: business.category,
+    raw: business.raw
+  };
+  const errors: string[] = [];
+  for (const path of paths) {
+    const target = new URL(path, base);
+    try {
+      const response = await fetch(target, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+      const text = await response.text();
+      let json: any = null;
+      try { json = text ? JSON.parse(text) : {}; } catch { json = { rawText: text }; }
+      if (response.ok) return json;
+      errors.push(`${path}: ${json?.error || json?.message || response.status}`);
+    } catch (error) {
+      errors.push(`${path}: ${errorMessage(error)}`);
+    }
+  }
+  throw new Error(`No backend email-finder endpoint succeeded. ${errors.join(' | ')}`);
 }
 
 async function runOnce(request: NextRequest) {
@@ -63,7 +70,8 @@ async function runOnce(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
-  const limit = Math.max(1, Math.min(25, Number(request.nextUrl.searchParams.get('limit') || 10)));
+  const limit = Math.max(1, Math.min(500, Number(request.nextUrl.searchParams.get('limit') || 100)));
+  const concurrency = Math.max(1, Math.min(50, Number(request.nextUrl.searchParams.get('concurrency') || 20)));
 
   const { data: jobs, error: jobError } = await supabase
     .from('email_research_jobs')
@@ -75,12 +83,13 @@ async function runOnce(request: NextRequest) {
   if (jobError) throw jobError;
 
   const results: Array<Record<string, unknown>> = [];
-  for (const job of jobs || []) {
-    const business = Array.isArray((job as any).businesses) ? (job as any).businesses[0] : (job as any).businesses;
+
+  async function processJob(job: any) {
+    const business = Array.isArray(job.businesses) ? job.businesses[0] : job.businesses;
     if (!business) {
       await supabase.from('email_research_jobs').update({ status: 'failed', last_error: 'Business not found', finished_at: new Date().toISOString() }).eq('id', job.id);
       results.push({ job: job.id, status: 'failed', error: 'Business not found' });
-      continue;
+      return;
     }
 
     await supabase.from('email_research_jobs').update({ status: 'running', started_at: new Date().toISOString(), attempts: (job.attempts || 0) + 1 }).eq('id', job.id);
@@ -90,7 +99,7 @@ async function runOnce(request: NextRequest) {
       const backendResult = await callBackendFindEmail(business);
       const email = bestEmailFromPayload(backendResult);
       if (email) {
-        await supabase.from('email_candidates').insert({
+        await supabase.from('email_candidates').upsert({
           workspace_id: job.workspace_id,
           business_id: business.id,
           email,
@@ -98,23 +107,32 @@ async function runOnce(request: NextRequest) {
           score: Number(backendResult?.score || backendResult?.confidence || 80) || 80,
           status: 'candidate',
           raw: backendResult
-        });
+        }, { onConflict: 'workspace_id,business_id,email' });
         await supabase.from('businesses').update({ email, status: 'found', raw: { ...(business.raw || {}), backend_email_research: backendResult } }).eq('id', business.id);
         await supabase.from('email_research_jobs').update({ status: 'done', result: backendResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
-        results.push({ job: job.id, business: business.id, status: 'found', email });
+        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'found', email });
       } else {
         await supabase.from('businesses').update({ status: 'review', raw: { ...(business.raw || {}), backend_email_research: backendResult } }).eq('id', business.id);
         await supabase.from('email_research_jobs').update({ status: 'done', result: backendResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
-        results.push({ job: job.id, business: business.id, status: 'no_email_found' });
+        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'no_email_found' });
       }
     } catch (error) {
       const attempts = (job.attempts || 0) + 1;
       const nextStatus = attempts >= 3 ? 'failed' : 'queued';
       await supabase.from('email_research_jobs').update({ status: nextStatus, attempts, last_error: errorMessage(error), finished_at: nextStatus === 'failed' ? new Date().toISOString() : null }).eq('id', job.id);
       if (nextStatus === 'failed') await supabase.from('businesses').update({ status: 'review' }).eq('id', business.id);
-      results.push({ job: job.id, business: business.id, status: nextStatus, error: errorMessage(error) });
+      results.push({ job: job.id, business: business.id, businessName: business.name, status: nextStatus, error: errorMessage(error) });
     }
   }
+
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(concurrency, (jobs || []).length) }, async () => {
+    while (cursor < (jobs || []).length) {
+      const index = cursor++;
+      await processJob((jobs || [])[index]);
+    }
+  });
+  await Promise.all(runners);
 
   return NextResponse.json({ success: true, processed: results.length, results });
 }
