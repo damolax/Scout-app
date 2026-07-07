@@ -9,7 +9,7 @@ export default async function BusinessesPage() {
       <div className="topbar">
         <div className="page-title">
           <h2>Businesses</h2>
-          <p>Native cloud queue. Search, filter, update statuses, export, and manage imported businesses without rendering the full list at once.</p>
+          <p>Native cloud CRM queue. Open any business to view details, Auto Scout history, sent messages, and replies.</p>
         </div>
       </div>
       <BusinessQueueClient workspace={workspace} />

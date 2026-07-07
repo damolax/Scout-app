@@ -1,22 +1,15 @@
-# Scout App v8.5 Setup
+# Scout App v8.13 Setup
 
-1. Push this package to GitHub.
-2. Let Vercel deploy.
-3. Run `supabase/migrations/202607050001_scout_v8_cloud.sql` again in Supabase SQL Editor.
-4. Confirm `NEXT_PUBLIC_BACKEND_URL` is set in Vercel.
-5. Open Verify Emails.
-6. Click Refresh / Check verifier config.
-7. Verify a small selected set first, then current page, then next batch.
+Deploy normally, then run the SQL migration in Supabase if needed.
 
-Provider options:
+Recommended workflow:
+1. Upload contacts. Rows with emails become Ready; rows without emails remain Pending.
+2. Businesses page: queue no-email businesses to Auto Scout or open one business to inspect details.
+3. Auto Scout: click Queue Pending No-Email, then Start Auto Scout.
+4. Auto Scout now tries the backend first. If the backend result is missing/weak, the Node app deep-scans the business website.
+5. Found emails are only promoted when they pass strict rules and have source evidence or safe domain match.
+6. Ready Email Detection: run free preflight checks for format/disposable domains.
+7. Email Scout: send only Ready contacts.
+8. Replies / No Inbox: bounces/no-inbox do not count as responses.
 
-- `basic_mx` works without a paid verifier key and checks format/MX/domain risk.
-- Paid mailbox providers such as ZeroBounce, Hunter, Abstract, NeverBounce, and Kickbox require keys on the backend.
-
-
-## v8.7 update
-
-- Fixed CSV email detection for columns like Emails, Found Emails, Personal Email, Business Email, Owner Email, and Contact Emails.
-- Upload preview now reports total detected email rows, so blank first-page preview rows do not mean the whole file has no emails.
-- Added native Replies page for reply sync, no-inbox/bounce separation, and template/sender response tracking.
-- Run the Supabase migration again after deploying v8.7.
+Important: v8.13 improves website discovery, but speed still depends on target websites, blocking, timeouts, and backend/Vercel limits.

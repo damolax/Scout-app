@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 import type { Workspace } from '@/lib/types';
 
@@ -17,7 +18,7 @@ type JobRow = {
   businesses?: any;
 };
 
-type ScoutStats = Record<string, number> & { pending_no_email?: number; found_with_email?: number };
+type ScoutStats = Record<string, number> & { pending_no_email?: number; found_with_email?: number; stale_running?: number };
 
 function fmtError(error: unknown) {
   if (!error) return 'Unknown error';
@@ -31,7 +32,30 @@ function getBusiness(job: JobRow) {
 }
 
 function getEmailFromResult(result: any) {
-  return String(result?.email || result?.bestEmail || result?.best_email || result?.result?.email || result?.data?.email || '').trim();
+  return String(result?.email || result?.bestEmail || result?.best_email || result?.validatedEmail || result?.result?.email || result?.data?.email || (Array.isArray(result?.emails) ? result.emails[0] : '') || '').trim();
+}
+
+function getEvidenceFromResult(result: any) {
+  if (!result || typeof result !== 'object') return '';
+  const direct = result.sourceUrl || result.source_url || result.foundOn || result.found_on || result.contactPage || result.contact_page || result.page || result.url || result.website;
+  if (direct) return String(direct);
+  const arrays = [result.sources, result.pages, result.urls, result.links, result.evidence];
+  for (const item of arrays) {
+    if (Array.isArray(item) && item.length) {
+      const first = item.find(Boolean);
+      if (typeof first === 'string') return first;
+      if (first && typeof first === 'object') return String(first.url || first.href || first.page || first.source || '');
+    }
+  }
+  return '';
+}
+
+function qualityLabel(result: any) {
+  const evidence = getEvidenceFromResult(result);
+  const generated = Boolean(result?.generated || result?.guessed || result?.pattern || String(result?.method || '').toLowerCase().includes('guess'));
+  if (evidence) return 'source seen';
+  if (generated) return 'generated only';
+  return 'unverified candidate';
 }
 
 export default function AutoScoutClient({ workspace }: { workspace: Workspace }) {
@@ -43,9 +67,30 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   const [stats, setStats] = useState<ScoutStats>({});
   const [recentJobs, setRecentJobs] = useState<JobRow[]>([]);
   const [results, setResults] = useState<Array<Record<string, unknown>>>([]);
-  const [message, setMessage] = useState('Ready. Queue pending/no-email businesses, then click Start Auto Scout. The tab shows live queued/running/found/failed progress.');
+  const [message, setMessage] = useState('Ready. Queue pending/no-email businesses, then click Start Auto Scout. Use the found-email table below as the source of truth.');
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
+
+  const foundRows = useMemo(() => {
+    const rows = [...results.map((row) => ({ session: true, row })), ...recentJobs.map((job) => ({ session: false, row: job }))];
+    return rows
+      .map((item) => {
+        const row: any = item.row;
+        const business = item.session ? null : getBusiness(row as JobRow);
+        const result = item.session ? row : row.result;
+        const email = String(row.email || business?.email || getEmailFromResult(result)).trim();
+        const businessName = String(row.businessName || row.business || business?.name || '').trim();
+        const evidence = String(row.evidence || getEvidenceFromResult(result)).trim();
+        const quality = String(row.quality || qualityLabel(result));
+        const status = String(row.status || '').trim();
+        const reason = String(row.error || row.reason || row.last_error || '').trim();
+        const pagesChecked = Number(row.pagesChecked || result?.deepWebsiteFinder?.pagesChecked || result?.pagesChecked || 0);
+        const id = String(row.business || business?.id || row.id || '');
+        return { id, email, businessName, evidence, quality, status, pagesChecked, reason };
+      })
+      .filter((row) => row.email || row.status === 'failed' || row.status === 'no_email_found' || row.reason)
+      .slice(0, 120);
+  }, [recentJobs, results]);
 
   async function loadStats() {
     const next: ScoutStats = {};
@@ -68,6 +113,15 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       .not('email', 'is', null)
       .neq('email', '');
     next.found_with_email = foundWithEmail || 0;
+
+    const staleSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { count: staleRunning } = await supabase
+      .from('email_research_jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspace.id)
+      .eq('status', 'running')
+      .lt('updated_at', staleSince);
+    next.stale_running = staleRunning || 0;
     setStats(next);
 
     const { data } = await supabase
@@ -75,7 +129,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       .select('id,status,attempts,last_error,result,created_at,updated_at,started_at,finished_at,businesses(id,name,email,website,domain,category,location,status)')
       .eq('workspace_id', workspace.id)
       .order('updated_at', { ascending: false })
-      .limit(50);
+      .limit(80);
     setRecentJobs((data || []) as JobRow[]);
   }
 
@@ -107,7 +161,9 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   }
 
   async function runOneBatch() {
-    const res = await fetch(`/api/research/run-once?limit=${Math.max(1, Math.min(500, batchSize))}&concurrency=${Math.max(1, Math.min(50, concurrency))}`, { method: 'POST' });
+    const safeBatch = Math.max(1, Math.min(500, batchSize));
+    const safeConcurrency = Math.max(1, Math.min(50, concurrency));
+    const res = await fetch(`/api/research/run-once?limit=${safeBatch}&concurrency=${safeConcurrency}`, { method: 'POST' });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.success) throw new Error(json.error || 'Run request failed.');
     const newResults = Array.isArray(json.results) ? json.results : [];
@@ -126,20 +182,20 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       setMessage('Starting Auto Scout. Queuing pending/no-email businesses first...');
       await enqueuePendingNoEmail();
       setBusy(true);
-      setMessage('Auto Scout is running. It will keep processing queued businesses until you stop it or the queue is empty.');
+      setMessage('Auto Scout is running. It will keep calling the Node API, which calls the backend email finder. Stop it when you want to pause.');
       while (!stopRef.current) {
         const batch = await runOneBatch();
         totalProcessed += batch.processed;
         totalFound += batch.found;
         await loadStats();
-        setMessage(`Auto Scout running · processed ${totalProcessed.toLocaleString()} job(s), found ${totalFound.toLocaleString()} email(s). Click Stop Auto Scout to pause.`);
+        setMessage(`Auto Scout running · processed ${totalProcessed.toLocaleString()} job(s), found ${totalFound.toLocaleString()} email candidate(s) this session. Click Stop Auto Scout to pause.`);
         if (!batch.processed) {
-          setMessage(`Auto Scout stopped because there are no queued jobs left. Processed ${totalProcessed.toLocaleString()} job(s), found ${totalFound.toLocaleString()} email(s). Found emails should be checked in Ready Email Detection next.`);
+          setMessage(`Auto Scout stopped because there are no queued jobs left. Processed ${totalProcessed.toLocaleString()} job(s), found ${totalFound.toLocaleString()} email candidate(s). Run Ready Email Detection next.`);
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
-      if (stopRef.current) setMessage(`Auto Scout paused by you. Processed ${totalProcessed.toLocaleString()} job(s), found ${totalFound.toLocaleString()} email(s).`);
+      if (stopRef.current) setMessage(`Auto Scout paused by you. Processed ${totalProcessed.toLocaleString()} job(s), found ${totalFound.toLocaleString()} email candidate(s).`);
     } catch (error) {
       setMessage(`Auto Scout stopped with error: ${fmtError(error)}`);
     } finally {
@@ -153,9 +209,9 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   async function runBatchManually() {
     setBusy(true);
     try {
-      setMessage(`Running one Auto Scout batch of up to ${batchSize.toLocaleString()} business(es)...`);
+      setMessage(`Running one backend batch of up to ${batchSize.toLocaleString()} queued job(s)...`);
       const batch = await runOneBatch();
-      setMessage(`One batch complete. Processed ${batch.processed.toLocaleString()} job(s); found ${batch.found.toLocaleString()} email(s).`);
+      setMessage(`One batch complete. Processed ${batch.processed.toLocaleString()} job(s); found ${batch.found.toLocaleString()} email candidate(s).`);
       await loadStats();
     } catch (error) {
       setMessage(`Batch failed: ${fmtError(error)}`);
@@ -172,55 +228,58 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   return (
     <div className="stack">
       <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Pending No Email</div><div className="num">{(stats.pending_no_email || 0).toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Queued</div><div className="num">{(stats.queued || 0).toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Running</div><div className="num">{(stats.running || 0).toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Found Emails</div><div className="num">{(stats.found_with_email || 0).toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Needs Research</div><div className="num">{(stats.pending_no_email || 0).toLocaleString()}</div><p className="muted">Pending/review businesses with no email.</p></div>
+        <div className="card kpi"><div className="title">Waiting Jobs</div><div className="num">{(stats.queued || 0).toLocaleString()}</div><p className="muted">Queued for backend email research.</p></div>
+        <div className="card kpi"><div className="title">Active Jobs</div><div className="num">{(stats.running || 0).toLocaleString()}</div><p className="muted">Currently marked running. Stale: {(stats.stale_running || 0).toLocaleString()}.</p></div>
+        <div className="card kpi"><div className="title">Trusted Candidates Found</div><div className="num">{(stats.found_with_email || 0).toLocaleString()}</div><p className="muted">Passed strict rules. Still not inbox-proven until send/bounce tracking.</p></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Auto Scout Control</h3>
-        <p className="muted">Auto Scout takes pending businesses without emails, queues them, then keeps asking the backend to find emails until you stop it or the queue finishes. Found emails go to <strong>found</strong>; run Ready Email Detection next to move valid ones to Ready.</p>
+        <p className="muted">Auto Scout controls the queue and calls your backend email-finder. v8.13 rejects bad @ fragments and now searches deeper: homepage, contact/about/team/impressum/privacy pages, mailto links, obfuscated emails, and Cloudflare-protected emails where possible.</p>
         <div className="grid grid-4">
-          <div><label className="label">Queue pending/no-email</label><input className="input" type="number" min={1} max={50000} value={queueLimit} onChange={(e) => setQueueLimit(Math.max(1, Math.min(50000, Number(e.target.value) || 5000)))} /></div>
-          <div><label className="label">Backend batch size</label><input className="input" type="number" min={1} max={500} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))} /></div>
-          <div><label className="label">Backend concurrency</label><input className="input" type="number" min={1} max={50} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(50, Number(e.target.value) || 20)))} /></div>
-          <div><label className="label">Mode</label><div className="badge">{running ? 'Running live' : 'Stopped'}</div></div>
+          <div><label className="label">Queue limit</label><input className="input" type="number" min={1} max={50000} value={queueLimit} onChange={(e) => setQueueLimit(Math.max(1, Math.min(50000, Number(e.target.value) || 5000)))} /><p className="muted">How many no-email businesses to add to the research queue.</p></div>
+          <div><label className="label">Backend batch size</label><input className="input" type="number" min={1} max={500} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))} /><p className="muted">Maximum queued jobs sent to one Node API run.</p></div>
+          <div><label className="label">Backend concurrency</label><input className="input" type="number" min={1} max={50} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(50, Number(e.target.value) || 20)))} /><p className="muted">How many backend lookups run in parallel inside that batch.</p></div>
+          <div><label className="label">Mode</label><div className="badge">{running ? 'Running live' : 'Stopped'}</div><p className="muted">These numbers are used by the Node API. Backend rate limits can still slow or block results.</p></div>
         </div>
         <div className="actions" style={{ marginTop: 14 }}>
           <button className="btn secondary" disabled={busy} onClick={enqueuePendingNoEmail}>Queue Pending No-Email</button>
           {!running ? <button className="btn" disabled={busy} onClick={startAutoScout}>Start Auto Scout</button> : <button className="btn danger" onClick={stopAutoScout}>Stop Auto Scout</button>}
-          <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Run One Batch</button>
+          <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Run One Backend Batch</button>
           <button className="btn secondary" disabled={busy && !running} onClick={loadStats}>Refresh Progress</button>
         </div>
         <div className={message.toLowerCase().includes('failed') || message.toLowerCase().includes('error') ? 'error' : 'notice'} style={{ marginTop: 12 }}>{message}</div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Speed Note</h3>
-        <p className="muted">The app can queue and control 5,000 businesses quickly, but actually finding emails depends on your backend, target websites/directories, rate limits, and Render/Vercel timeout limits. This page now runs batches continuously and shows live results; the dedicated backend worker will be the correct way to run thousands unattended later.</p>
+        <h3>What These Numbers Mean</h3>
+        <p className="muted"><strong>Queue limit</strong> decides how many no-email businesses are placed into the queue. <strong>Backend batch size</strong> decides how many queued jobs one run tries to process. <strong>Backend concurrency</strong> decides how many of those lookups happen at the same time. The app is using these values when it calls <code>/api/research/run-once</code>, but the actual success and speed depend on your backend endpoint and whether it can scrape real sources quickly.</p>
       </div>
 
-      <div className="grid grid-2">
-        <div className="card" style={{ padding: 18 }}>
-          <h3>Live Results From This Session</h3>
-          <div className="table-wrap"><table><thead><tr><th>Status</th><th>Email</th><th>Business</th><th>Reason</th></tr></thead><tbody>
-            {results.map((row, index) => <tr key={index}><td>{String(row.status || '-')}</td><td>{String(row.email || '')}</td><td>{String(row.business || row.businessName || row.id || '-')}</td><td>{String(row.error || row.reason || '')}</td></tr>)}
-            {!results.length ? <tr><td colSpan={4} className="muted">Start Auto Scout to see found emails and errors as they happen.</td></tr> : null}
-          </tbody></table></div>
-        </div>
+      <div className="card" style={{ padding: 18 }}>
+        <h3>Found Emails / Errors</h3>
+        <p className="muted">This table combines current-session results and recent database jobs. Only candidates that pass strict rules are promoted. Weak/generated candidates are kept in Review with a reason instead of being treated as found. Deep website results show source evidence and pages checked when available.</p>
+        <div className="table-wrap"><table><thead><tr><th>Status</th><th>Email</th><th>Business</th><th>Quality</th><th>Evidence</th><th>Pages</th><th>Reason</th></tr></thead><tbody>
+          {foundRows.map((row, index) => <tr key={`${row.id || row.email}-${index}`}><td>{row.status || '-'}</td><td>{row.email || <span className="muted">No email</span>}</td><td>{row.id ? <Link href={`/businesses/${row.id}`}>{row.businessName || row.id}</Link> : row.businessName || '-'}</td><td>{row.quality || '-'}</td><td>{row.evidence ? <a href={row.evidence.startsWith('http') ? row.evidence : `https://${row.evidence}`} target="_blank" rel="noreferrer">source</a> : <span className="muted">No evidence supplied</span>}</td><td>{String((row as any).pagesChecked || '')}</td><td>{row.reason || ''}</td></tr>)}
+          {!foundRows.length ? <tr><td colSpan={7} className="muted">No found-email rows or errors yet. If the top counter says emails were found, click Refresh Progress and check Recent Auto Scout Jobs below.</td></tr> : null}
+        </tbody></table></div>
+      </div>
 
-        <div className="card" style={{ padding: 18 }}>
-          <h3>Recent Auto Scout Jobs</h3>
-          <div className="table-wrap"><table><thead><tr><th>Business</th><th>Status</th><th>Email</th><th>Attempts</th><th>Error</th></tr></thead><tbody>
-            {recentJobs.map((job) => {
-              const business = getBusiness(job);
-              const email = String(business?.email || getEmailFromResult(job.result) || '');
-              return <tr key={job.id}><td><strong>{business?.name || '-'}</strong><br /><span className="muted">{business?.website || business?.domain || ''}</span></td><td><span className={`status ${job.status}`}>{job.status}</span></td><td>{email || <span className="muted">No email yet</span>}</td><td>{job.attempts || 0}</td><td><span className="muted">{job.last_error || ''}</span></td></tr>;
-            })}
-            {!recentJobs.length ? <tr><td colSpan={5} className="muted">No Auto Scout jobs yet.</td></tr> : null}
-          </tbody></table></div>
-        </div>
+      <div className="card" style={{ padding: 18 }}>
+        <h3>Recent Auto Scout Jobs</h3>
+        <div className="table-wrap"><table><thead><tr><th>Business</th><th>Status</th><th>Email</th><th>Quality</th><th>Attempts</th><th>Error</th></tr></thead><tbody>
+          {recentJobs.map((job) => {
+            const business = getBusiness(job);
+            const email = String(business?.email || getEmailFromResult(job.result) || '');
+            return <tr key={job.id}><td>{business?.id ? <Link href={`/businesses/${business.id}`}><strong>{business?.name || '-'}</strong></Link> : <strong>{business?.name || '-'}</strong>}<br /><span className="muted">{business?.website || business?.domain || ''}</span></td><td><span className={`status ${job.status}`}>{job.status}</span></td><td>{email || <span className="muted">No email yet</span>}</td><td>{qualityLabel(job.result)}</td><td>{job.attempts || 0}</td><td><span className="muted">{job.last_error || ''}</span></td></tr>;
+          })}
+          {!recentJobs.length ? <tr><td colSpan={6} className="muted">No Auto Scout jobs yet.</td></tr> : null}
+        </tbody></table></div>
+      </div>
+
+      <div className="notice">
+        <strong>Trust rule:</strong> Auto Scout can find email candidates, but a real inbox is only confirmed after sending and bounce/no-inbox detection. Emails are filtered before promotion, but a real inbox is only confirmed after sending and bounce/no-inbox detection.
       </div>
     </div>
   );

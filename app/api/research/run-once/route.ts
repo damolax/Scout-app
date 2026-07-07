@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { chooseBestEmailCandidate, type EmailCandidateDecision } from '@/lib/email-candidate-rules';
+import { findEmailsDeepFromWebsite, type DeepWebsiteFinderResult } from '@/lib/website-email-finder';
 
 function errorMessage(error: unknown) {
   if (!error) return 'Unknown error';
@@ -11,21 +13,99 @@ function errorMessage(error: unknown) {
   } catch { return String(error); }
 }
 
-function bestEmailFromPayload(payload: any): string {
-  const candidates = [
-    payload?.email,
-    payload?.bestEmail,
-    payload?.best_email,
-    payload?.validatedEmail,
-    payload?.result?.email,
-    payload?.result?.bestEmail,
-    payload?.data?.email,
-    payload?.data?.bestEmail,
-    Array.isArray(payload?.emails) ? payload.emails[0] : '',
-    Array.isArray(payload?.result?.emails) ? payload.result.emails[0] : ''
-  ];
-  return String(candidates.find(Boolean) || '').trim().toLowerCase();
+
+function sourceEvidenceFromPayload(payload: any): string {
+  if (!payload || typeof payload !== 'object') return '';
+  const direct = payload.sourceUrl || payload.source_url || payload.foundOn || payload.found_on || payload.contactPage || payload.contact_page || payload.page || payload.url || payload.website;
+  if (direct) return String(direct);
+  const arrays = [payload.sources, payload.pages, payload.urls, payload.links, payload.evidence];
+  for (const item of arrays) {
+    if (Array.isArray(item) && item.length) {
+      const first = item.find(Boolean);
+      if (typeof first === 'string') return first;
+      if (first && typeof first === 'object') return String(first.url || first.href || first.page || first.source || '');
+    }
+  }
+  return '';
 }
+
+function resultQuality(payload: any): { sourceEvidence: string; quality: string; score: number } {
+  const sourceEvidence = sourceEvidenceFromPayload(payload);
+  const generated = Boolean(payload?.generated || payload?.guessed || payload?.pattern || String(payload?.method || '').toLowerCase().includes('guess'));
+  if (sourceEvidence) return { sourceEvidence, quality: 'source_seen', score: 82 };
+  if (generated) return { sourceEvidence, quality: 'generated_only', score: 30 };
+  return { sourceEvidence, quality: 'unverified_candidate', score: 45 };
+}
+
+
+function backendMarkedGenerated(payload: any): boolean {
+  return Boolean(
+    payload?.generated ||
+    payload?.guessed ||
+    payload?.pattern ||
+    payload?.isGuess ||
+    String(payload?.method || '').toLowerCase().includes('guess') ||
+    String(payload?.source || '').toLowerCase().includes('guess') ||
+    String(payload?.reason || '').toLowerCase().includes('generated')
+  );
+}
+
+function bestEmailDecisionFromPayload(payload: any, business: any) {
+  const sourceEvidence = sourceEvidenceFromPayload(payload);
+  const generated = backendMarkedGenerated(payload);
+  return chooseBestEmailCandidate(payload, business, sourceEvidence, generated);
+}
+
+function shouldDeepSearch(decision: EmailCandidateDecision) {
+  if (!decision.email) return true;
+  if (!decision.valid) return true;
+  if (!decision.promote) return true;
+  if (decision.quality === 'unverified_candidate') return true;
+  return false;
+}
+
+function mergeResearchDecision(backendResult: any, backendDecision: EmailCandidateDecision, deepResult: DeepWebsiteFinderResult | null) {
+  const deepDecision = deepResult?.decision;
+  if (deepDecision?.email && deepDecision.valid && deepDecision.promote) {
+    return {
+      decision: deepDecision,
+      method: 'deep_website_finder',
+      payload: { backend: backendResult, backendDecision, deepWebsiteFinder: deepResult },
+      reason: deepResult?.reason || deepDecision.reasons.join(' ')
+    };
+  }
+  if (backendDecision.email && backendDecision.valid && backendDecision.promote) {
+    return {
+      decision: backendDecision,
+      method: 'backend_finder',
+      payload: { backend: backendResult, backendDecision, deepWebsiteFinder: deepResult },
+      reason: backendDecision.reasons.join(' ') || 'Backend returned a promoted email candidate.'
+    };
+  }
+  if (deepDecision?.email && deepDecision.valid) {
+    return {
+      decision: deepDecision,
+      method: 'deep_website_candidate',
+      payload: { backend: backendResult, backendDecision, deepWebsiteFinder: deepResult },
+      reason: deepResult?.reason || deepDecision.reasons.join(' ')
+    };
+  }
+  if (backendDecision.email && backendDecision.valid) {
+    return {
+      decision: backendDecision,
+      method: 'backend_candidate',
+      payload: { backend: backendResult, backendDecision, deepWebsiteFinder: deepResult },
+      reason: backendDecision.reasons.join(' ') || 'Backend returned a candidate that needs evidence.'
+    };
+  }
+  return {
+    decision: deepDecision || backendDecision,
+    method: 'no_trusted_email',
+    payload: { backend: backendResult, backendDecision, deepWebsiteFinder: deepResult },
+    reason: [backendDecision.reasons.join(' '), deepResult?.reason].filter(Boolean).join(' | ') || 'No trusted email found.'
+  };
+}
+
 
 async function callBackendFindEmail(business: any) {
   const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
@@ -96,25 +176,56 @@ async function runOnce(request: NextRequest) {
     await supabase.from('businesses').update({ status: 'scanning' }).eq('id', business.id).neq('status', 'contacted');
 
     try {
-      const backendResult = await callBackendFindEmail(business);
-      const email = bestEmailFromPayload(backendResult);
-      if (email) {
+      let backendResult: any = {};
+      let backendError = '';
+      try {
+        backendResult = await callBackendFindEmail(business);
+      } catch (error) {
+        backendError = errorMessage(error);
+        backendResult = { success: false, error: backendError, method: 'backend_unavailable' };
+      }
+
+      const backendDecision = bestEmailDecisionFromPayload(backendResult, business);
+      let deepResult: DeepWebsiteFinderResult | null = null;
+      if (shouldDeepSearch(backendDecision)) {
+        deepResult = await findEmailsDeepFromWebsite(business, { maxPages: 7, timeoutMs: 6500 });
+      }
+
+      const merged = mergeResearchDecision(backendResult, backendDecision, deepResult);
+      const decision = merged.decision;
+      const email = decision.email;
+      const enrichedResult = { ...merged.payload, email, emailDecision: decision, quality: decision.quality, sourceEvidence: decision.sourceEvidence, method: merged.method, backendError };
+
+      if (email && decision.valid && decision.promote) {
         await supabase.from('email_candidates').upsert({
           workspace_id: job.workspace_id,
           business_id: business.id,
           email,
-          source: 'backend_worker',
-          score: Number(backendResult?.score || backendResult?.confidence || 80) || 80,
-          status: 'candidate',
-          raw: backendResult
+          source: merged.method === 'deep_website_finder' ? `deep_${deepResult?.sourceType || 'website'}` : (decision.sourceEvidence ? 'backend_source_seen' : 'backend_domain_match'),
+          score: decision.score,
+          status: decision.sourceEvidence ? 'source_seen_candidate' : 'domain_match_candidate',
+          raw: enrichedResult
         }, { onConflict: 'workspace_id,business_id,email' });
-        await supabase.from('businesses').update({ email, status: 'found', raw: { ...(business.raw || {}), backend_email_research: backendResult } }).eq('id', business.id);
-        await supabase.from('email_research_jobs').update({ status: 'done', result: backendResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
-        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'found', email });
+        await supabase.from('businesses').update({ email, status: 'found', score: decision.score, raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
+        await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
+        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'found', email, method: merged.method, quality: decision.quality, evidence: decision.sourceEvidence, pagesChecked: deepResult?.pagesChecked || 0, reason: merged.reason || 'Email passed strict candidate rules.' });
+      } else if (email && decision.valid && !decision.promote) {
+        await supabase.from('email_candidates').upsert({
+          workspace_id: job.workspace_id,
+          business_id: business.id,
+          email,
+          source: merged.method,
+          score: decision.score,
+          status: 'needs_evidence',
+          raw: enrichedResult
+        }, { onConflict: 'workspace_id,business_id,email' });
+        await supabase.from('businesses').update({ status: 'review', raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
+        await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
+        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'candidate_needs_evidence', email, method: merged.method, quality: decision.quality, evidence: decision.sourceEvidence, pagesChecked: deepResult?.pagesChecked || 0, reason: merged.reason || 'Valid format, but not trusted enough to promote.' });
       } else {
-        await supabase.from('businesses').update({ status: 'review', raw: { ...(business.raw || {}), backend_email_research: backendResult } }).eq('id', business.id);
-        await supabase.from('email_research_jobs').update({ status: 'done', result: backendResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
-        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'no_email_found' });
+        await supabase.from('businesses').update({ status: 'review', raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
+        await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
+        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'no_trusted_email_found', method: merged.method, pagesChecked: deepResult?.pagesChecked || 0, rejected: decision.rejected, reason: merged.reason });
       }
     } catch (error) {
       const attempts = (job.attempts || 0) + 1;

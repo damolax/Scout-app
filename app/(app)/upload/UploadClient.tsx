@@ -297,7 +297,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new business(es), skipped ${skippedTotal.toLocaleString()}. Rows with email were saved as Ready; no-email rows were saved as Pending for Auto Scout.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
     } catch (error) {
       const message = formatImportError(error);
-      console.error('Scout v8.4 fast import failed:', error);
+      console.error('Scout v8.10 fast import failed:', error);
       setErrors([message]);
       setPhase('failed');
       setProgress('Import failed. See the real error below.');
@@ -382,7 +382,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       <div className="card" style={{ padding: 18 }}>
         <label className="label">Upload CSV</label>
         <input className="input" type="file" accept=".csv,text/csv" onChange={onFile} />
-        <p className="muted">Limit: 100,000 usable rows. v8.8 routes contacts simply: emails → Ready for Email Scout; no email → Pending for Auto Scout. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
+        <p className="muted">Limit: 100,000 usable rows. Import divides rows clearly: emails → Ready for Email Scout; no email → Pending for Auto Scout; duplicates are skipped/exportable; invalid rows are downloadable. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
         <div className={phase === 'failed' ? 'error' : phase === 'done' ? 'success' : 'notice'}>{progress}</div>
         <div className="progress-track" aria-label="Import progress"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>
 

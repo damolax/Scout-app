@@ -209,7 +209,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       setTotal(count || 0);
       setPage(nextPage);
       setSelected({});
-      setMessage(`Loaded ${(data || []).length.toLocaleString()} contact(s). Detection can run up to ${MAX_DETECT_PER_RUN.toLocaleString()} at a time; blank number means all matching contacts up to that safety cap.`);
+      setMessage(`Showing ${(data || []).length.toLocaleString()} preview contact(s) from ${Number(count || 0).toLocaleString()} matching contact(s). This page displays 100 rows only, but Detect Next ${requestedLimit().toLocaleString()} / Detect All Matching can process the larger eligible set up to ${MAX_DETECT_PER_RUN.toLocaleString()} at a time.`);
     } catch (err) {
       setError(formatError(err));
     } finally {

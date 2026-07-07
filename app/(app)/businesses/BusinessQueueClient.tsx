@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 import { Business, BusinessStatus, Workspace } from '@/lib/types';
 
@@ -361,7 +362,7 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
               {businesses.map((b) => (
                 <tr key={b.id}>
                   <td><input type="checkbox" checked={!!selected[b.id]} onChange={(event) => setSelected((current) => ({ ...current, [b.id]: event.target.checked }))} /></td>
-                  <td><strong>{b.name || '-'}</strong><br /><span className="muted">{b.category || ''} {b.location ? `· ${b.location}` : ''}</span></td>
+                  <td><Link href={`/businesses/${b.id}`}><strong>{b.name || '-'}</strong></Link><br /><span className="muted">{b.category || ''} {b.location ? `· ${b.location}` : ''}</span><br /><Link className="muted" href={`/businesses/${b.id}`}>Open business →</Link></td>
                   <td>{b.email || <span className="muted">No email</span>}</td>
                   <td>{b.website || b.domain || <span className="muted">No site</span>}</td>
                   <td><span className={`status ${b.status}`}>{b.status.replace('_', ' ')}</span></td>
@@ -372,6 +373,8 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
                       <select className="select" value={b.status} onChange={(event) => updateStatus([b.id], event.target.value as BusinessStatus)} disabled={busy}>
                         {STATUS_OPTIONS.map((item) => <option key={item} value={item}>{item.replace('_', ' ')}</option>)}
                       </select>
+                      <Link className="btn secondary" href={`/businesses/${b.id}`}>Open</Link>
+                      {b.email ? <Link className="btn secondary" href={`/email-scout?business=${b.id}`}>Message</Link> : null}
                       {hasNoEmail(b) ? <button className="btn secondary" type="button" disabled={busy} onClick={() => queueForAutoScout([b.id], 'single no-email')}>Auto Scout</button> : null}
                     </div>
                   </td>

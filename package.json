@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-9-auto-scout-flow",
-  "version": "8.9.0",
+  "name": "scout-app-v8-13-autoscout-deep-website-finder",
+  "version": "8.13.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.9 with Business-to-Auto-Scout queueing, continuous Auto Scout, simplified ready-email detection, and cleaner Gmail sender setup."
+  "description": "Scout App v8.13 with deep website email finding: homepage/contact/about/impressum scanning, mailto extraction, obfuscation decoding, Cloudflare email decode, and evidence-based Auto Scout results."
 }

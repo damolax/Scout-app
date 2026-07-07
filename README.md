@@ -1,30 +1,18 @@
-# Scout App v8.5 Native Verify Email
+# Scout App v8.13 Deep Website Finder
 
-This version keeps the real Node/Next/Supabase app and adds the native Verify Emails workflow. It does not embed the old v73 index app.
+This version improves Auto Scout so it does not only depend on the backend returning an email. If the backend result is missing, weak, generated, or not trusted, the Node app now performs a deeper website search itself.
 
-## Included
+Key changes:
+- Keeps the v8.12 strict email rules so bad `@` fragments are still rejected.
+- Adds a server-side deep website finder inside the Node app.
+- Checks homepage, likely contact/about/team/support/impressum/privacy/legal pages.
+- Extracts `mailto:` links and visible page emails.
+- Decodes common obfuscations like `info [at] domain [dot] com`.
+- Decodes Cloudflare protected emails where the encoded value is present in the HTML.
+- Saves source evidence URL and source type with the candidate.
+- Promotes source-seen/domain-matching emails, keeps weak candidates in Review.
+- Auto Scout live/results table now includes page evidence and pages checked.
 
-- v8.4 native business queue and fast import foundation
-- Native Verify Emails page
-- Backend verifier config check
-- Verify selected contacts
-- Verify current page
-- Verify next batch, capped at 500 per run
-- Saves verification result back into Supabase businesses.raw.verification
-- Moves safe contacts to Ready
-- Moves invalid contacts to Invalid
-- Keeps risky/catch-all/unknown contacts in Review
-- Upserts email candidate verification records
-- Download last verification results as CSV
+This does not prove inbox delivery before sending. It proves the email was found from a source page. Real no-inbox/bounce confirmation still happens after sending and reply/bounce sync.
 
-## Important
-
-Run the Supabase migration again before testing because v8.5 adds unique/index support for email candidate verification upserts.
-
-
-## v8.7 update
-
-- Fixed CSV email detection for columns like Emails, Found Emails, Personal Email, Business Email, Owner Email, and Contact Emails.
-- Upload preview now reports total detected email rows, so blank first-page preview rows do not mean the whole file has no emails.
-- Added native Replies page for reply sync, no-inbox/bounce separation, and template/sender response tracking.
-- Run the Supabase migration again after deploying v8.7.
+Run the Supabase migration after deployment if your project has not already been migrated through the prior v8 versions.
