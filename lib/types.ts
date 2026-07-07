@@ -104,6 +104,27 @@ export type MessageTemplate = {
   updated_at?: string | null;
 };
 
+export type ReplyHistory = {
+  id: string;
+  workspace_id: string;
+  business_id?: string | null;
+  sent_message_id?: string | null;
+  template_id?: string | null;
+  gmail_account_id?: string | null;
+  batch_id?: string | null;
+  from_email?: string | null;
+  to_email?: string | null;
+  subject?: string | null;
+  snippet?: string | null;
+  body?: string | null;
+  classification?: string | null;
+  is_real_reply?: boolean | null;
+  received_at?: string | null;
+  gmail_message_id?: string | null;
+  gmail_thread_id?: string | null;
+  raw?: Record<string, unknown> | null;
+};
+
 export type GmailAccount = {
   id: string;
   workspace_id: string;

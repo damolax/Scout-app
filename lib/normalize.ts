@@ -1,31 +1,57 @@
+const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+
 export function cleanText(value: unknown): string {
-  return String(value ?? '').trim();
+  if (Array.isArray(value)) return value.map((item) => cleanText(item)).filter(Boolean).join(' ');
+  if (value && typeof value === 'object') {
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+  return String(value ?? '').replace(/\u00a0/g, ' ').trim();
+}
+
+export function extractEmail(value: unknown): string {
+  const raw = cleanText(value).toLowerCase();
+  if (!raw) return '';
+  const decoded = raw
+    .replace(/^mailto:/, '')
+    .replace(/\s*(\[at\]|\(at\)|\sat\s)\s*/g, '@')
+    .replace(/\s*(\[dot\]|\(dot\)|\sdot\s)\s*/g, '.')
+    .replace(/\s*@\s*/g, '@')
+    .replace(/\s*\.\s*/g, '.');
+  const match = decoded.match(EMAIL_RE);
+  return match?.[0] || '';
 }
 
 export function normalizeEmail(value: unknown): string {
-  return cleanText(value).toLowerCase();
+  return extractEmail(value);
 }
 
 export function normalizeWebsite(value: unknown): string {
   const raw = cleanText(value).toLowerCase();
   if (!raw) return '';
-  if (/^https?:\/\//i.test(raw)) return raw;
-  return `https://${raw}`;
+  const noMailto = raw.replace(/^mailto:/, '');
+  if (extractEmail(noMailto) && !/https?:\/\//i.test(noMailto) && !/^www\./i.test(noMailto)) return '';
+  const domainLike = noMailto.match(/(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^^\s,;)]*)?/i)?.[0] || '';
+  if (!domainLike) return '';
+  if (/^https?:\/\//i.test(domainLike)) return domainLike;
+  return `https://${domainLike}`;
 }
 
 export function domainFromWebsite(value: unknown): string {
   const raw = cleanText(value).toLowerCase();
   if (!raw) return '';
+  if (extractEmail(raw) && !/https?:\/\//i.test(raw) && !/^www\./i.test(raw)) return '';
   try {
     const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
     return url.hostname.replace(/^www\./, '');
   } catch {
-    return raw.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+    return raw.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].replace(/[^a-z0-9.-]/g, '');
   }
 }
 
 export function normalizePhone(value: unknown): string {
-  return cleanText(value).replace(/[^+0-9]/g, '');
+  const raw = cleanText(value);
+  const phone = raw.replace(/[^+0-9]/g, '');
+  return phone.replace(/\D/g, '').length >= 7 ? phone : '';
 }
 
 export function makeNormalizedKey(input: {

@@ -624,3 +624,42 @@ end;
 $$;
 
 grant execute on function public.reset_gmail_daily_counts(uuid) to authenticated;
+
+-- v8.7 Reply Tracking + Import Parser Fix support.
+alter table public.reply_history add column if not exists gmail_message_id text;
+alter table public.reply_history add column if not exists gmail_thread_id text;
+alter table public.reply_history add column if not exists direction text not null default 'received';
+alter table public.reply_history add column if not exists matched_status text;
+
+create unique index if not exists reply_history_workspace_gmail_message_unique on public.reply_history(workspace_id, gmail_message_id);
+create index if not exists reply_history_workspace_thread_idx on public.reply_history(workspace_id, gmail_thread_id, received_at desc);
+create index if not exists reply_history_workspace_classification_idx on public.reply_history(workspace_id, classification, received_at desc);
+
+alter table public.no_inbox_records add column if not exists sent_message_id uuid references public.sent_messages(id) on delete set null;
+alter table public.no_inbox_records add column if not exists gmail_account_id uuid references public.gmail_accounts(id) on delete set null;
+alter table public.no_inbox_records add column if not exists template_id uuid references public.templates(id) on delete set null;
+alter table public.no_inbox_records add column if not exists gmail_message_id text;
+alter table public.no_inbox_records add column if not exists gmail_thread_id text;
+
+create index if not exists no_inbox_records_workspace_email_idx on public.no_inbox_records(workspace_id, email, created_at desc);
+create index if not exists no_inbox_records_workspace_template_idx on public.no_inbox_records(workspace_id, template_id, created_at desc);
+create index if not exists no_inbox_records_workspace_gmail_idx on public.no_inbox_records(workspace_id, gmail_account_id, created_at desc);
+
+alter table public.sent_messages add column if not exists last_reply_at timestamptz;
+
+create or replace view public.template_response_performance as
+select
+  t.workspace_id,
+  t.id as template_id,
+  t.name as template_name,
+  count(distinct s.id) filter (where s.status = 'sent') as sent_count,
+  count(distinct r.id) filter (where r.is_real_reply = true) as real_reply_count,
+  count(distinct r.id) filter (where r.is_real_reply = false) as ignored_reply_count,
+  case when count(distinct r.id) filter (where r.is_real_reply = true) > 0
+    then round((count(distinct s.id) filter (where s.status = 'sent'))::numeric / (count(distinct r.id) filter (where r.is_real_reply = true))::numeric, 2)
+    else null
+  end as emails_per_reply
+from public.templates t
+left join public.sent_messages s on s.template_id = t.id and s.workspace_id = t.workspace_id
+left join public.reply_history r on r.template_id = t.id and r.workspace_id = t.workspace_id
+group by t.workspace_id, t.id, t.name;

@@ -179,7 +179,9 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       await checkTargetMismatch(parsed.headers);
       setRows(parsed.rows);
       setPhase('ready');
-      setProgress(`Preview ready: ${parsed.rows.length.toLocaleString()} usable row(s), ${parsed.invalidRows.length.toLocaleString()} invalid row(s). Import uses server-side chunks of ${SERVER_IMPORT_CHUNK.toLocaleString()} rows for speed.`);
+      const emailCount = parsed.rows.filter((row) => row.email).length;
+      const websiteCount = parsed.rows.filter((row) => row.website || row.domain).length;
+      setProgress(`Preview ready: ${parsed.rows.length.toLocaleString()} usable row(s), ${emailCount.toLocaleString()} with email, ${websiteCount.toLocaleString()} with website/domain, ${parsed.invalidRows.length.toLocaleString()} invalid row(s). Import uses server-side chunks of ${SERVER_IMPORT_CHUNK.toLocaleString()} rows for speed.`);
     } catch (error) {
       setPhase('failed');
       setErrors([formatImportError(error)]);
@@ -288,12 +290,15 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     }
   }
 
+  const detectedEmailCount = rows.filter((row) => row.email).length;
+  const detectedWebsiteCount = rows.filter((row) => row.website || row.domain).length;
+
   return (
     <div className="stack">
       <div className="card" style={{ padding: 18 }}>
         <label className="label">Upload CSV</label>
         <input className="input" type="file" accept=".csv,text/csv" onChange={onFile} />
-        <p className="muted">Limit: 100,000 usable rows per import. Target: 10,000 rows should import in seconds, not minutes. Actual speed depends on mobile/network/Supabase region, but the app no longer uses hundreds of browser inserts.</p>
+        <p className="muted">Limit: 100,000 usable rows per import. v8.7 detects more email column names, scans every cell for emails, and still only renders a small preview so the page does not freeze.</p>
         <div className={phase === 'failed' ? 'error' : phase === 'done' ? 'success' : 'notice'}>{progress}</div>
         <div className="progress-track" aria-label="Import progress"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>
 
@@ -337,7 +342,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       {rows.length ? (
         <div className="card" style={{ padding: 18 }}>
           <h3>Preview</h3>
-          <p className="muted">Showing first 25 rows only. Full queue is rendered in pages on the Businesses page.</p>
+          <p className="muted">Showing first 25 rows only. Full file detected: {detectedEmailCount.toLocaleString()} email row(s), {detectedWebsiteCount.toLocaleString()} website/domain row(s). If the first 25 rows show blank email but this count is above 0, the emails are later in the file.</p>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Name</th><th>Email</th><th>Website</th><th>Category</th><th>Location</th><th>Dedupe Key</th></tr></thead>

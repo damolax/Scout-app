@@ -20,3 +20,11 @@ This version keeps the real Node/Next/Supabase app and adds the native Verify Em
 ## Important
 
 Run the Supabase migration again before testing because v8.5 adds unique/index support for email candidate verification upserts.
+
+
+## v8.7 update
+
+- Fixed CSV email detection for columns like Emails, Found Emails, Personal Email, Business Email, Owner Email, and Contact Emails.
+- Upload preview now reports total detected email rows, so blank first-page preview rows do not mean the whole file has no emails.
+- Added native Replies page for reply sync, no-inbox/bounce separation, and template/sender response tracking.
+- Run the Supabase migration again after deploying v8.7.

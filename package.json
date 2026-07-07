@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-6-native-outreach-engine",
-  "version": "8.6.0",
+  "name": "scout-app-v8-7-reply-tracking-import-fix",
+  "version": "8.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "20.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.6 native outreach engine with templates, sender rotation, bulk send logs, and performance tracking."
+  "description": "Scout App v8.7 with improved email import parsing, reply tracking, no-inbox separation, and response performance metrics."
 }
