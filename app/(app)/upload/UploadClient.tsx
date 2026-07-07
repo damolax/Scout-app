@@ -3,7 +3,7 @@
 import { ChangeEvent, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { csvColumnsLookDifferent, parseCsvText } from '@/lib/csv';
-import { CsvBusinessInput, CsvInvalidRow, ImportResult, Workspace } from '@/lib/types';
+import { Business, CsvBusinessInput, CsvInvalidRow, ImportResult, Workspace } from '@/lib/types';
 
 const MAX_IMPORT_ROWS = 100000;
 const SERVER_IMPORT_CHUNK = 5000;
@@ -72,6 +72,22 @@ function downloadRawRows(name: string, rows: Array<{ raw: Record<string, unknown
   URL.revokeObjectURL(url);
 }
 
+function downloadBusinessRows(name: string, businesses: Business[]) {
+  if (!businesses.length) return;
+  const headers = ['name', 'email', 'phone', 'website', 'domain', 'category', 'location', 'source', 'status', 'score', 'normalized_key', 'created_at', 'updated_at'];
+  const lines = [headers.map(csvEscape).join(',')];
+  for (const b of businesses) lines.push(headers.map((h) => csvEscape((b as unknown as Record<string, unknown>)[h])).join(','));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function downloadInvalidRows(name: string, rows: CsvInvalidRow[]) {
   if (!rows.length) return;
   const rawHeaders = Array.from(rows.reduce((set, row) => {
@@ -113,7 +129,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   const [invalidRows, setInvalidRows] = useState<CsvInvalidRow[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [fileName, setFileName] = useState('');
-  const [progress, setProgress] = useState('Choose a CSV file to begin. Limit: 100,000 usable rows per import.');
+  const [progress, setProgress] = useState('Choose a CSV file. Rows with emails go to Ready for Email Scout; rows without emails stay Pending for Auto Scout.');
   const [phase, setPhase] = useState<ImportPhase>('idle');
   const [percent, setPercent] = useState(0);
   const [importing, setImporting] = useState(false);
@@ -181,7 +197,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       setPhase('ready');
       const emailCount = parsed.rows.filter((row) => row.email).length;
       const websiteCount = parsed.rows.filter((row) => row.website || row.domain).length;
-      setProgress(`Preview ready: ${parsed.rows.length.toLocaleString()} usable row(s), ${emailCount.toLocaleString()} with email, ${websiteCount.toLocaleString()} with website/domain, ${parsed.invalidRows.length.toLocaleString()} invalid row(s). Import uses server-side chunks of ${SERVER_IMPORT_CHUNK.toLocaleString()} rows for speed.`);
+      setProgress(`Preview ready: ${parsed.rows.length.toLocaleString()} usable row(s). ${emailCount.toLocaleString()} will go to Ready for Email Scout. ${(parsed.rows.length - emailCount).toLocaleString()} without email will stay Pending for Auto Scout. ${websiteCount.toLocaleString()} have website/domain. ${parsed.invalidRows.length.toLocaleString()} invalid row(s).`);
     } catch (error) {
       setPhase('failed');
       setErrors([formatImportError(error)]);
@@ -278,13 +294,81 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       const seconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
       setPercent(100);
       setPhase('done');
-      setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new business(es), skipped ${skippedTotal.toLocaleString()}.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
+      setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new business(es), skipped ${skippedTotal.toLocaleString()}. Rows with email were saved as Ready; no-email rows were saved as Pending for Auto Scout.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
     } catch (error) {
       const message = formatImportError(error);
       console.error('Scout v8.4 fast import failed:', error);
       setErrors([message]);
       setPhase('failed');
       setProgress('Import failed. See the real error below.');
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function fetchPendingNoEmailBusinesses(maxRows = 50000) {
+    const all: Business[] = [];
+    const pageSize = 1000;
+    for (let from = 0; from < maxRows; from += pageSize) {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('*')
+        .eq('workspace_id', workspace.id)
+        .in('status', ['pending', 'scanning', 'found', 'review'])
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const batch = ((data || []) as Business[]).filter((b) => !String(b.email || '').trim());
+      all.push(...batch);
+      if (!data || data.length < pageSize) break;
+    }
+    return all;
+  }
+
+  async function exportPendingNoEmailForScout() {
+    setImporting(true);
+    setErrors([]);
+    try {
+      const pending = await fetchPendingNoEmailBusinesses();
+      if (!pending.length) {
+        setProgress('No pending no-email businesses found to export for Auto Scout.');
+        return;
+      }
+      downloadBusinessRows('scout-pending-no-email-for-auto-scout.csv', pending);
+      setProgress(`Exported ${pending.length.toLocaleString()} pending no-email business(es) for Auto Scout.`);
+    } catch (error) {
+      setErrors([formatImportError(error)]);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function deletePendingNoEmailBusinesses() {
+    const ok = confirm('Delete all Pending/Scanning/Found/Review businesses that have no email? Export them first if you still need them for Auto Scout.');
+    if (!ok) return;
+    setImporting(true);
+    setErrors([]);
+    try {
+      const { data, error } = await supabase.rpc('delete_pending_no_email_businesses', { target_workspace: workspace.id });
+      if (error) throw error;
+      setProgress(`Deleted ${(Number(data) || 0).toLocaleString()} pending no-email business(es).`);
+    } catch (error) {
+      setErrors([formatImportError(error)]);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function repairEmailRouting() {
+    setImporting(true);
+    setErrors([]);
+    try {
+      const { data, error } = await supabase.rpc('mark_ready_emails_and_pending_no_email', { target_workspace: workspace.id });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : null;
+      setProgress(`Repaired routing. Ready with email: ${Number(row?.ready_count || 0).toLocaleString()}. Pending without email: ${Number(row?.pending_count || 0).toLocaleString()}.`);
+    } catch (error) {
+      setErrors([formatImportError(error)]);
     } finally {
       setImporting(false);
     }
@@ -298,7 +382,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       <div className="card" style={{ padding: 18 }}>
         <label className="label">Upload CSV</label>
         <input className="input" type="file" accept=".csv,text/csv" onChange={onFile} />
-        <p className="muted">Limit: 100,000 usable rows per import. v8.7 detects more email column names, scans every cell for emails, and still only renders a small preview so the page does not freeze.</p>
+        <p className="muted">Limit: 100,000 usable rows. v8.8 routes contacts simply: emails → Ready for Email Scout; no email → Pending for Auto Scout. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
         <div className={phase === 'failed' ? 'error' : phase === 'done' ? 'success' : 'notice'}>{progress}</div>
         <div className="progress-track" aria-label="Import progress"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>
 
@@ -319,6 +403,9 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
 
         <div className="actions">
           <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : `Import ${rows.length.toLocaleString()} business(es)`}</button>
+          <button className="btn secondary" type="button" disabled={importing} onClick={repairEmailRouting}>Repair: Email → Ready / No Email → Pending</button>
+          <button className="btn secondary" type="button" disabled={importing} onClick={exportPendingNoEmailForScout}>Export Pending No-Email for Auto Scout</button>
+          <button className="btn danger" type="button" disabled={importing} onClick={deletePendingNoEmailBusinesses}>Delete Pending No-Email</button>
           {invalidRows.length ? <button className="btn secondary" type="button" onClick={() => downloadInvalidRows('scout-invalid-rows.csv', invalidRows)}>Download invalid rows</button> : null}
           {result?.skippedRows.length ? <button className="btn secondary" type="button" onClick={() => downloadRawRows('scout-skipped-duplicates.csv', result.skippedRows)}>Download skipped duplicates</button> : null}
         </div>

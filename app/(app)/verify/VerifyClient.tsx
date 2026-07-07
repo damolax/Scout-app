@@ -5,9 +5,12 @@ import { createClient } from '@/lib/supabase-browser';
 import { Business, BusinessStatus, Workspace } from '@/lib/types';
 
 const PAGE_SIZE = 100;
-const VERIFY_CHUNK_SIZE = 500;
-const UPDATE_CONCURRENCY = 25;
-const PROVIDERS = ['basic_mx', 'zerobounce', 'abstract', 'hunter', 'neverbounce', 'kickbox'];
+const VERIFY_CHUNK_SIZE = 5000;
+const UPDATE_CONCURRENCY = 50;
+const MAX_DETECT_PER_RUN = 5000;
+const DISPOSABLE_DOMAINS = new Set(['mailinator.com','10minutemail.com','tempmail.com','guerrillamail.com','yopmail.com','trashmail.com']);
+const FREE_PROVIDER_DOMAINS = new Set(['gmail.com','yahoo.com','outlook.com','hotmail.com','icloud.com','aol.com','proton.me','protonmail.com']);
+const ROLE_PREFIXES = new Set(['info','support','hello','contact','sales','admin','office','service','shop','orders','team','crm']);
 
 type VerifyFilter = 'has_email' | 'needs_verification' | 'ready' | 'review' | 'invalid' | 'all';
 type VerifyStats = Record<string, number> & { total?: number; has_email?: number };
@@ -49,6 +52,32 @@ function formatError(error: unknown) {
 
 function normalizeEmail(email: unknown) {
   return String(email || '').trim().toLowerCase();
+}
+
+
+function detectReadyEmail(emailValue: unknown): BackendVerifyResult {
+  const email = normalizeEmail(emailValue);
+  const checkedAt = new Date().toISOString();
+  const validFormat = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(email);
+  const [prefix = '', domain = ''] = email.split('@');
+  const hasUsableDomain = !!domain && domain.includes('.') && !domain.startsWith('.') && !domain.endsWith('.');
+  const isDisposable = DISPOSABLE_DOMAINS.has(domain);
+  const isRoleBased = ROLE_PREFIXES.has(prefix);
+  const isFreeProvider = FREE_PROVIDER_DOMAINS.has(domain);
+
+  if (!email || !validFormat || !hasUsableDomain) {
+    return { email, status: 'bad_format', score: 0, readyToContact: false, provider: 'free_ready_detector', providerReason: 'Invalid email format or missing domain.', validFormat: false, hasMx: undefined, isRoleBased, isFreeProvider, checkedAt };
+  }
+  if (isDisposable) {
+    return { email, status: 'invalid', score: 10, readyToContact: false, provider: 'free_ready_detector', providerReason: 'Disposable/temporary email domain.', validFormat, hasMx: undefined, isRoleBased, isFreeProvider, checkedAt };
+  }
+  const score = isRoleBased ? 90 : isFreeProvider ? 82 : 88;
+  const reason = isRoleBased
+    ? 'Valid format and role/business inbox. Accepted for outreach.'
+    : isFreeProvider
+      ? 'Valid format and personal/free-mail inbox style. Accepted for outreach, but watch bounce/reply results.'
+      : 'Valid format and business-domain email. Accepted for outreach.';
+  return { email, status: 'valid', score, readyToContact: true, provider: 'free_ready_detector', providerReason: reason, validFormat, hasMx: undefined, isRoleBased, isFreeProvider, checkedAt };
 }
 
 function csvEscape(value: unknown) {
@@ -114,18 +143,16 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState<VerifyFilter>('needs_verification');
   const [search, setSearch] = useState('');
-  const [provider, setProvider] = useState('basic_mx');
-  const [limit, setLimit] = useState(100);
+  const [limit, setLimit] = useState(5000);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<VerifyStats>({});
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [message, setMessage] = useState('Load contacts with emails, then verify selected contacts or the current page.');
+  const [message, setMessage] = useState('Load contacts with emails, then detect ready emails. No paid verifier is used.');
   const [error, setError] = useState('');
   const [lastResults, setLastResults] = useState<Array<Record<string, unknown>>>([]);
-  const [backendNote, setBackendNote] = useState('');
   const selectedIds = Object.keys(selected).filter((id) => selected[id]);
 
   function applyFilter(query: any) {
@@ -171,7 +198,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       setTotal(count || 0);
       setPage(nextPage);
       setSelected({});
-      setMessage(`Loaded ${(data || []).length.toLocaleString()} contact(s). Page size is ${PAGE_SIZE}; verification runs only on selected/current contacts to avoid freezing.`);
+      setMessage(`Loaded ${(data || []).length.toLocaleString()} contact(s). Page size is ${PAGE_SIZE}; ready-email detection can run up to 5,000 at a time.`);
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -182,22 +209,10 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
   useEffect(() => {
     loadBusinesses(0);
     loadStats();
-    checkVerifierConfig();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
-  async function checkVerifierConfig() {
-    try {
-      const response = await fetch(`/api/backend/verifier-config?provider=${encodeURIComponent(provider)}`);
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(json?.error || json?.message || `Backend verifier config failed: ${response.status}`);
-      setBackendNote(json?.note || `Verifier provider: ${json?.requestedProvider || provider}`);
-    } catch (err) {
-      setBackendNote(`Could not read backend verifier config: ${formatError(err)}`);
-    }
-  }
-
-  useEffect(() => { checkVerifierConfig(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [provider]);
+  const detectorNote = 'Free ready-email detector: no paid verifier. It marks valid-format business or personal emails Ready, rejects clearly bad/disposable emails, and leaves true inbox proof to bounce/reply tracking after sending.';
 
   async function refresh() {
     await Promise.all([loadBusinesses(page), loadStats()]);
@@ -212,7 +227,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       .neq('email', '')
       .in('status', ['pending', 'found', 'review'])
       .order('updated_at', { ascending: true })
-      .limit(Math.max(1, Math.min(500, limit)));
+      .limit(Math.max(1, Math.min(MAX_DETECT_PER_RUN, limit)));
     const cleanSearch = search.trim().replace(/[%_]/g, '');
     if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
     const { data, error: batchError } = await query;
@@ -231,7 +246,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       const result = byEmail.get(normalizeEmail(business.email));
       if (!result) {
         summary.errors += 1;
-        rowsForDownload.push({ name: business.name, email: business.email, status: 'missing_result', reason: 'Backend did not return this email.' });
+        rowsForDownload.push({ name: business.name, email: business.email, status: 'missing_result', reason: 'Detector did not return this email.' });
         return;
       }
       const nextStatus = statusFromVerification(result);
@@ -247,7 +262,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
         workspace_id: workspace.id,
         business_id: business.id,
         email: normalizeEmail(business.email),
-        source: 'backend_verifier',
+        source: 'free_ready_detector',
         score,
         status: String(result.status || nextStatus),
         raw: result
@@ -294,34 +309,28 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
         const email = normalizeEmail(business.email);
         if (email && !byEmail.has(email)) byEmail.set(email, business);
       }
-      targets = Array.from(byEmail.values()).slice(0, Math.max(1, Math.min(500, limit)));
+      targets = Array.from(byEmail.values()).slice(0, Math.max(1, Math.min(MAX_DETECT_PER_RUN, limit)));
       if (!targets.length) {
         setMessage('No contacts with emails were found for this verification action.');
         return;
       }
 
       const started = performance.now();
-      setMessage(`Verifying ${targets.length.toLocaleString()} email(s) with ${provider}...`);
+      setMessage(`Detecting ${targets.length.toLocaleString()} ready email(s) with the free local detector...`);
       const allResults: BackendVerifyResult[] = [];
       for (let i = 0; i < targets.length; i += VERIFY_CHUNK_SIZE) {
         const chunk = targets.slice(i, i + VERIFY_CHUNK_SIZE);
-        const response = await fetch('/api/backend/batch-verify-emails', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ emails: chunk.map((b) => b.email), provider, delayMs: 0 })
-        });
-        const json = await response.json().catch(() => ({}));
-        if (!response.ok || json?.success === false) throw new Error(json?.error || json?.message || `Backend verification failed with HTTP ${response.status}`);
-        allResults.push(...((json?.results || []) as BackendVerifyResult[]));
+        allResults.push(...chunk.map((b) => detectReadyEmail(b.email)));
         setProgress(Math.round(Math.min(95, ((i + chunk.length) / targets.length) * 70)));
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
-      setMessage('Saving verification results to Supabase...');
+      setMessage('Saving ready-email detection results to Supabase...');
       const summary = await persistVerification(targets, allResults);
       const seconds = ((performance.now() - started) / 1000).toFixed(1);
       setProgress(100);
       setSelected({});
-      setMessage(`Verified ${summary.checked.toLocaleString()} contact(s) in ${seconds}s. Ready: ${summary.ready.toLocaleString()}, Review: ${summary.review.toLocaleString()}, Invalid: ${summary.invalid.toLocaleString()}, Errors: ${summary.errors.toLocaleString()}.`);
+      setMessage(`Detected ${summary.checked.toLocaleString()} email(s) in ${seconds}s. Ready: ${summary.ready.toLocaleString()}, Review: ${summary.review.toLocaleString()}, Invalid: ${summary.invalid.toLocaleString()}, Errors: ${summary.errors.toLocaleString()}. This is free preflight detection, not paid SMTP inbox verification.`);
       await refresh();
     } catch (err) {
       setError(formatError(err));
@@ -375,15 +384,12 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
               <option value="invalid">Invalid / No Inbox</option>
               <option value="all">All businesses</option>
             </select>
-            <select className="select" style={{ maxWidth: 180 }} value={provider} onChange={(event) => setProvider(event.target.value)}>
-              {PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-            <input className="input" style={{ maxWidth: 120 }} type="number" min={1} max={500} value={limit} onChange={(event) => setLimit(Number(event.target.value || 100))} />
+            <input className="input" style={{ maxWidth: 120 }} type="number" min={1} max={5000} value={limit} onChange={(event) => setLimit(Number(event.target.value || 100))} />
             <button className="btn secondary" type="button" disabled={loading || busy} onClick={() => loadBusinesses(0)}>Search</button>
           </div>
           <button className="btn secondary" type="button" disabled={loading || busy} onClick={refresh}>Refresh</button>
         </div>
-        <div className="notice" style={{ marginTop: 12 }}>{backendNote || 'Backend verifier config is loading...'}</div>
+        <div className="notice" style={{ marginTop: 12 }}>{detectorNote}</div>
         {busy ? <div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div> : null}
         <div className={error ? 'error' : 'success'} style={{ marginTop: 12 }}>{error || message}</div>
       </div>
@@ -391,13 +397,13 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       <div className="card" style={{ padding: 18 }}>
         <div className="actions" style={{ marginBottom: 12 }}>
           <span className="badge">Selected: {selectedIds.length.toLocaleString()}</span>
-          <button className="btn" type="button" disabled={!selectedIds.length || busy} onClick={() => verifyContacts('selected')}>Verify Selected</button>
-          <button className="btn secondary" type="button" disabled={!businesses.some((b) => b.email) || busy} onClick={() => verifyContacts('page')}>Verify Current Page</button>
-          <button className="btn secondary" type="button" disabled={busy} onClick={() => verifyContacts('next')}>Verify Next {Math.max(1, Math.min(500, limit)).toLocaleString()}</button>
+          <button className="btn" type="button" disabled={!selectedIds.length || busy} onClick={() => verifyContacts('selected')}>Detect Selected</button>
+          <button className="btn secondary" type="button" disabled={!businesses.some((b) => b.email) || busy} onClick={() => verifyContacts('page')}>Detect Current Page</button>
+          <button className="btn secondary" type="button" disabled={busy} onClick={() => verifyContacts('next')}>Detect Next {Math.max(1, Math.min(MAX_DETECT_PER_RUN, limit)).toLocaleString()}</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'ready')}>Mark Ready</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'review')}>Mark Review</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'invalid')}>Mark Invalid</button>
-          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-verification-results.csv', lastResults)}>Download Last Results</button>
+          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-verification-results.csv', lastResults)}>Download Last Detection Results</button>
         </div>
 
         <div className="table-wrap">
@@ -422,7 +428,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
                     <td>{verificationData ? <span className="muted">{reasonFromVerification(verificationData)}</span> : <span className="muted">Not checked</span>}</td>
                     <td>{b.website || b.domain || <span className="muted">No site</span>}</td>
                     <td>
-                      <button className="btn secondary" type="button" disabled={!b.email || busy} onClick={() => { setSelected({ [b.id]: true }); setTimeout(() => verifyContacts('selected'), 0); }}>Verify</button>
+                      <button className="btn secondary" type="button" disabled={!b.email || busy} onClick={() => { setSelected({ [b.id]: true }); setTimeout(() => verifyContacts('selected'), 0); }}>Detect</button>
                     </td>
                   </tr>
                 );

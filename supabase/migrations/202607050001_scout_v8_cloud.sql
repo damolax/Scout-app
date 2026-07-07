@@ -392,8 +392,8 @@ begin
       d.category,
       d.location,
       d.source,
-      'pending',
-      null,
+      case when coalesce(nullif(d.email, ''), '') <> '' then 'ready' else 'pending' end,
+      case when coalesce(nullif(d.email, ''), '') <> '' then 75 else null end,
       d.normalized_key,
       d.raw,
       auth.uid()
@@ -443,6 +443,99 @@ end;
 $$;
 
 grant execute on function public.archive_empty_businesses(uuid) to authenticated;
+
+
+create or replace function public.delete_pending_no_email_businesses(target_workspace uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  affected int;
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not public.is_workspace_member(target_workspace) then
+    raise exception 'User is not approved for this workspace';
+  end if;
+
+  delete from public.businesses
+  where workspace_id = target_workspace
+    and status in ('pending','scanning','found','review')
+    and coalesce(nullif(email, ''), '') = '';
+
+  get diagnostics affected = row_count;
+  return affected;
+end;
+$$;
+
+grant execute on function public.delete_pending_no_email_businesses(uuid) to authenticated;
+
+create or replace function public.mark_ready_emails_and_pending_no_email(target_workspace uuid)
+returns table(ready_count int, pending_count int)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not public.is_workspace_member(target_workspace) then
+    raise exception 'User is not approved for this workspace';
+  end if;
+
+  -- Recover emails from old imports where the parser stored the raw CSV row but left businesses.email blank.
+  update public.businesses
+  set
+    email = lower((regexp_match(
+      concat_ws(' ',
+        raw->>'email', raw->>'Email', raw->>'emails', raw->>'Emails',
+        raw->>'email1', raw->>'email2', raw->>'email3',
+        raw->>'validatedEmail1', raw->>'validatedEmail2', raw->>'validatedEmail3',
+        raw->>'business email', raw->>'Business Email', raw->>'personal email', raw->>'Personal Email',
+        raw->>'found email', raw->>'Found Email', raw->>'owner email', raw->>'Owner Email'
+      ),
+      '[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}'
+    ))[1]),
+    updated_at = now()
+  where workspace_id = target_workspace
+    and coalesce(nullif(email, ''), '') = ''
+    and regexp_match(
+      concat_ws(' ',
+        raw->>'email', raw->>'Email', raw->>'emails', raw->>'Emails',
+        raw->>'email1', raw->>'email2', raw->>'email3',
+        raw->>'validatedEmail1', raw->>'validatedEmail2', raw->>'validatedEmail3',
+        raw->>'business email', raw->>'Business Email', raw->>'personal email', raw->>'Personal Email',
+        raw->>'found email', raw->>'Found Email', raw->>'owner email', raw->>'Owner Email'
+      ),
+      '[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}'
+    ) is not null;
+
+  update public.businesses
+  set status = 'ready', score = coalesce(score, 75), updated_at = now()
+  where workspace_id = target_workspace
+    and coalesce(nullif(email, ''), '') <> ''
+    and status in ('pending','found','review');
+
+  update public.businesses
+  set status = 'pending', updated_at = now()
+  where workspace_id = target_workspace
+    and coalesce(nullif(email, ''), '') = ''
+    and status in ('found','review','ready');
+
+  return query
+  select
+    (select count(*)::int from public.businesses where workspace_id = target_workspace and status = 'ready' and coalesce(nullif(email, ''), '') <> '') as ready_count,
+    (select count(*)::int from public.businesses where workspace_id = target_workspace and status = 'pending' and coalesce(nullif(email, ''), '') = '') as pending_count;
+end;
+$$;
+
+grant execute on function public.mark_ready_emails_and_pending_no_email(uuid) to authenticated;
 
 
 alter table public.profiles enable row level security;

@@ -4,7 +4,7 @@ import { cleanText, displayDomain, extractEmail, makeNormalizedKey, normalizeEma
 
 const FIELD_ALIASES = {
   name: ['business name', 'business', 'company', 'company name', 'name', 'title', 'place name', 'organization', 'organisation', 'store', 'shop', 'merchant', 'brand'],
-  email: ['email', 'emails', 'email address', 'email addresses', 'e-mail', 'e-mail address', 'mail', 'contact email', 'contact emails', 'verified email', 'verified emails', 'found email', 'found emails', 'personal email', 'personal emails', 'business email', 'business emails', 'owner email', 'owner emails', 'primary email', 'primary emails', 'work email', 'work emails', 'inbox email', 'valid email'],
+  email: ['email', 'emails', 'email1', 'email2', 'email3', 'email 1', 'email 2', 'email 3', 'validatedemail1', 'validatedemail2', 'validatedemail3', 'validated email 1', 'validated email 2', 'validated email 3', 'email address', 'email addresses', 'e-mail', 'e-mail address', 'mail', 'contact email', 'contact emails', 'verified email', 'verified emails', 'found email', 'found emails', 'personal email', 'personal emails', 'business email', 'business emails', 'owner email', 'owner emails', 'primary email', 'primary emails', 'work email', 'work emails', 'inbox email', 'valid email'],
   phone: ['phone', 'phones', 'phone number', 'telephone', 'mobile', 'contact number', 'tel', 'whatsapp'],
   website: ['website', 'websites', 'site', 'url', 'web', 'domain url', 'business website', 'website url', 'store url', 'shop url', 'profile url'],
   domain: ['domain', 'domains', 'website domain', 'root domain'],
@@ -40,7 +40,8 @@ function findField(headers: string[], field: FieldName): string | undefined {
   const loose = normalizedHeaders.find((h) => {
     const matches = aliases.some((alias) => h.normalized === alias || h.normalized.startsWith(`${alias} `) || h.normalized.endsWith(` ${alias}`) || h.normalized.includes(` ${alias} `));
     if (!matches) return false;
-    if (field === 'email' && BAD_EMAIL_HEADER_WORDS.some((bad) => h.normalized.includes(bad) && !h.normalized.includes('email address'))) return false;
+    if (field === 'email' && /^(email|e mail|mail|validated email|verified email|found email|contact email|business email|personal email|owner email|primary email|work email)\s*\d*$/.test(h.normalized)) return true;
+    if (field === 'email' && BAD_EMAIL_HEADER_WORDS.some((bad) => h.normalized.includes(bad) && !h.normalized.includes('email address') && !h.normalized.includes('validated email') && !h.normalized.includes('verified email'))) return false;
     return true;
   });
   return loose?.raw;

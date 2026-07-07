@@ -65,7 +65,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Important</h3>
-        <p className="muted">Vercel Cron is configured to hit <code>/api/research/run-once</code> every 15 minutes. For heavy 100,000-contact jobs, the permanent version should move the long worker into your backend/Render process, while this app remains the cloud dashboard and queue.</p>
+        <p className="muted">Auto Scout is intentionally triggered from this tab for now. The 15-minute Vercel cron was removed because Hobby Vercel blocks it; long background workers should run on the backend/Render later while this app remains the dashboard and queue.</p>
       </div>
     </div>
   );

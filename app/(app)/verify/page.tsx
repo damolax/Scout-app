@@ -7,8 +7,8 @@ export default async function VerifyPage() {
   return (
     <div className="stack">
       <div className="page-title">
-        <h2>Verify Emails</h2>
-        <p>Verify imported contacts against the backend verifier, then move safe contacts to Ready and risky contacts to Review.</p>
+        <h2>Ready Email Detection</h2>
+        <p>No paid verifier. Contacts with valid business or personal emails are marked Ready; no-email contacts remain Pending for Auto Scout; bounces/no-inbox are cleaned after sending.</p>
       </div>
       <VerifyClient workspace={workspace} />
     </div>
