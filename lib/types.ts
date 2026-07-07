@@ -50,12 +50,27 @@ export type CsvBusinessInput = {
   raw: Record<string, unknown>;
 };
 
+
+export type CsvInvalidRow = {
+  rowNumber: number;
+  reason: string;
+  raw: Record<string, unknown>;
+};
+
+export type DuplicateSource = 'queue' | 'scout_history';
+
+export type ExistingKeyRecord = {
+  normalized_key: string;
+  source: DuplicateSource;
+};
+
 export type ImportResult = {
   uploaded: number;
   inserted: number;
   skippedExistingQueue: number;
   skippedScouted: number;
-  skippedBadRows: number;
+  skippedFileDuplicates: number;
+  invalidRows: CsvInvalidRow[];
   skippedRows: CsvBusinessInput[];
   batchId?: string;
   queuedResearch?: number;

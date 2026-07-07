@@ -8,7 +8,7 @@ export default async function UploadPage() {
     <div className="stack">
       <div className="page-title">
         <h2>Upload Lists</h2>
-        <p>Import CSV businesses, skip duplicates, and save the queue in Supabase.</p>
+        <p>Import up to 100,000 CSV contacts/businesses with chunked duplicate checks, invalid-row export, and Supabase queue storage.</p>
       </div>
       <UploadClient workspace={workspace} />
     </div>

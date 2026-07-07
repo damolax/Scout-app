@@ -1,4 +1,4 @@
-# Scout App v8.2 Native Shell Setup
+# Scout App v8.3 Native Shell Setup
 
 This version removes translation for now and keeps the app focused on the native Node/Next/Supabase foundation.
 
@@ -36,3 +36,14 @@ RESEARCH_CRON_SECRET=change-this
 - `/api/translate`.
 - DeepL/LibreTranslate env vars.
 - Template translate buttons.
+
+
+## v8.3 Native Import
+
+- CSV import limit: 100,000 usable rows per file.
+- Duplicate checks use `check_existing_normalized_keys` RPC over POST chunks, not a giant URL query.
+- Inserts run in 500-row chunks.
+- Invalid rows and skipped duplicates can be downloaded.
+- If unfinished queue records exist and a new CSV has very different columns, Scout shows a campaign-mixing warning.
+
+Run the Supabase migration again before testing import.

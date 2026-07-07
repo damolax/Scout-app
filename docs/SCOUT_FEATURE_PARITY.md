@@ -112,3 +112,15 @@ Goal: rebuild Scout App as real Node/Next/Supabase pages. No embedded legacy HTM
 - [ ] Workspace export/import
 - [ ] Backup scouted history
 - [ ] Restore old local data
+
+
+## v8.3 Completed
+
+- Native CSV upload/import page.
+- 100,000 usable row limit.
+- Chunked duplicate checks against businesses and scout_history.
+- Chunked Supabase inserts.
+- Invalid row export.
+- Skipped duplicate export.
+- Different target/campaign warning.
+- Real error rendering instead of `[object Object]`.

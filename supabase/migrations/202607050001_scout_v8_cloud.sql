@@ -263,6 +263,30 @@ as $$
   );
 $$;
 
+
+create or replace function public.check_existing_normalized_keys(
+  target_workspace uuid,
+  normalized_keys text[]
+)
+returns table(normalized_key text, source text)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select b.normalized_key, 'queue'::text as source
+  from public.businesses b
+  where b.workspace_id = target_workspace
+    and b.normalized_key = any(normalized_keys)
+  union
+  select h.normalized_key, 'scout_history'::text as source
+  from public.scout_history h
+  where h.workspace_id = target_workspace
+    and h.normalized_key = any(normalized_keys);
+$$;
+
+grant execute on function public.check_existing_normalized_keys(uuid, text[]) to authenticated;
+
 alter table public.profiles enable row level security;
 alter table public.workspaces enable row level security;
 alter table public.workspace_members enable row level security;

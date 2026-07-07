@@ -1,4 +1,4 @@
-# Scout App v8.2 Native Shell
+# Scout App v8.3 Native Shell
 
 This package keeps Scout App as a real Node/Next/Supabase application. It removes the embedded legacy/Main Scout approach and keeps the app ready for feature-by-feature native migration.
 
@@ -30,3 +30,14 @@ Run the SQL migration in `supabase/migrations/202607050001_scout_v8_cloud.sql`, 
 ## Next deliverable
 
 `v8.3 native import` — complete 100,000-contact upload, chunked import, duplicate skipping, invalid row export, and import batch history.
+
+
+## v8.3 Native Import
+
+- CSV import limit: 100,000 usable rows per file.
+- Duplicate checks use `check_existing_normalized_keys` RPC over POST chunks, not a giant URL query.
+- Inserts run in 500-row chunks.
+- Invalid rows and skipped duplicates can be downloaded.
+- If unfinished queue records exist and a new CSV has very different columns, Scout shows a campaign-mixing warning.
+
+Run the Supabase migration again before testing import.
