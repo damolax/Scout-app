@@ -129,7 +129,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   const [invalidRows, setInvalidRows] = useState<CsvInvalidRow[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [fileName, setFileName] = useState('');
-  const [progress, setProgress] = useState('Choose a CSV file. Rows with emails go to Ready for Email Scout; rows without emails stay Pending for Auto Scout.');
+  const [progress, setProgress] = useState('Choose a CSV file. Rows with emails go to Ready for Message; rows without emails stay Pending for Auto Scout.');
   const [phase, setPhase] = useState<ImportPhase>('idle');
   const [percent, setPercent] = useState(0);
   const [importing, setImporting] = useState(false);
@@ -197,7 +197,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       setPhase('ready');
       const emailCount = parsed.rows.filter((row) => row.email).length;
       const websiteCount = parsed.rows.filter((row) => row.website || row.domain).length;
-      setProgress(`Preview ready: ${parsed.rows.length.toLocaleString()} usable row(s). ${emailCount.toLocaleString()} will go to Ready for Email Scout. ${(parsed.rows.length - emailCount).toLocaleString()} without email will stay Pending for Auto Scout. ${websiteCount.toLocaleString()} have website/domain. ${parsed.invalidRows.length.toLocaleString()} invalid row(s).`);
+      setProgress(`Preview ready: ${parsed.rows.length.toLocaleString()} usable row(s). ${emailCount.toLocaleString()} will go to Ready for Message. ${(parsed.rows.length - emailCount).toLocaleString()} without email will stay Pending for Auto Scout. ${websiteCount.toLocaleString()} have website/domain. ${parsed.invalidRows.length.toLocaleString()} invalid row(s).`);
     } catch (error) {
       setPhase('failed');
       setErrors([formatImportError(error)]);
@@ -382,7 +382,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       <div className="card" style={{ padding: 18 }}>
         <label className="label">Upload CSV</label>
         <input className="input" type="file" accept=".csv,text/csv" onChange={onFile} />
-        <p className="muted">Limit: 100,000 usable rows. Import divides rows clearly: emails → Ready for Email Scout; no email → Pending for Auto Scout; duplicates are skipped/exportable; invalid rows are downloadable. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
+        <p className="muted">Limit: 100,000 usable rows. Import divides rows clearly: emails → Ready for Message; no email → Pending for Auto Scout; duplicates are skipped/exportable; invalid rows are downloadable. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
         <div className={phase === 'failed' ? 'error' : phase === 'done' ? 'success' : 'notice'}>{progress}</div>
         <div className="progress-track" aria-label="Import progress"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>
 

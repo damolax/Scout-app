@@ -43,6 +43,6 @@ The Replies page tracks:
 
 The frontend uses `/api/backend/...` as a proxy. The Render backend still needs working reply-reading endpoints. v8.7 tries these compatible endpoints:
 
-- `/email-scout/check-replies`
+- `/message/check-replies`
 - `/replies/sync`
 - `/gmail/replies`

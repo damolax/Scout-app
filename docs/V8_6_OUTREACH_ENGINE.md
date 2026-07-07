@@ -1,6 +1,6 @@
 # Scout App v8.6 Native Outreach Engine
 
-This release moves Email Scout from a placeholder into a native outreach control center.
+This release moves Message from a placeholder into a native outreach control center.
 
 ## Added
 

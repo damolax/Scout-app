@@ -78,6 +78,7 @@ type SendSummary = {
 };
 
 const READY_PAGE_SIZE = 100;
+const MAX_MESSAGE_BATCH_SIZE = 5000;
 const DEFAULT_TEMPLATE_MESSAGE = `Hi {name},\n\nI came across {business} and noticed there may be a few simple ways to improve how prospects move from first visit to enquiry.\n\nI can send you a short review with the first changes I would make for {business}.\n\nBest regards,\nOlalekan`;
 const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
@@ -177,11 +178,22 @@ function toDateTomorrow() {
   return d.toISOString();
 }
 
+function getMessageRoutePath() {
+  if (typeof window === 'undefined') return '/message';
+  return window.location.pathname.startsWith('/message') ? '/message' : '/message';
+}
+
+function getMessageRedirectUri() {
+  if (typeof window === 'undefined') return '/message';
+  return `${window.location.origin}${getMessageRoutePath()}`;
+}
+
 export default function EmailScoutClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
   const [readyContacts, setReadyContacts] = useState<Business[]>([]);
+  const [readyTotal, setReadyTotal] = useState(0);
   const [selectedContacts, setSelectedContacts] = useState<Record<string, boolean>>({});
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, boolean>>({});
   const [templateId, setTemplateId] = useState('');
@@ -202,7 +214,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('Select a template, select Gmail accounts, then send a fixed-size batch from Ready contacts.');
+  const [status, setStatus] = useState('Select a template, select Gmail accounts, then send a fixed-size batch from Ready-to-message contacts.');
   const [error, setError] = useState('');
   const [backendNote, setBackendNote] = useState('');
   const [lastResults, setLastResults] = useState<Array<Record<string, unknown>>>([]);
@@ -256,9 +268,10 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
 
   async function loadReadyContacts() {
     const cleanSearch = readySearch.trim().replace(/[%_]/g, '');
+    const targetBusinessId = typeof window !== 'undefined' ? new URL(window.location.href).searchParams.get('business') : '';
     let query = supabase
       .from('businesses')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('workspace_id', workspace.id)
       .eq('status', 'ready')
       .not('email', 'is', null)
@@ -266,10 +279,32 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       .order('updated_at', { ascending: true })
       .limit(READY_PAGE_SIZE);
     if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
-    const { data, error: loadError } = await query;
+    const { data, error: loadError, count } = await query;
     if (loadError) throw loadError;
-    setReadyContacts((data || []) as Business[]);
-    setSelectedContacts({});
+
+    let rows = (data || []) as Business[];
+    let selected: Record<string, boolean> = {};
+
+    if (targetBusinessId) {
+      const { data: target, error: targetError } = await supabase
+        .from('businesses')
+        .select('*')
+        .eq('workspace_id', workspace.id)
+        .eq('id', targetBusinessId)
+        .maybeSingle();
+      if (targetError) throw targetError;
+      if (target?.email) {
+        rows = [target as Business, ...rows.filter((b) => b.id !== target.id)].slice(0, READY_PAGE_SIZE);
+        selected = { [target.id]: true };
+        setStatus(`Loaded selected business for Message: ${target.name || target.email}.`);
+      } else if (target) {
+        setStatus('Selected business has no email yet. Send it to Auto Scout first, then return to Message.');
+      }
+    }
+
+    setReadyContacts(rows);
+    setReadyTotal(count || rows.length);
+    setSelectedContacts(selected);
   }
 
   async function loadPerformance() {
@@ -286,7 +321,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     setError('');
     try {
       await Promise.all([loadTemplates(), loadAccounts(), loadReadyContacts(), loadPerformance(), checkBackend()]);
-      setStatus('Loaded templates, Gmail accounts, Ready contacts, and recent performance.');
+      setStatus('Loaded templates, Gmail accounts, Ready-to-message contacts, and recent performance.');
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -295,7 +330,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
   }
 
   useEffect(() => {
-    const savedClientId = localStorage.getItem('scout_v86_google_client_id') || '';
+    const savedClientId = localStorage.getItem('scout_v814_google_client_id') || '';
     setGoogleClientId(savedClientId);
     setManualClientId(savedClientId);
     refreshAll();
@@ -312,8 +347,8 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     const url = new URL(window.location.href);
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
-    if (!code || state !== 'scout_v86_gmail') return;
-    const clientId = googleClientId || localStorage.getItem('scout_v86_google_client_id') || '';
+    if (!code || state !== 'scout_v814_gmail') return;
+    const clientId = googleClientId || localStorage.getItem('scout_v814_google_client_id') || '';
     if (!clientId) {
       setError('Google OAuth returned a code, but Google Client ID is missing. Save the Client ID and reconnect Gmail.');
       return;
@@ -321,7 +356,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     setBusy(true);
     setStatus('Completing Gmail connection...');
     try {
-      const redirectUri = `${window.location.origin}/email-scout`;
+      const redirectUri = getMessageRedirectUri();
       const response = await fetch('/api/backend/gmail/exchange', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -375,8 +410,8 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       setError('Paste your Google OAuth Client ID first.');
       return;
     }
-    localStorage.setItem('scout_v86_google_client_id', googleClientId.trim());
-    const redirectUri = `${window.location.origin}/email-scout`;
+    localStorage.setItem('scout_v814_google_client_id', googleClientId.trim());
+    const redirectUri = getMessageRedirectUri();
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', googleClientId.trim());
     url.searchParams.set('redirect_uri', redirectUri);
@@ -384,7 +419,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     url.searchParams.set('scope', GMAIL_SCOPES);
     url.searchParams.set('access_type', 'offline');
     url.searchParams.set('prompt', 'consent');
-    url.searchParams.set('state', 'scout_v86_gmail');
+    url.searchParams.set('state', 'scout_v814_gmail');
     window.location.href = url.toString();
   }
 
@@ -506,15 +541,53 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     setMessage(t.message);
   }
 
-  function getContactsForSend() {
+  async function getContactsForSend() {
     const selected = readyContacts.filter((b) => selectedContacts[b.id]);
-    const source = selected.length ? selected : readyContacts;
     const unique = new Map<string, Business>();
-    for (const business of source) {
+    const limit = Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(sendLimit || 50)));
+
+    if (selected.length) {
+      for (const business of selected) {
+        const key = normalizeEmail(business.email);
+        if (key && !unique.has(key)) unique.set(key, business);
+      }
+      return Array.from(unique.values()).slice(0, limit);
+    }
+
+    const cleanSearch = readySearch.trim().replace(/[%_]/g, '');
+    let query = supabase
+      .from('businesses')
+      .select('*')
+      .eq('workspace_id', workspace.id)
+      .eq('status', 'ready')
+      .not('email', 'is', null)
+      .neq('email', '')
+      .order('updated_at', { ascending: true })
+      .limit(limit);
+    if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
+    const { data, error: loadError } = await query;
+    if (loadError) throw loadError;
+    for (const business of (data || []) as Business[]) {
       const key = normalizeEmail(business.email);
       if (key && !unique.has(key)) unique.set(key, business);
     }
-    return Array.from(unique.values()).slice(0, Math.max(1, Math.min(2000, sendLimit)));
+    return Array.from(unique.values()).slice(0, limit);
+  }
+
+  async function repairReadyContacts() {
+    setBusy(true);
+    setError('');
+    try {
+      const { data, error: repairError } = await supabase.rpc('mark_ready_emails_and_pending_no_email', { target_workspace: workspace.id });
+      if (repairError) throw repairError;
+      const row = Array.isArray(data) ? data[0] : data;
+      setStatus(`Repaired routing. Ready-to-message with email: ${Number(row?.ready_count || 0).toLocaleString()}. Pending without email: ${Number(row?.pending_count || 0).toLocaleString()}.`);
+      await loadReadyContacts();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function buildContactPayload(business: Business, template: TemplateRow, index: number) {
@@ -531,7 +604,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       templateName: template.name,
       website: business.website || '',
       domain: business.domain || getDomain(business),
-      source: business.source || 'scout_v86'
+      source: business.source || 'scout_v814'
     };
   }
 
@@ -597,12 +670,12 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     setSummary({ requested: 0, attempted: 0, sent: 0, failed: 0, skipped: 0, stopped: false });
     try {
       if (!currentTemplate) throw new Error('Create or select a template first.');
-      const contacts = getContactsForSend();
-      if (!contacts.length) throw new Error('No Ready contacts with email found. Verify/import contacts first.');
+      const contacts = await getContactsForSend();
+      if (!contacts.length) throw new Error('No Ready-to-message contacts with email found. Import contacts with emails or run Ready Email Detection first.');
       let activeAccounts = accounts.filter((a) => selectedAccounts[a.id] && a.status === 'connected' && !isPaused(a) && (a.access_token || a.refresh_token));
       if (!activeAccounts.length) throw new Error('Select at least one connected Gmail account with OAuth tokens.');
 
-      const batchId = `scout_v86_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const batchId = `scout_v814_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const { error: batchError } = await supabase.from('outreach_batches').insert({
         id: batchId,
         workspace_id: workspace.id,
@@ -745,7 +818,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
   return (
     <div className="stack">
       <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Ready Contacts</div><div className="num">{readyContacts.length.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Ready To Message</div><div className="num">{readyTotal.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Connected Senders</div><div className="num">{accounts.filter((a) => a.status === 'connected' && !isPaused(a)).length.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Recent Sent Logs</div><div className="num">{recentSent.filter((r) => r.status === 'sent').length.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Real Replies</div><div className="num">{replies.filter((r) => r.is_real_reply !== false).length.toLocaleString()}</div></div>
@@ -773,7 +846,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
             <input className="input" style={{ flex: 1, minWidth: 260 }} value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} placeholder="Google OAuth Client ID" />
             <button className="btn" type="button" onClick={startGmailOauth} disabled={busy}>Connect Gmail</button>
           </div>
-          <p className="muted" style={{ fontSize: 12 }}>Authorized redirect URI in Google Cloud must be: <strong>{typeof window !== 'undefined' ? `${window.location.origin}/email-scout` : '/email-scout'}</strong></p>
+          <p className="muted" style={{ fontSize: 12 }}>Authorized redirect URI in Google Cloud must be: <strong>{typeof window !== 'undefined' ? getMessageRedirectUri() : '/message'}</strong></p>
 
           <div className="actions" style={{ marginTop: 14 }}>
             <button className="btn secondary" type="button" onClick={() => setShowAdvancedTokens((value) => !value)}>{showAdvancedTokens ? 'Hide Advanced Sender Setup' : 'Advanced: Manual Sender Setup'}</button>
@@ -833,7 +906,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       <div className="card" style={{ padding: 18 }}>
         <h3>Batch Send</h3>
         <div className="grid grid-4">
-          <div><label className="label">Fixed number to send</label><input className="input" type="number" min={1} max={2000} value={sendLimit} onChange={(e) => setSendLimit(Number(e.target.value || 50))} /><p className="muted" style={{ fontSize: 12 }}>If selected contacts are empty, Scout sends the next Ready contacts.</p></div>
+          <div><label className="label">Fixed number to send</label><input className="input" type="number" min={1} max={MAX_MESSAGE_BATCH_SIZE} value={sendLimit} onChange={(e) => setSendLimit(Number(e.target.value || 50))} /><p className="muted" style={{ fontSize: 12 }}>If no contacts are selected, Scout pulls the next Ready-to-message contacts from Supabase, not only the 100-row preview.</p></div>
           <div><label className="label">Delay per email/ms</label><input className="input" type="number" min={0} max={60000} value={delayMs} onChange={(e) => setDelayMs(Number(e.target.value || 0))} /></div>
           <div><label className="label">Selected contacts</label><div className="badge">{selectedContactIds.length ? selectedContactIds.length.toLocaleString() : 'Auto next Ready'}</div></div>
           <div><label className="label">Selected senders</label><div className="badge">{selectedAccountIds.length.toLocaleString()}</div></div>
@@ -842,7 +915,8 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
         <div className="actions">
           <button className="btn" type="button" onClick={sendBatch} disabled={busy || loading}>Start Fixed Batch</button>
           <button className="btn secondary" type="button" onClick={refreshAll} disabled={busy || loading}>Refresh</button>
-          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-v89-last-send-results.csv', lastResults)}>Download Last Results</button>
+          <button className="btn secondary" type="button" onClick={repairReadyContacts} disabled={busy || loading}>Repair Ready List</button>
+          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-message-last-send-results.csv', lastResults)}>Download Last Results</button>
         </div>
         <div className="grid grid-4" style={{ marginTop: 14 }}>
           <div className="card kpi"><div className="title">Requested</div><div className="num">{summary.requested}</div></div>
@@ -855,16 +929,16 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
           <div className="actions" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-            <h3 style={{ margin: 0 }}>Ready Contacts</h3>
+            <h3 style={{ margin: 0 }}>Ready To Message</h3>
             <div className="actions"><input className="input" style={{ width: 260 }} value={readySearch} onChange={(e) => setReadySearch(e.target.value)} placeholder="Search ready contacts" onKeyDown={(e) => { if (e.key === 'Enter') loadReadyContacts(); }} /><button className="btn secondary" type="button" onClick={loadReadyContacts}>Search</button></div>
           </div>
-          <div className="actions" style={{ marginBottom: 12 }}><label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={readyContacts.length > 0 && selectedContactIds.length === readyContacts.length} onChange={(e) => toggleAllContacts(e.target.checked)} /> Select current page</label><span className="badge">Showing first {READY_PAGE_SIZE}</span></div>
+          <div className="actions" style={{ marginBottom: 12 }}><label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={readyContacts.length > 0 && selectedContactIds.length === readyContacts.length} onChange={(e) => toggleAllContacts(e.target.checked)} /> Select current page</label><span className="badge">Showing {readyContacts.length.toLocaleString()} of {readyTotal.toLocaleString()} ready-to-message</span></div>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Use</th><th>Business</th><th>Email</th><th>Website</th></tr></thead>
               <tbody>
                 {readyContacts.map((b) => <tr key={b.id}><td><input type="checkbox" checked={!!selectedContacts[b.id]} onChange={(e) => setSelectedContacts((cur) => ({ ...cur, [b.id]: e.target.checked }))} /></td><td><strong>{b.name || '-'}</strong><br /><span className="muted">{b.category || ''} {b.location ? `· ${b.location}` : ''}</span></td><td>{b.email}</td><td>{b.website || b.domain || '-'}</td></tr>)}
-                {!readyContacts.length ? <tr><td colSpan={4} className="muted">No Ready contacts found. Verify emails first.</td></tr> : null}
+                {!readyContacts.length ? <tr><td colSpan={4} className="muted">No Ready-to-message contacts found. Import contacts with emails, run Ready Email Detection, or click Repair Ready List.</td></tr> : null}
               </tbody>
             </table>
           </div>
@@ -878,7 +952,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
             <div className="notice">{previewSubject}</div>
             <label className="label" style={{ marginTop: 12 }}>Body</label>
             <div className="card" style={{ padding: 14, whiteSpace: 'pre-wrap' }}>{previewBody}</div>
-          </> : <p className="muted">Select a template and load Ready contacts to preview.</p>}
+          </> : <p className="muted">Select a template and load Ready-to-message contacts to preview.</p>}
         </div>
       </div>
 

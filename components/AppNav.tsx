@@ -10,7 +10,7 @@ const items = [
   { href: '/businesses', label: 'Businesses', icon: Building2 },
   { href: '/verify', label: 'Verify Emails', icon: ShieldCheck },
   { href: '/auto-scout', label: 'Auto Scout', icon: Search },
-  { href: '/email-scout', label: 'Email Scout', icon: Mail },
+  { href: '/message', label: 'Message', icon: Mail },
   { href: '/replies', label: 'Replies', icon: MessageSquareReply },
   { href: '/no-inbox', label: 'No Inbox', icon: Ban },
   { href: '/data-safety', label: 'Data Safety', icon: Database },

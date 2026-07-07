@@ -374,7 +374,7 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
                         {STATUS_OPTIONS.map((item) => <option key={item} value={item}>{item.replace('_', ' ')}</option>)}
                       </select>
                       <Link className="btn secondary" href={`/businesses/${b.id}`}>Open</Link>
-                      {b.email ? <Link className="btn secondary" href={`/email-scout?business=${b.id}`}>Message</Link> : null}
+                      {b.email ? <Link className="btn secondary" href={`/message?business=${b.id}`}>Message</Link> : null}
                       {hasNoEmail(b) ? <button className="btn secondary" type="button" disabled={busy} onClick={() => queueForAutoScout([b.id], 'single no-email')}>Auto Scout</button> : null}
                     </div>
                   </td>

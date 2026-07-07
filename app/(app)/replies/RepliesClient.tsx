@@ -379,7 +379,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
                   {account.email} · {account.status}
                 </label>
               ))}
-              {!accounts.length ? <div className="muted">No Gmail accounts saved yet. Add senders from Email Scout first.</div> : null}
+              {!accounts.length ? <div className="muted">No Gmail accounts saved yet. Add senders from Message first.</div> : null}
             </div>
           </div>
           <div>

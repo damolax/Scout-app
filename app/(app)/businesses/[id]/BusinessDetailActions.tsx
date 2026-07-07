@@ -55,7 +55,7 @@ export default function BusinessDetailActions({ workspace, businessId, hasEmail,
       <h3>Business Actions</h3>
       <p className="muted">Use this page as the single business record: decide whether it needs Auto Scout, can be messaged, should be reviewed, or should be removed from the active queue.</p>
       <div className="actions">
-        {hasEmail ? <Link className="btn" href={`/email-scout?business=${businessId}`}>Message this business</Link> : <button className="btn" type="button" disabled={busy} onClick={queueForAutoScout}>Send to Auto Scout</button>}
+        {hasEmail ? <Link className="btn" href={`/message?business=${businessId}`}>Message this business</Link> : <button className="btn" type="button" disabled={busy} onClick={queueForAutoScout}>Send to Auto Scout</button>}
         <button className="btn secondary" type="button" disabled={busy} onClick={() => setStatus('ready')}>Mark Ready</button>
         <button className="btn secondary" type="button" disabled={busy} onClick={() => setStatus('review')}>Mark Review</button>
         <button className="btn secondary" type="button" disabled={busy} onClick={() => setStatus('no_inbox')}>Move No Inbox</button>

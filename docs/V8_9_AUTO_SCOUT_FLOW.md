@@ -8,7 +8,7 @@
 4. Found emails become status `found`.
 5. Go to Ready Email Detection. Detect a fixed number, or leave the number blank to process all matching contacts up to the safety cap. Already-detected emails are skipped.
 6. Valid business or personal email formats become Ready. Clearly bad/disposable emails become Invalid.
-7. Send messages from Email Scout. Bounces/no-inbox are handled after sending and are not counted as real responses.
+7. Send messages from Message. Bounces/no-inbox are handled after sending and are not counted as real responses.
 
 ## Important limitation
 
