@@ -1,126 +1,41 @@
-# Scout App Native Feature Parity Plan
+# Scout Feature Parity
 
-Goal: rebuild Scout App as real Node/Next/Supabase pages. No embedded legacy HTML, no iframe app, no `/main-scout` shortcut.
+## Done
 
-## v8.2 Native Shell — Done in this package
+- [x] Native Node/Next/Supabase shell
+- [x] Email/password login
+- [x] Auto-approved users
+- [x] Admin account support
+- [x] Native upload/import foundation
+- [x] 100,000-row import limit
+- [x] Fast server-side chunk import
+- [x] Duplicate skip against queue and scout history
+- [x] Native business queue
+- [x] Business search/filter/status updates
+- [x] Bulk status updates and export
 
-- [x] Supabase email/password login
-- [x] Admin email configuration
-- [x] Auto-approved workspace membership
-- [x] Protected app shell/sidebar
-- [x] Native pages only
-- [x] Remove `/main-scout`
-- [x] Remove `/classic`
-- [x] Remove `legacy/scout-classic.html`
-- [x] English/German/French/Spanish support
+## Next
 
-## v8.3 Native Import — Next
-
-- [ ] CSV/XLSX upload
-- [ ] 100,000 usable row limit
-- [ ] Chunked parsing
-- [ ] Chunked duplicate check
-- [ ] Chunked insert
-- [ ] Different-target-list warning
-- [ ] Download skipped duplicates
-- [ ] Download invalid rows
-- [ ] Import batch history
-
-## v8.4 Business Queue
-
-- [ ] Pending queue
-- [ ] Search/filter/status tabs
-- [ ] Business detail page
-- [ ] Bulk actions
-- [ ] Export queue
-- [ ] Phone-friendly queue view
-
-## v8.5 Team Dedupe
-
-- [ ] Team scouted registry
-- [ ] Import old local v7 scouted history
-- [ ] Prevent repeated scouting across users
-- [ ] Show why a row was skipped
-
-## v8.6 Templates
-
-- [ ] Full template manager
-- [ ] Templates
-- [ ] Subject variants
-- [ ] Placeholder validation
-
-## v8.7 Gmail OAuth
-
-- [ ] Native Gmail connection UI
-- [ ] Multiple accounts
-- [ ] Sender health
-- [ ] Backend OAuth test
-
-## v8.8 Batch Sending
-
-- [ ] Ready-to-send queue
-- [ ] Batch sending
-- [ ] Sender selection/rotation
-- [ ] Per-message send log
-- [ ] Mark contacted after backend confirms send
-
-## v8.9 Replies
-
-- [ ] Read replies from backend/Gmail
-- [ ] Know which Gmail received reply
-- [ ] Match reply to business/contact
-
-## v8.10 No Inbox / Bounces
-
-- [ ] Mailer daemon detection
-- [ ] Delivery failure detection
-- [ ] Move to No Inbox
-- [ ] Exclude from real replies
-
-## v8.11 Verify / Email Finder
-
-- [ ] Find emails from websites
-- [ ] Verify/scoring
-- [ ] Role email/free-provider/business-domain detection
-
-## v8.12 Background Research
-
-- [ ] Backend worker queue
-- [ ] Research continues when user is not on app
-- [ ] Progress visible from phone/PC
-
-## v8.13 Extension Flow
-
-- [ ] Extension CSV import
-- [ ] Optional extension ingest endpoint
-- [ ] Dorking/directories source labels
-
-## v8.14 Dorking Settings
-
-- [ ] Industry/location/signal profiles
-- [ ] Send settings to extension
-
-## v8.15 Dashboard
-
-- [ ] KPIs from cloud data
-- [ ] Sender performance
-- [ ] Template performance
-- [ ] Research progress
-
-## v8.16 Data Safety
-
-- [ ] Workspace export/import
-- [ ] Backup scouted history
-- [ ] Restore old local data
+- [ ] Native Verify Email
+- [ ] Native templates
+- [ ] Native Gmail OAuth status/accounts UI
+- [ ] Native batch sending
+- [ ] Reply tracking
+- [ ] No-inbox/bounce handling
+- [ ] Extension/dorking flow
+- [ ] Background email research worker
+- [ ] Dashboard based on cloud data
 
 
-## v8.3 Completed
+## v8.5 Native Verify Email
 
-- Native CSV upload/import page.
-- 100,000 usable row limit.
-- Chunked duplicate checks against businesses and scout_history.
-- Chunked Supabase inserts.
-- Invalid row export.
-- Skipped duplicate export.
-- Different target/campaign warning.
-- Real error rendering instead of `[object Object]`.
+- [x] Verify selected contacts with backend `/batch-verify-emails`
+- [x] Verify current page
+- [x] Verify next batch up to 500
+- [x] Store verification result in Supabase
+- [x] Move valid contacts to Ready
+- [x] Move risky/catch-all/unknown to Review
+- [x] Move invalid/no-MX/bad-format to Invalid
+- [x] Save candidate verification records
+- [x] Download last verification results
+- [ ] Full background verification worker for 100k lists

@@ -1,43 +1,22 @@
-# Scout App v8.3 Native Shell
+# Scout App v8.5 Native Verify Email
 
-This package keeps Scout App as a real Node/Next/Supabase application. It removes the embedded legacy/Main Scout approach and keeps the app ready for feature-by-feature native migration.
+This version keeps the real Node/Next/Supabase app and adds the native Verify Emails workflow. It does not embed the old v73 index app.
 
 ## Included
 
-- Supabase email/password login.
-- Admin email support via `NEXT_PUBLIC_ADMIN_EMAIL`.
-- Native protected pages for dashboard, upload, businesses, verify, auto scout, email scout, replies, no inbox, data safety, and settings.
-- Settings page for backend URL, extension API key, and email templates.
-- 100,000-row import foundation for the next deliverable.
-- Background research queue foundation.
-- No translation feature in this build.
+- v8.4 native business queue and fast import foundation
+- Native Verify Emails page
+- Backend verifier config check
+- Verify selected contacts
+- Verify current page
+- Verify next batch, capped at 500 per run
+- Saves verification result back into Supabase businesses.raw.verification
+- Moves safe contacts to Ready
+- Moves invalid contacts to Invalid
+- Keeps risky/catch-all/unknown contacts in Review
+- Upserts email candidate verification records
+- Download last verification results as CSV
 
-## Required env vars
+## Important
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-NEXT_PUBLIC_BACKEND_URL=https://scout-email-finder.onrender.com
-NEXT_PUBLIC_ADMIN_EMAIL=oyekunleolalekan3168@gmail.com
-RESEARCH_CRON_SECRET=change-this
-```
-
-## Deploy
-
-Run the SQL migration in `supabase/migrations/202607050001_scout_v8_cloud.sql`, set the env vars in Vercel, then deploy.
-
-## Next deliverable
-
-`v8.3 native import` — complete 100,000-contact upload, chunked import, duplicate skipping, invalid row export, and import batch history.
-
-
-## v8.3 Native Import
-
-- CSV import limit: 100,000 usable rows per file.
-- Duplicate checks use `check_existing_normalized_keys` RPC over POST chunks, not a giant URL query.
-- Inserts run in 500-row chunks.
-- Invalid rows and skipped duplicates can be downloaded.
-- If unfinished queue records exist and a new CSV has very different columns, Scout shows a campaign-mixing warning.
-
-Run the Supabase migration again before testing import.
+Run the Supabase migration again before testing because v8.5 adds unique/index support for email candidate verification upserts.

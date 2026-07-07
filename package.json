@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-3-native-import",
-  "version": "8.3.0",
+  "name": "scout-app-v8-5-native-verify",
+  "version": "8.5.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "20.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.3 native import with Supabase login, 100k chunked uploads, duplicate skipping, invalid-row export, and cloud research job foundation."
+  "description": "Scout App v8.5 native email verification with backend verifier and Supabase queue updates."
 }

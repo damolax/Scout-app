@@ -3,20 +3,15 @@
 import { ChangeEvent, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { csvColumnsLookDifferent, parseCsvText } from '@/lib/csv';
-import { CsvBusinessInput, CsvInvalidRow, ExistingKeyRecord, ImportResult, Workspace } from '@/lib/types';
+import { CsvBusinessInput, CsvInvalidRow, ImportResult, Workspace } from '@/lib/types';
 
 const MAX_IMPORT_ROWS = 100000;
-const DUPLICATE_CHECK_CHUNK = 1000;
-const INSERT_CHUNK = 500;
+const SERVER_IMPORT_CHUNK = 5000;
 const ACTIVE_QUEUE_STATUSES = ['pending', 'scanning', 'found', 'ready', 'review'];
 
 type ImportPhase = 'idle' | 'reading' | 'ready' | 'checking' | 'importing' | 'done' | 'failed';
-
-type TargetWarning = {
-  activeCount: number;
-  previousHeaders: string[];
-  newHeaders: string[];
-} | null;
+type TargetWarning = { activeCount: number; previousHeaders: string[]; newHeaders: string[] } | null;
+type ImportChunkResult = { inserted_count: number; skipped_queue_count: number; skipped_history_count: number; skipped_keys?: string[] | null };
 
 function chunk<T>(items: T[], size: number): T[][] {
   const result: T[][] = [];
@@ -40,7 +35,7 @@ function formatImportError(error: unknown) {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
   try {
-    const value = error as { message?: string; code?: string; details?: string; hint?: string; error_description?: string; };
+    const value = error as { message?: string; code?: string; details?: string; hint?: string; error_description?: string };
     const parts = [
       value.message || value.error_description,
       value.code ? `Code: ${value.code}` : '',
@@ -85,9 +80,7 @@ function downloadInvalidRows(name: string, rows: CsvInvalidRow[]) {
   }, new Set<string>()));
   const headers = ['rowNumber', 'reason', ...rawHeaders];
   const lines = [headers.map(csvEscape).join(',')];
-  for (const row of rows) {
-    lines.push([row.rowNumber, row.reason, ...rawHeaders.map((h) => row.raw[h])].map(csvEscape).join(','));
-  }
+  for (const row of rows) lines.push([row.rowNumber, row.reason, ...rawHeaders.map((h) => row.raw[h])].map(csvEscape).join(','));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -97,6 +90,21 @@ function downloadInvalidRows(name: string, rows: CsvInvalidRow[]) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function toRpcRows(rows: CsvBusinessInput[]) {
+  return rows.map((row) => ({
+    name: row.name || null,
+    email: row.email || null,
+    phone: row.phone || null,
+    website: row.website || null,
+    domain: row.domain || null,
+    category: row.category || null,
+    location: row.location || null,
+    source: row.source || 'csv_upload',
+    normalized_key: row.normalized_key,
+    raw: row.raw || {}
+  }));
 }
 
 export default function UploadClient({ workspace }: { workspace: Workspace }) {
@@ -136,9 +144,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       .maybeSingle();
     if (error) throw error;
     const previousHeaders = Array.isArray(data?.headers) ? data.headers : [];
-    if (csvColumnsLookDifferent(previousHeaders, nextHeaders)) {
-      setTargetWarning({ activeCount, previousHeaders, newHeaders: nextHeaders });
-    }
+    if (csvColumnsLookDifferent(previousHeaders, nextHeaders)) setTargetWarning({ activeCount, previousHeaders, newHeaders: nextHeaders });
   }
 
   async function onFile(event: ChangeEvent<HTMLInputElement>) {
@@ -154,7 +160,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
 
     setFileName(file.name);
     setPhase('reading');
-    setProgress('Reading CSV and extracting businesses from all columns...');
+    setProgress('Reading CSV locally. The app only renders a 25-row preview, so large files should not freeze the page...');
     try {
       const text = await file.text();
       const parsed = await parseCsvText(text);
@@ -173,35 +179,12 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       await checkTargetMismatch(parsed.headers);
       setRows(parsed.rows);
       setPhase('ready');
-      setProgress(`Preview ready: ${parsed.rows.length.toLocaleString()} usable row(s), ${parsed.invalidRows.length.toLocaleString()} invalid row(s). Import will run in safe chunks.`);
+      setProgress(`Preview ready: ${parsed.rows.length.toLocaleString()} usable row(s), ${parsed.invalidRows.length.toLocaleString()} invalid row(s). Import uses server-side chunks of ${SERVER_IMPORT_CHUNK.toLocaleString()} rows for speed.`);
     } catch (error) {
       setPhase('failed');
       setErrors([formatImportError(error)]);
       setProgress('File could not be read. See error below.');
     }
-  }
-
-  async function fetchExistingKeys(keys: string[]) {
-    const queueKeys = new Set<string>();
-    const historyKeys = new Set<string>();
-    let checked = 0;
-    for (const part of chunk(keys, DUPLICATE_CHECK_CHUNK)) {
-      checked += part.length;
-      setPhase('checking');
-      setPercent(Math.min(45, Math.round((checked / Math.max(keys.length, 1)) * 45)));
-      setProgress(`Checking team duplicates: ${checked.toLocaleString()} / ${keys.length.toLocaleString()}...`);
-      const { data, error } = await supabase.rpc('check_existing_normalized_keys', {
-        target_workspace: workspace.id,
-        normalized_keys: part
-      });
-      if (error) throw error;
-      for (const item of (data || []) as ExistingKeyRecord[]) {
-        if (item.source === 'scout_history') historyKeys.add(item.normalized_key);
-        else queueKeys.add(item.normalized_key);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    return { queueKeys, historyKeys };
   }
 
   async function enqueueImportedResearch(batchId: string) {
@@ -231,17 +214,10 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     setErrors([]);
     setPercent(0);
     try {
+      const startedAt = performance.now();
       const { rows: deduped, duplicateRows } = uniqueRows(rows);
-      setProgress(`Preparing ${deduped.length.toLocaleString()} unique business(es). Removed ${duplicateRows.length.toLocaleString()} duplicate row(s) inside the file...`);
-      const keys = deduped.map((row) => row.normalized_key);
-      const { queueKeys, historyKeys } = await fetchExistingKeys(keys);
-
-      const skippedRows: CsvBusinessInput[] = [];
-      const fresh = deduped.filter((row) => {
-        const exists = queueKeys.has(row.normalized_key) || historyKeys.has(row.normalized_key);
-        if (exists) skippedRows.push(row);
-        return !exists;
-      });
+      setPhase('checking');
+      setProgress(`Preparing ${deduped.length.toLocaleString()} unique business(es). Removed ${duplicateRows.length.toLocaleString()} duplicate row(s) inside the file.`);
 
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData.user) throw userError || new Error('Not signed in.');
@@ -253,7 +229,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
           file_name: fileName || 'csv_upload.csv',
           row_count: rows.length,
           inserted_count: 0,
-          skipped_count: skippedRows.length + duplicateRows.length + invalidRows.length,
+          skipped_count: duplicateRows.length + invalidRows.length,
           headers,
           created_by: userData.user.id
         })
@@ -262,66 +238,48 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       if (batchError) throw batchError;
 
       let inserted = 0;
+      let skippedExistingQueue = 0;
+      let skippedScouted = 0;
       let processed = 0;
+      const skippedKeys = new Set<string>();
       setPhase('importing');
-      for (const part of chunk(fresh, INSERT_CHUNK)) {
+
+      for (const part of chunk(deduped, SERVER_IMPORT_CHUNK)) {
         processed += part.length;
-        setPercent(45 + Math.min(50, Math.round((processed / Math.max(fresh.length, 1)) * 50)));
-        setProgress(`Importing ${processed.toLocaleString()} / ${fresh.length.toLocaleString()} fresh business(es)...`);
-        const payload = part.map((row) => ({
-          workspace_id: workspace.id,
-          import_batch_id: batch.id,
-          name: row.name || null,
-          email: row.email || null,
-          phone: row.phone || null,
-          website: row.website || null,
-          domain: row.domain || null,
-          category: row.category || null,
-          location: row.location || null,
-          source: row.source || 'csv_upload',
-          status: 'pending',
-          score: null,
-          normalized_key: row.normalized_key,
-          raw: row.raw,
-          created_by: userData.user.id
-        }));
-        const { data, error } = await supabase
-          .from('businesses')
-          .upsert(payload, { onConflict: 'workspace_id,normalized_key', ignoreDuplicates: true })
-          .select('id');
+        setPercent(Math.min(95, Math.round((processed / Math.max(deduped.length, 1)) * 95)));
+        setProgress(`Fast cloud import: ${processed.toLocaleString()} / ${deduped.length.toLocaleString()} row(s). Server is deduping and inserting in one step...`);
+        const { data, error } = await supabase.rpc('import_businesses_chunk', {
+          target_workspace: workspace.id,
+          target_batch_id: batch.id,
+          input_rows: toRpcRows(part)
+        });
         if (error) throw error;
-        inserted += data?.length || 0;
-        await new Promise((resolve) => setTimeout(resolve, 15));
+        const item = ((data || []) as ImportChunkResult[])[0];
+        inserted += Number(item?.inserted_count || 0);
+        skippedExistingQueue += Number(item?.skipped_queue_count || 0);
+        skippedScouted += Number(item?.skipped_history_count || 0);
+        (item?.skipped_keys || []).forEach((key) => skippedKeys.add(key));
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
+      const skippedRows = deduped.filter((row) => skippedKeys.has(row.normalized_key));
       let queuedResearch = 0;
       if (enqueueResearch && inserted > 0) {
         setProgress('Import saved. Queueing background email research jobs...');
         queuedResearch = await enqueueImportedResearch(batch.id);
       }
 
-      await supabase
-        .from('import_batches')
-        .update({ inserted_count: inserted, skipped_count: skippedRows.length + duplicateRows.length + invalidRows.length })
-        .eq('id', batch.id);
+      const skippedTotal = skippedRows.length + duplicateRows.length + invalidRows.length;
+      await supabase.from('import_batches').update({ inserted_count: inserted, skipped_count: skippedTotal }).eq('id', batch.id);
 
-      setResult({
-        uploaded: rows.length,
-        inserted,
-        skippedExistingQueue: skippedRows.filter((row) => queueKeys.has(row.normalized_key)).length,
-        skippedScouted: skippedRows.filter((row) => historyKeys.has(row.normalized_key)).length,
-        skippedFileDuplicates: duplicateRows.length,
-        invalidRows,
-        skippedRows,
-        batchId: batch.id,
-        queuedResearch
-      });
+      setResult({ uploaded: rows.length, inserted, skippedExistingQueue, skippedScouted, skippedFileDuplicates: duplicateRows.length, invalidRows, skippedRows, batchId: batch.id, queuedResearch });
+      const seconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
       setPercent(100);
       setPhase('done');
-      setProgress(`Done. Imported ${inserted.toLocaleString()} new business(es).${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
+      setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new business(es), skipped ${skippedTotal.toLocaleString()}.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
     } catch (error) {
       const message = formatImportError(error);
-      console.error('Scout v8.3 import failed:', error);
+      console.error('Scout v8.4 fast import failed:', error);
       setErrors([message]);
       setPhase('failed');
       setProgress('Import failed. See the real error below.');
@@ -335,7 +293,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       <div className="card" style={{ padding: 18 }}>
         <label className="label">Upload CSV</label>
         <input className="input" type="file" accept=".csv,text/csv" onChange={onFile} />
-        <p className="muted">Limit: 100,000 usable rows per import. Scout extracts email, website/domain, phone, name, category, and location from known columns and fallback cell scanning.</p>
+        <p className="muted">Limit: 100,000 usable rows per import. Target: 10,000 rows should import in seconds, not minutes. Actual speed depends on mobile/network/Supabase region, but the app no longer uses hundreds of browser inserts.</p>
         <div className={phase === 'failed' ? 'error' : phase === 'done' ? 'success' : 'notice'}>{progress}</div>
         <div className="progress-track" aria-label="Import progress"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>
 
@@ -355,9 +313,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         </label>
 
         <div className="actions">
-          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>
-            {importing ? 'Importing...' : `Import ${rows.length.toLocaleString()} business(es)`}
-          </button>
+          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : `Import ${rows.length.toLocaleString()} business(es)`}</button>
           {invalidRows.length ? <button className="btn secondary" type="button" onClick={() => downloadInvalidRows('scout-invalid-rows.csv', invalidRows)}>Download invalid rows</button> : null}
           {result?.skippedRows.length ? <button className="btn secondary" type="button" onClick={() => downloadRawRows('scout-skipped-duplicates.csv', result.skippedRows)}>Download skipped duplicates</button> : null}
         </div>
@@ -381,19 +337,14 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       {rows.length ? (
         <div className="card" style={{ padding: 18 }}>
           <h3>Preview</h3>
-          <p className="muted">Showing first 25 rows only. Large imports are stored in Supabase and rendered separately in the Businesses page.</p>
+          <p className="muted">Showing first 25 rows only. Full queue is rendered in pages on the Businesses page.</p>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Name</th><th>Email</th><th>Website</th><th>Category</th><th>Location</th><th>Dedupe Key</th></tr></thead>
               <tbody>
                 {rows.slice(0, 25).map((row, index) => (
                   <tr key={`${row.normalized_key}-${index}`}>
-                    <td>{row.name || '-'}</td>
-                    <td>{row.email || '-'}</td>
-                    <td>{row.website || row.domain || '-'}</td>
-                    <td>{row.category || '-'}</td>
-                    <td>{row.location || '-'}</td>
-                    <td>{row.normalized_key}</td>
+                    <td>{row.name || '-'}</td><td>{row.email || '-'}</td><td>{row.website || row.domain || '-'}</td><td>{row.category || '-'}</td><td>{row.location || '-'}</td><td>{row.normalized_key}</td>
                   </tr>
                 ))}
               </tbody>

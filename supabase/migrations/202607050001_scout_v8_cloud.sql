@@ -67,6 +67,8 @@ create table if not exists public.businesses (
 
 create index if not exists businesses_workspace_status_idx on public.businesses(workspace_id, status);
 create index if not exists businesses_workspace_created_idx on public.businesses(workspace_id, created_at desc);
+create index if not exists businesses_workspace_email_idx on public.businesses(workspace_id, email);
+create index if not exists businesses_workspace_updated_idx on public.businesses(workspace_id, updated_at desc);
 
 create table if not exists public.scout_history (
   id uuid primary key default gen_random_uuid(),
@@ -99,6 +101,9 @@ create table if not exists public.email_candidates (
   raw jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+create unique index if not exists email_candidates_workspace_business_email_unique on public.email_candidates(workspace_id, business_id, email);
+create index if not exists email_candidates_workspace_status_idx on public.email_candidates(workspace_id, status, created_at desc);
 
 create table if not exists public.sent_messages (
   id uuid primary key default gen_random_uuid(),
@@ -286,6 +291,159 @@ as $$
 $$;
 
 grant execute on function public.check_existing_normalized_keys(uuid, text[]) to authenticated;
+
+create or replace function public.import_businesses_chunk(
+  target_workspace uuid,
+  target_batch_id uuid,
+  input_rows jsonb
+)
+returns table(inserted_count int, skipped_queue_count int, skipped_history_count int, skipped_keys text[])
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not public.is_workspace_member(target_workspace) then
+    raise exception 'User is not approved for this workspace';
+  end if;
+
+  return query
+  with incoming as (
+    select
+      nullif(trim(x.name), '') as name,
+      nullif(trim(lower(x.email)), '') as email,
+      nullif(trim(x.phone), '') as phone,
+      nullif(trim(x.website), '') as website,
+      nullif(trim(x.domain), '') as domain,
+      nullif(trim(x.category), '') as category,
+      nullif(trim(x.location), '') as location,
+      coalesce(nullif(trim(x.source), ''), 'csv_upload') as source,
+      nullif(trim(x.normalized_key), '') as normalized_key,
+      coalesce(x.raw, '{}'::jsonb) as raw
+    from jsonb_to_recordset(coalesce(input_rows, '[]'::jsonb)) as x(
+      name text,
+      email text,
+      phone text,
+      website text,
+      domain text,
+      category text,
+      location text,
+      source text,
+      normalized_key text,
+      raw jsonb
+    )
+    where nullif(trim(x.normalized_key), '') is not null
+  ),
+  deduped as (
+    select distinct on (normalized_key) *
+    from incoming
+    order by normalized_key
+  ),
+  queue_existing as (
+    select d.normalized_key
+    from deduped d
+    join public.businesses b
+      on b.workspace_id = target_workspace
+     and b.normalized_key = d.normalized_key
+  ),
+  history_existing as (
+    select d.normalized_key
+    from deduped d
+    join public.scout_history h
+      on h.workspace_id = target_workspace
+     and h.normalized_key = d.normalized_key
+    where not exists (select 1 from queue_existing q where q.normalized_key = d.normalized_key)
+  ),
+  skipped as (
+    select normalized_key from queue_existing
+    union
+    select normalized_key from history_existing
+  ),
+  inserted as (
+    insert into public.businesses (
+      workspace_id,
+      import_batch_id,
+      name,
+      email,
+      phone,
+      website,
+      domain,
+      category,
+      location,
+      source,
+      status,
+      score,
+      normalized_key,
+      raw,
+      created_by
+    )
+    select
+      target_workspace,
+      target_batch_id,
+      d.name,
+      d.email,
+      d.phone,
+      d.website,
+      d.domain,
+      d.category,
+      d.location,
+      d.source,
+      'pending',
+      null,
+      d.normalized_key,
+      d.raw,
+      auth.uid()
+    from deduped d
+    where not exists (select 1 from skipped s where s.normalized_key = d.normalized_key)
+    on conflict (workspace_id, normalized_key) do nothing
+    returning normalized_key
+  )
+  select
+    (select count(*)::int from inserted) as inserted_count,
+    (select count(*)::int from queue_existing) as skipped_queue_count,
+    (select count(*)::int from history_existing) as skipped_history_count,
+    coalesce((select array_agg(normalized_key) from skipped), array[]::text[]) as skipped_keys;
+end;
+$$;
+
+grant execute on function public.import_businesses_chunk(uuid, uuid, jsonb) to authenticated;
+
+create or replace function public.archive_empty_businesses(target_workspace uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  affected int;
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not public.is_workspace_member(target_workspace) then
+    raise exception 'User is not approved for this workspace';
+  end if;
+
+  update public.businesses
+  set status = 'archived', updated_at = now()
+  where workspace_id = target_workspace
+    and status in ('pending','scanning','found','ready','review')
+    and coalesce(nullif(email, ''), '') = ''
+    and coalesce(nullif(website, ''), '') = ''
+    and coalesce(nullif(domain, ''), '') = '';
+
+  get diagnostics affected = row_count;
+  return affected;
+end;
+$$;
+
+grant execute on function public.archive_empty_businesses(uuid) to authenticated;
+
 
 alter table public.profiles enable row level security;
 alter table public.workspaces enable row level security;
