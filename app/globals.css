@@ -93,22 +93,4 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
   .container { padding: 16px; }
 }
 
-
-.classic-shell { display: grid; gap: 14px; height: calc(100vh - 48px); }
-.classic-header { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:14px 16px; }
-.classic-header h2 { margin:0; font-size:22px; }
-.classic-header p { margin:4px 0 0; }
-.classic-frame {
-  width: 100%;
-  height: min(76vh, calc(100vh - 170px));
-  min-height: 640px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: #06101d;
-  box-shadow: 0 16px 40px rgba(0,0,0,.22);
-}
-@media (max-width: 900px) {
-  .classic-shell { height: auto; }
-  .classic-header { align-items:flex-start; flex-direction:column; }
-  .classic-frame { min-height: 720px; height: 82vh; }
-}
+.btn:disabled { opacity: .55; cursor: not-allowed; }

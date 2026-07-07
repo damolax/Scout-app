@@ -149,6 +149,7 @@ create table if not exists public.templates (
   created_at timestamptz not null default now()
 );
 
+
 create table if not exists public.gmail_accounts (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.workspaces(id) on delete cascade,

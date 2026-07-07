@@ -4,19 +4,51 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { Workspace } from '@/lib/types';
 
+type TemplateRow = {
+  id: string;
+  name: string;
+  subject: string;
+  message: string;
+  created_at: string;
+};
+
+function formatError(error: unknown) {
+  if (!error) return 'Unknown error.';
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try {
+    const value = error as { message?: string; code?: string; details?: string; hint?: string };
+    return [value.message, value.code ? `Code: ${value.code}` : '', value.details, value.hint].filter(Boolean).join(' | ') || JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
 export default function SettingsClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const [backendUrl, setBackendUrl] = useState(process.env.NEXT_PUBLIC_BACKEND_URL || '');
   const [status, setStatus] = useState('Settings are stored in this browser and Supabase project env.');
-  const [templates, setTemplates] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [templateName, setTemplateName] = useState('Message 1');
   const [subject, setSubject] = useState('{name}, quick idea');
   const [message, setMessage] = useState('Hi {name}, I found your business and had a quick idea.');
 
+  async function loadTemplates() {
+    const { data, error } = await supabase
+      .from('templates')
+      .select('id,name,subject,message,created_at')
+      .eq('workspace_id', workspace.id)
+      .order('created_at', { ascending: false });
+
+    if (error) setStatus(formatError(error));
+    setTemplates((data || []) as TemplateRow[]);
+  }
+
   useEffect(() => {
     const saved = localStorage.getItem('scout_v8_backend_url');
     if (saved) setBackendUrl(saved);
-    supabase.from('templates').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }).then(({ data }) => setTemplates(data || []));
+    loadTemplates();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, workspace.id]);
 
   function saveLocalBackend() {
@@ -27,12 +59,20 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   async function saveTemplate() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { error } = await supabase.from('templates').insert({ workspace_id: workspace.id, name: templateName, subject, message, created_by: user.id });
-    if (error) setStatus(error.message);
+
+    const payload = {
+      workspace_id: workspace.id,
+      name: templateName,
+      subject,
+      message,
+      created_by: user.id
+    };
+
+    const { error } = await supabase.from('templates').insert(payload);
+    if (error) setStatus(formatError(error));
     else {
       setStatus('Template saved to cloud.');
-      const { data } = await supabase.from('templates').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false });
-      setTemplates(data || []);
+      await loadTemplates();
     }
   }
 
@@ -40,7 +80,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     <div className="stack">
       <div className="card" style={{ padding: 18 }}>
         <h3>Backend</h3>
-        <p className="muted">Keep the old backend for Gmail OAuth, send, read replies, bounce/no-inbox, and enrichment.</p>
+        <p className="muted">Keep the backend for Gmail OAuth, send, read replies, bounce/no-inbox, enrichment, and long-running jobs.</p>
         <label className="label">Backend URL</label>
         <input className="input" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} />
         <div className="actions" style={{ marginTop: 12 }}><button className="btn" onClick={saveLocalBackend}>Save locally</button></div>
@@ -54,16 +94,19 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Email Templates</h3>
+        <p className="muted">Translation is removed for now. Save the final subject and message exactly as you want Scout to use them.</p>
         <div className="grid grid-2">
           <div><label className="label">Template name</label><input className="input" value={templateName} onChange={(e) => setTemplateName(e.target.value)} /></div>
           <div><label className="label">Subject</label><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
         </div>
         <label className="label" style={{ marginTop: 12 }}>Message</label>
         <textarea className="textarea" value={message} onChange={(e) => setMessage(e.target.value)} />
-        <div className="actions" style={{ marginTop: 12 }}><button className="btn" onClick={saveTemplate}>Save template</button></div>
+        <div className="actions" style={{ marginTop: 12 }}>
+          <button className="btn" onClick={saveTemplate}>Save template</button>
+        </div>
       </div>
 
-      <div className="notice">{status}</div>
+      <div className={status.includes('failed') || status.includes('Code:') ? 'error' : 'notice'}>{status}</div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Saved Templates</h3>

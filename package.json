@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-1-full-workspace",
-  "version": "8.1.0",
+  "name": "scout-app-v8-2-native-shell",
+  "version": "8.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "20.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.1 full workspace with Supabase login, Main Scout App feature mount, safe 100k imports, and cloud research job foundation."
+  "description": "Scout App v8.2 native shell with Supabase login, native workspace pages, safe 100k imports, and cloud research job foundation."
 }

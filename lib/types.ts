@@ -74,3 +74,14 @@ export type EmailResearchJob = {
   started_at: string | null;
   finished_at: string | null;
 };
+
+
+export type MessageTemplate = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  subject: string;
+  message: string;
+  created_by: string | null;
+  created_at: string;
+};

@@ -2,10 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Upload, Building2, ShieldCheck, Search, Mail, MessageSquareReply, Ban, Settings, Database, LayoutDashboard } from 'lucide-react';
+import { BarChart3, Upload, Building2, ShieldCheck, Search, Mail, MessageSquareReply, Ban, Settings, Database } from 'lucide-react';
 
 const items = [
-  { href: '/main-scout', label: 'Main Scout App', icon: LayoutDashboard },
   { href: '/dashboard', label: 'Dashboard', icon: BarChart3 },
   { href: '/upload', label: 'Upload Lists', icon: Upload },
   { href: '/businesses', label: 'Businesses', icon: Building2 },

@@ -1,58 +1,38 @@
-# Setup for Eunice / Olalekan
+# Scout App v8.2 Native Shell Setup
 
-## 1. Push the app
+This version removes translation for now and keeps the app focused on the native Node/Next/Supabase foundation.
 
-Unzip this package and copy the folder contents to the root of `damolax/Scout-app`.
+## 1. Supabase
 
-Use `git add -A` so deleted/renamed files are staged.
+Use the Scout App Supabase project. Run:
 
-## 2. Vercel settings
+```text
+supabase/migrations/202607050001_scout_v8_cloud.sql
+```
 
-Make sure Vercel project settings are:
+## 2. Vercel env vars
 
-- Framework: Next.js
-- Install command: blank or `npm ci --no-audit --no-fund`
-- Build command: blank or `npm run build`
-- Output directory: blank or `.next`
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+NEXT_PUBLIC_BACKEND_URL=https://scout-email-finder.onrender.com
+NEXT_PUBLIC_ADMIN_EMAIL=oyekunleolalekan3168@gmail.com
+RESEARCH_CRON_SECRET=change-this
+```
 
-This repo also includes `vercel.json` to force the same.
+## 3. Test order
 
-## 3. Supabase
+1. Login.
+2. Open Dashboard.
+3. Open Settings.
+4. Save backend URL.
+5. Save a simple email template.
+6. Open Upload and test a small CSV.
 
-Use a new Supabase project for Scout App. Run:
+## Removed for now
 
-`supabase/migrations/202607050001_scout_v8_cloud.sql`
-
-Disable email confirmation for now if you want users auto-approved immediately.
-
-## 4. First login
-
-Create/sign in with:
-
-`oyekunleolalekan3168@gmail.com`
-
-This is the admin email.
-
-## 5. Use the full feature set
-
-Open:
-
-`/main-scout`
-
-This contains the full working v73 Scout features while the native pages are migrated.
-
-## 6. Upload 100,000 contacts safely
-
-Use `/upload` for the native cloud importer.
-
-- Maximum: 100,000 usable rows.
-- Duplicate check is chunked.
-- Insert is chunked.
-- Skipped duplicates can be downloaded.
-- Optional checkbox queues background email research jobs after import.
-
-## 7. Background research
-
-Use `/auto-scout` to queue pending businesses. Vercel Cron is configured to call `/api/research/run-once` every 15 minutes.
-
-For very large 100,000-row research jobs, the long-running worker should eventually be moved into the backend/Render server. This v8.1 package provides the cloud queue and safe progress foundation.
+- `/translate` page.
+- `/api/translate`.
+- DeepL/LibreTranslate env vars.
+- Template translate buttons.
