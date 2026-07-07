@@ -29,7 +29,7 @@
   },
   "packageManager": "npm@10.9.2",
   "engines": {
-    "node": "20.x",
+    "node": "24.x",
     "npm": "10.x"
   },
   "description": "Scout App v8.7 with improved email import parsing, reply tracking, no-inbox separation, and response performance metrics."
