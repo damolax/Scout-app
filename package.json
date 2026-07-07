@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-5-native-verify",
-  "version": "8.5.0",
+  "name": "scout-app-v8-6-native-outreach-engine",
+  "version": "8.6.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "20.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.5 native email verification with backend verifier and Supabase queue updates."
+  "description": "Scout App v8.6 native outreach engine with templates, sender rotation, bulk send logs, and performance tracking."
 }

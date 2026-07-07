@@ -485,3 +485,142 @@ begin
     execute format('create policy %I on public.%I for delete using (public.is_workspace_member(workspace_id))', t || ' delete member', t);
   end loop;
 end $$;
+
+-- v8.6 Native Outreach Engine additions.
+alter table public.templates add column if not exists subject_variants text[] not null default '{}';
+alter table public.templates add column if not exists active boolean not null default true;
+alter table public.templates add column if not exists updated_at timestamptz not null default now();
+
+drop trigger if exists templates_touch_updated_at on public.templates;
+create trigger templates_touch_updated_at before update on public.templates for each row execute function public.touch_updated_at();
+
+alter table public.gmail_accounts add column if not exists access_token text;
+alter table public.gmail_accounts add column if not exists refresh_token text;
+alter table public.gmail_accounts add column if not exists client_id text;
+alter table public.gmail_accounts add column if not exists expires_at timestamptz;
+alter table public.gmail_accounts add column if not exists daily_limit int not null default 400;
+alter table public.gmail_accounts add column if not exists sent_today int not null default 0;
+alter table public.gmail_accounts add column if not exists paused_until timestamptz;
+alter table public.gmail_accounts add column if not exists last_error text;
+alter table public.gmail_accounts add column if not exists raw jsonb not null default '{}'::jsonb;
+alter table public.gmail_accounts add column if not exists updated_at timestamptz not null default now();
+
+drop trigger if exists gmail_accounts_touch_updated_at on public.gmail_accounts;
+create trigger gmail_accounts_touch_updated_at before update on public.gmail_accounts for each row execute function public.touch_updated_at();
+
+create index if not exists gmail_accounts_workspace_status_idx on public.gmail_accounts(workspace_id, status, paused_until);
+
+create table if not exists public.outreach_batches (
+  id text primary key,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  template_id uuid references public.templates(id) on delete set null,
+  requested_count int not null default 0,
+  selected_sender_count int not null default 0,
+  attempted_count int not null default 0,
+  sent_count int not null default 0,
+  failed_count int not null default 0,
+  skipped_count int not null default 0,
+  status text not null default 'running',
+  raw jsonb not null default '{}'::jsonb,
+  created_by uuid references auth.users(id) on delete set null,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists outreach_batches_workspace_created_idx on public.outreach_batches(workspace_id, created_at desc);
+create index if not exists outreach_batches_workspace_status_idx on public.outreach_batches(workspace_id, status, created_at desc);
+
+drop trigger if exists outreach_batches_touch_updated_at on public.outreach_batches;
+create trigger outreach_batches_touch_updated_at before update on public.outreach_batches for each row execute function public.touch_updated_at();
+
+create table if not exists public.outreach_events (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  batch_id text references public.outreach_batches(id) on delete set null,
+  business_id uuid references public.businesses(id) on delete set null,
+  template_id uuid references public.templates(id) on delete set null,
+  gmail_account_id uuid references public.gmail_accounts(id) on delete set null,
+  type text not null default 'info',
+  message text,
+  raw jsonb not null default '{}'::jsonb,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists outreach_events_workspace_batch_idx on public.outreach_events(workspace_id, batch_id, created_at desc);
+create index if not exists outreach_events_workspace_type_idx on public.outreach_events(workspace_id, type, created_at desc);
+
+alter table public.sent_messages add column if not exists template_id uuid references public.templates(id) on delete set null;
+alter table public.sent_messages add column if not exists gmail_account_id uuid references public.gmail_accounts(id) on delete set null;
+alter table public.sent_messages add column if not exists batch_id text references public.outreach_batches(id) on delete set null;
+alter table public.sent_messages add column if not exists gmail_thread_id text;
+alter table public.sent_messages add column if not exists delivery_status text;
+alter table public.sent_messages add column if not exists error_code text;
+
+create index if not exists sent_messages_workspace_template_idx on public.sent_messages(workspace_id, template_id, sent_at desc);
+create index if not exists sent_messages_workspace_gmail_idx on public.sent_messages(workspace_id, gmail_account_id, sent_at desc);
+create index if not exists sent_messages_workspace_batch_idx on public.sent_messages(workspace_id, batch_id, sent_at desc);
+
+alter table public.reply_history add column if not exists sent_message_id uuid references public.sent_messages(id) on delete set null;
+alter table public.reply_history add column if not exists template_id uuid references public.templates(id) on delete set null;
+alter table public.reply_history add column if not exists gmail_account_id uuid references public.gmail_accounts(id) on delete set null;
+alter table public.reply_history add column if not exists batch_id text references public.outreach_batches(id) on delete set null;
+
+create index if not exists reply_history_workspace_template_idx on public.reply_history(workspace_id, template_id, received_at desc);
+create index if not exists reply_history_workspace_gmail_idx on public.reply_history(workspace_id, gmail_account_id, received_at desc);
+create index if not exists reply_history_workspace_real_idx on public.reply_history(workspace_id, is_real_reply, received_at desc);
+
+alter table public.outreach_batches enable row level security;
+alter table public.outreach_events enable row level security;
+
+drop policy if exists "outreach_batches select member" on public.outreach_batches;
+create policy "outreach_batches select member" on public.outreach_batches for select using (public.is_workspace_member(workspace_id));
+drop policy if exists "outreach_batches insert member" on public.outreach_batches;
+create policy "outreach_batches insert member" on public.outreach_batches for insert with check (public.is_workspace_member(workspace_id));
+drop policy if exists "outreach_batches update member" on public.outreach_batches;
+create policy "outreach_batches update member" on public.outreach_batches for update using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
+drop policy if exists "outreach_batches delete member" on public.outreach_batches;
+create policy "outreach_batches delete member" on public.outreach_batches for delete using (public.is_workspace_member(workspace_id));
+
+drop policy if exists "outreach_events select member" on public.outreach_events;
+create policy "outreach_events select member" on public.outreach_events for select using (public.is_workspace_member(workspace_id));
+drop policy if exists "outreach_events insert member" on public.outreach_events;
+create policy "outreach_events insert member" on public.outreach_events for insert with check (public.is_workspace_member(workspace_id));
+drop policy if exists "outreach_events update member" on public.outreach_events;
+create policy "outreach_events update member" on public.outreach_events for update using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
+drop policy if exists "outreach_events delete member" on public.outreach_events;
+create policy "outreach_events delete member" on public.outreach_events for delete using (public.is_workspace_member(workspace_id));
+
+create or replace function public.reset_gmail_daily_counts(target_workspace uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  affected int;
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not public.is_workspace_member(target_workspace) then
+    raise exception 'User is not approved for this workspace';
+  end if;
+
+  update public.gmail_accounts
+  set sent_today = 0,
+      paused_until = null,
+      last_error = null,
+      status = case when status = 'limit_hit' then 'connected' else status end,
+      updated_at = now()
+  where workspace_id = target_workspace;
+
+  get diagnostics affected = row_count;
+  return affected;
+end;
+$$;
+
+grant execute on function public.reset_gmail_daily_counts(uuid) to authenticated;

@@ -96,7 +96,29 @@ export type MessageTemplate = {
   workspace_id: string;
   name: string;
   subject: string;
+  subject_variants?: string[] | null;
   message: string;
+  active?: boolean | null;
   created_by: string | null;
   created_at: string;
+  updated_at?: string | null;
+};
+
+export type GmailAccount = {
+  id: string;
+  workspace_id: string;
+  email: string;
+  display_name: string | null;
+  status: string;
+  access_token?: string | null;
+  refresh_token?: string | null;
+  client_id?: string | null;
+  expires_at?: string | null;
+  daily_limit?: number | null;
+  sent_today?: number | null;
+  paused_until?: string | null;
+  last_error?: string | null;
+  raw?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at?: string | null;
 };
