@@ -58,4 +58,19 @@ export type ImportResult = {
   skippedBadRows: number;
   skippedRows: CsvBusinessInput[];
   batchId?: string;
+  queuedResearch?: number;
+};
+
+export type EmailResearchJob = {
+  id: string;
+  workspace_id: string;
+  business_id: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  priority: number;
+  attempts: number;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 };

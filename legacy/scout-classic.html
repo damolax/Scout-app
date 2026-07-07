@@ -668,8 +668,8 @@ body{
           <p>Optional backend runner. It uses the same Bing signals and backend endpoints. Search engines can still block cloud scraping, so browser extension mode remains the most reliable no-API dorking mode.</p>
           <div style="display:grid;grid-template-columns:1fr 140px 140px;gap:10px;margin-bottom:10px">
             <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Backend URL</label><input id="sv37-dork-backend" class="as-input" placeholder="https://your-backend.onrender.com"></div>
-            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Target emails</label><input id="sv37-dork-target" class="as-input" type="number" min="1" max="50000" value="50"></div>
-            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Max pages</label><input id="sv37-dork-max-pages" class="as-input" type="number" min="1" max="50000" value="300"></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Target emails</label><input id="sv37-dork-target" class="as-input" type="number" min="1" max="100000" value="50"></div>
+            <div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Max pages</label><input id="sv37-dork-max-pages" class="as-input" type="number" min="1" max="100000" value="300"></div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="topbar-btn primary" onclick="sv37StartCloudDorking()">Start Cloud Bing Campaign</button>
@@ -11838,5 +11838,19 @@ function manualPollReplies() {
 })();
 </script>
 
+
+<script id="SCOUT_V81_FULL_WORKSPACE_PATCH">
+(function(){
+  window.SCOUT_V81_FULL_WORKSPACE_PATCH = 'main-scout-full-features-100k-import';
+  try {
+    const importCount = document.getElementById('import-count');
+    if (importCount && window.pendingUploadData && Array.isArray(window.pendingUploadData)) importCount.textContent = String(window.pendingUploadData.length);
+    const target = document.getElementById('sv37-dork-target');
+    const pages = document.getElementById('sv37-dork-max-pages');
+    if (target) target.max = '100000';
+    if (pages) pages.max = '100000';
+  } catch(e) {}
+})();
+</script>
 </body>
 </html>

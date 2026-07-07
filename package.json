@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-cloud",
-  "version": "8.0.1",
+  "name": "scout-app-v8-1-full-workspace",
+  "version": "8.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -31,5 +31,6 @@
   "engines": {
     "node": "20.x",
     "npm": "10.x"
-  }
+  },
+  "description": "Scout App v8.1 full workspace with Supabase login, Main Scout App feature mount, safe 100k imports, and cloud research job foundation."
 }

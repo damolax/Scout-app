@@ -171,6 +171,26 @@ create table if not exists public.activity_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.email_research_jobs (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  business_id uuid not null references public.businesses(id) on delete cascade,
+  status text not null default 'queued' check (status in ('queued','running','done','failed','cancelled')),
+  priority int not null default 100,
+  attempts int not null default 0,
+  last_error text,
+  result jsonb not null default '{}'::jsonb,
+  requested_by uuid references auth.users(id) on delete set null,
+  started_at timestamptz,
+  finished_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(workspace_id, business_id)
+);
+
+create index if not exists email_research_jobs_workspace_status_idx on public.email_research_jobs(workspace_id, status, priority desc, created_at);
+create index if not exists email_research_jobs_business_idx on public.email_research_jobs(business_id);
+
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
@@ -189,6 +209,9 @@ create trigger workspaces_touch_updated_at before update on public.workspaces fo
 
 drop trigger if exists businesses_touch_updated_at on public.businesses;
 create trigger businesses_touch_updated_at before update on public.businesses for each row execute function public.touch_updated_at();
+
+drop trigger if exists email_research_jobs_touch_updated_at on public.email_research_jobs;
+create trigger email_research_jobs_touch_updated_at before update on public.email_research_jobs for each row execute function public.touch_updated_at();
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -252,6 +275,7 @@ alter table public.no_inbox_records enable row level security;
 alter table public.templates enable row level security;
 alter table public.gmail_accounts enable row level security;
 alter table public.activity_logs enable row level security;
+alter table public.email_research_jobs enable row level security;
 
 drop policy if exists "profiles read own" on public.profiles;
 create policy "profiles read own" on public.profiles for select using (id = auth.uid());
@@ -267,7 +291,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['import_batches','businesses','scout_history','email_candidates','sent_messages','reply_history','no_inbox_records','templates','gmail_accounts','activity_logs'] loop
+  foreach t in array array['import_batches','businesses','scout_history','email_candidates','sent_messages','reply_history','no_inbox_records','templates','gmail_accounts','activity_logs','email_research_jobs'] loop
     execute format('drop policy if exists %I on public.%I', t || ' select member', t);
     execute format('create policy %I on public.%I for select using (public.is_workspace_member(workspace_id))', t || ' select member', t);
     execute format('drop policy if exists %I on public.%I', t || ' insert member', t);

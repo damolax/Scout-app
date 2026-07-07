@@ -1,68 +1,58 @@
-# Exact steps to deploy Scout App v8 Cloud
+# Setup for Eunice / Olalekan
 
-## A. Supabase
+## 1. Push the app
 
-1. Go to Supabase and create a project.
-2. Open SQL Editor.
-3. Paste and run `supabase/migrations/202607050001_scout_v8_cloud.sql`.
-4. Go to Authentication → Providers → Email.
-5. For now, disable email confirmation so users can login immediately.
-6. Copy your Project URL, anon key, and service role key.
+Unzip this package and copy the folder contents to the root of `damolax/Scout-app`.
 
-## B. Push to GitHub
+Use `git add -A` so deleted/renamed files are staged.
 
-From Downloads after unzipping:
+## 2. Vercel settings
 
-```bash
-cd ~/Downloads
-rm -rf scout-app-v8-cloud-push
-unzip scout-app-v8-cloud.zip -d scout-app-v8-cloud-unzipped
+Make sure Vercel project settings are:
 
-git clone https://github.com/damolax/Scout-app.git scout-app-v8-cloud-push
-cd scout-app-v8-cloud-push
+- Framework: Next.js
+- Install command: blank or `npm ci --no-audit --no-fund`
+- Build command: blank or `npm run build`
+- Output directory: blank or `.next`
 
-# Remove the old one-page app files from the cloned repo, then copy v8 in.
-find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-cp -r ../scout-app-v8-cloud-unzipped/scout-app-v8-cloud/* .
+This repo also includes `vercel.json` to force the same.
 
-git status
-git add .
-git commit -m "Rebuild Scout App v8 cloud with Supabase login"
-git push origin main
-```
+## 3. Supabase
 
-## C. Vercel environment variables
+Use a new Supabase project for Scout App. Run:
 
-Add these in Vercel Project Settings → Environment Variables:
+`supabase/migrations/202607050001_scout_v8_cloud.sql`
 
-```txt
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY
-SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
-NEXT_PUBLIC_BACKEND_URL=https://scout-email-finder.onrender.com
-NEXT_PUBLIC_ADMIN_EMAIL=oyekunleolalekan3168@gmail.com
-```
+Disable email confirmation for now if you want users auto-approved immediately.
 
-Redeploy after adding env vars.
+## 4. First login
 
-## D. First login
+Create/sign in with:
 
-1. Open the deployed app.
-2. Create account with `oyekunleolalekan3168@gmail.com`.
-3. The SQL trigger makes this account admin automatically.
-4. Any other user who signs up is auto-approved as a member.
+`oyekunleolalekan3168@gmail.com`
 
-## E. Restore old scouted history
+This is the admin email.
 
-Open the v8 app in the same browser where old Scout App had the data.
+## 5. Use the full feature set
 
-Go to:
+Open:
 
-```txt
-Data Safety → Download local v7 scouted history
-Data Safety → Import local v7 history into cloud
-```
+`/main-scout`
 
-## F. Extension remains separate
+This contains the full working v73 Scout features while the native pages are migrated.
 
-Do not force extension login. Keep using it for Google dorking/directory scouting and upload CSV into Scout App.
+## 6. Upload 100,000 contacts safely
+
+Use `/upload` for the native cloud importer.
+
+- Maximum: 100,000 usable rows.
+- Duplicate check is chunked.
+- Insert is chunked.
+- Skipped duplicates can be downloaded.
+- Optional checkbox queues background email research jobs after import.
+
+## 7. Background research
+
+Use `/auto-scout` to queue pending businesses. Vercel Cron is configured to call `/api/research/run-once` every 15 minutes.
+
+For very large 100,000-row research jobs, the long-running worker should eventually be moved into the backend/Render server. This v8.1 package provides the cloud queue and safe progress foundation.
