@@ -2,7 +2,15 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-const SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly'];
+const SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.readonly'
+];
 
 function encodeState(payload: Record<string, unknown>) {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
@@ -23,13 +31,14 @@ export async function GET(request: NextRequest) {
   }
 
   const redirectUri = `${origin}/api/gmail/oauth/callback`;
-  const state = encodeState({ workspace_id: workspaceId, return_to: returnTo, created_at: Date.now() });
+  const state = encodeState({ workspace_id: workspaceId, return_to: returnTo, created_at: Date.now(), v: '8.20' });
   const auth = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   auth.searchParams.set('client_id', clientId);
   auth.searchParams.set('redirect_uri', redirectUri);
   auth.searchParams.set('response_type', 'code');
   auth.searchParams.set('scope', SCOPES.join(' '));
   auth.searchParams.set('access_type', 'offline');
+  // Force the permission screen again so Gmail send/read scopes and a refresh token are returned.
   auth.searchParams.set('prompt', 'consent select_account');
   auth.searchParams.set('include_granted_scopes', 'false');
   auth.searchParams.set('state', state);

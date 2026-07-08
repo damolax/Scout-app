@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-19-gmail-oauth-send",
-  "version": "8.19.0",
+  "name": "scout-app-v8-20-gmail-oauth-diagnostics",
+  "version": "8.20.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.19: native Gmail OAuth callback, connected sender persistence, and native Gmail sending route."
+  "description": "Scout App v8.20: Gmail OAuth diagnostics, clearer errors, forced consent scopes, and sender persistence checks."
 }
