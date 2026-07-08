@@ -432,7 +432,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       const contacts = await getContactsForSend(options?.limit, contactsOverride);
       if (!contacts.length) throw new Error('No Ready contacts with email found.');
       let activeAccounts = accountsForSend();
-      if (!activeAccounts.length) throw new Error('Connect Gmail in Settings, then select at least one sender here.');
+      if (!activeAccounts.length) throw new Error('Connect Gmail in Settings, then select at least one connected sender here.');
 
       const batchId = `scout_v818_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const { error: batchError } = await supabase.from('outreach_batches').insert({
@@ -471,19 +471,16 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         attempted += 1;
         setStatus(`${attempted.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`);
 
-        const response = await fetch('/api/backend/email-scout/send-selected-batch', {
+        const response = await fetch('/api/gmail/send', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            contacts: [payload],
-            limit: 1,
-            delayMs,
-            dryRun,
-            senderEmail: account.email,
-            access_token: account.access_token,
-            refresh_token: account.refresh_token,
-            client_id: account.client_id,
-            expires_at: account.expires_at ? new Date(account.expires_at).getTime() : undefined
+            workspace_id: workspace.id,
+            gmail_account_id: account.id,
+            to: payload.email,
+            subject: payload.subject,
+            body: payload.message,
+            dryRun
           })
         });
         const json = await response.json().catch(() => ({}));

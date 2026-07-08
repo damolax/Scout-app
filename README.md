@@ -11,3 +11,18 @@ v8.18 focuses on messaging readiness:
 - `/email-scout` redirects to `/message`.
 
 Run the Supabase migration after deploying if your database has not been updated through v8.15+.
+
+## v8.19 Gmail OAuth
+
+Gmail connection is handled natively by the Node app. Add these Vercel env vars:
+
+```txt
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+```
+
+Google Cloud OAuth redirect URI:
+
+```txt
+https://scout-app-oyeola.vercel.app/api/gmail/oauth/callback
+```

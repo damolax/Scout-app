@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-18-message-auth-templates",
-  "version": "8.18.0",
+  "name": "scout-app-v8-19-gmail-oauth-send",
+  "version": "8.19.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.18: dedicated template library, Message send controls, Gmail sender auth in Settings, and scheduling option cleanup."
+  "description": "Scout App v8.19: native Gmail OAuth callback, connected sender persistence, and native Gmail sending route."
 }
