@@ -756,3 +756,169 @@ from public.templates t
 left join public.sent_messages s on s.template_id = t.id and s.workspace_id = t.workspace_id
 left join public.reply_history r on r.template_id = t.id and r.workspace_id = t.workspace_id
 group by t.workspace_id, t.id, t.name;
+
+-- v8.15 Message Library, scheduling, and follow-up support.
+create table if not exists public.message_categories (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  name text not null,
+  description text,
+  active boolean not null default true,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(workspace_id, name)
+);
+
+create index if not exists message_categories_workspace_name_idx on public.message_categories(workspace_id, name);
+
+alter table public.templates add column if not exists category_id uuid references public.message_categories(id) on delete set null;
+alter table public.templates add column if not exists category_name text;
+alter table public.templates add column if not exists purpose text;
+create index if not exists templates_workspace_category_idx on public.templates(workspace_id, category_id, active, created_at desc);
+
+alter table public.sent_messages add column if not exists is_follow_up boolean not null default false;
+alter table public.sent_messages add column if not exists followup_due_at timestamptz;
+create index if not exists sent_messages_workspace_followup_idx on public.sent_messages(workspace_id, is_follow_up, sent_at desc);
+
+create table if not exists public.message_schedules (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  type text not null default 'initial' check (type in ('initial','follow_up')),
+  category_id uuid references public.message_categories(id) on delete set null,
+  template_id uuid references public.templates(id) on delete set null,
+  target_count int not null default 100,
+  scheduled_for timestamptz not null,
+  status text not null default 'scheduled' check (status in ('scheduled','due','running','sent','cancelled','failed')),
+  raw jsonb not null default '{}'::jsonb,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists message_schedules_workspace_status_idx on public.message_schedules(workspace_id, status, scheduled_for);
+
+drop trigger if exists message_categories_touch_updated_at on public.message_categories;
+create trigger message_categories_touch_updated_at before update on public.message_categories for each row execute function public.touch_updated_at();
+
+drop trigger if exists message_schedules_touch_updated_at on public.message_schedules;
+create trigger message_schedules_touch_updated_at before update on public.message_schedules for each row execute function public.touch_updated_at();
+
+alter table public.message_categories enable row level security;
+alter table public.message_schedules enable row level security;
+
+drop policy if exists "message_categories select member" on public.message_categories;
+create policy "message_categories select member" on public.message_categories for select using (public.is_workspace_member(workspace_id));
+drop policy if exists "message_categories insert member" on public.message_categories;
+create policy "message_categories insert member" on public.message_categories for insert with check (public.is_workspace_member(workspace_id));
+drop policy if exists "message_categories update member" on public.message_categories;
+create policy "message_categories update member" on public.message_categories for update using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
+drop policy if exists "message_categories delete member" on public.message_categories;
+create policy "message_categories delete member" on public.message_categories for delete using (public.is_workspace_member(workspace_id));
+
+drop policy if exists "message_schedules select member" on public.message_schedules;
+create policy "message_schedules select member" on public.message_schedules for select using (public.is_workspace_member(workspace_id));
+drop policy if exists "message_schedules insert member" on public.message_schedules;
+create policy "message_schedules insert member" on public.message_schedules for insert with check (public.is_workspace_member(workspace_id));
+drop policy if exists "message_schedules update member" on public.message_schedules;
+create policy "message_schedules update member" on public.message_schedules for update using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
+drop policy if exists "message_schedules delete member" on public.message_schedules;
+create policy "message_schedules delete member" on public.message_schedules for delete using (public.is_workspace_member(workspace_id));
+
+insert into public.message_categories (workspace_id, name, description)
+values
+  ('00000000-0000-4000-8000-000000000001', 'Airtable Google Map scouting', 'Messages for Airtable systems built from Google Maps/directories.'),
+  ('00000000-0000-4000-8000-000000000001', 'Airtable Google Doc scouting', 'Messages for Airtable systems built from docs/sheets workflow gaps.'),
+  ('00000000-0000-4000-8000-000000000001', 'Shopify design scouting', 'Messages focused on store design, trust, product page, and conversion flow.'),
+  ('00000000-0000-4000-8000-000000000001', 'Shopify marketing scouting', 'Messages focused on traffic quality, email capture, abandoned cart, and retention.')
+on conflict (workspace_id, name) do nothing;
+
+create or replace function public.get_due_followups(
+  target_workspace uuid,
+  limit_rows int default 100
+)
+returns table(
+  business_id uuid,
+  business_name text,
+  to_email text,
+  last_sent_at timestamptz,
+  last_subject text,
+  template_id uuid,
+  gmail_account_id uuid
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not public.is_workspace_member(target_workspace) then
+    raise exception 'User is not approved for this workspace';
+  end if;
+
+  return query
+  with latest_sent as (
+    select distinct on (s.business_id)
+      s.business_id,
+      s.to_email,
+      s.sent_at,
+      s.subject,
+      s.template_id,
+      s.gmail_account_id
+    from public.sent_messages s
+    where s.workspace_id = target_workspace
+      and s.status = 'sent'
+      and s.sent_at <= now() - interval '72 hours'
+      and s.business_id is not null
+    order by s.business_id, s.sent_at desc
+  )
+  select
+    b.id as business_id,
+    b.name as business_name,
+    l.to_email,
+    l.sent_at as last_sent_at,
+    l.subject as last_subject,
+    l.template_id,
+    l.gmail_account_id
+  from latest_sent l
+  join public.businesses b on b.id = l.business_id and b.workspace_id = target_workspace
+  where b.status = 'contacted'
+    and coalesce(nullif(l.to_email, ''), '') <> ''
+    and not exists (
+      select 1 from public.reply_history r
+      where r.workspace_id = target_workspace
+        and r.business_id = b.id
+        and r.is_real_reply = true
+        and r.received_at >= l.sent_at
+    )
+    and not exists (
+      select 1 from public.no_inbox_records n
+      where n.workspace_id = target_workspace
+        and (n.business_id = b.id or lower(coalesce(n.email, '')) = lower(l.to_email))
+        and n.created_at >= l.sent_at
+    )
+  order by l.sent_at asc
+  limit greatest(1, least(coalesce(limit_rows, 100), 5000));
+end;
+$$;
+
+grant execute on function public.get_due_followups(uuid, int) to authenticated;
+
+create or replace view public.sender_response_performance as
+select
+  g.workspace_id,
+  g.id as gmail_account_id,
+  g.email as sender_email,
+  count(distinct s.id) filter (where s.status = 'sent') as sent_count,
+  count(distinct r.id) filter (where r.is_real_reply = true) as real_reply_count,
+  case when count(distinct r.id) filter (where r.is_real_reply = true) > 0
+    then round((count(distinct s.id) filter (where s.status = 'sent'))::numeric / (count(distinct r.id) filter (where r.is_real_reply = true))::numeric, 2)
+    else null
+  end as emails_per_reply
+from public.gmail_accounts g
+left join public.sent_messages s on s.gmail_account_id = g.id and s.workspace_id = g.workspace_id
+left join public.reply_history r on r.gmail_account_id = g.id and r.workspace_id = g.workspace_id
+group by g.workspace_id, g.id, g.email;

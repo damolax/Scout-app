@@ -16,7 +16,7 @@ function errorMessage(error: unknown) {
 
 function sourceEvidenceFromPayload(payload: any): string {
   if (!payload || typeof payload !== 'object') return '';
-  const direct = payload.sourceUrl || payload.source_url || payload.foundOn || payload.found_on || payload.contactPage || payload.contact_page || payload.page || payload.url || payload.website;
+  const direct = payload.sourceUrl || payload.source_url || payload.foundOn || payload.found_on || payload.contactPage || payload.contact_page || payload.page || payload.evidenceUrl || payload.evidence_url; // Do not treat a generic payload.website as proof that an email was seen on that page.
   if (direct) return String(direct);
   const arrays = [payload.sources, payload.pages, payload.urls, payload.links, payload.evidence];
   for (const item of arrays) {

@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-14-message-ready-contacts",
-  "version": "8.14.0",
+  "name": "scout-app-v8-16-autoscout-quality-guard",
+  "version": "8.16.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.14: Message page replaces Email Scout, pulls Ready-to-message contacts directly from Supabase for sending, supports business-to-message links, and repairs Ready/Pending routing."
+  "description": "Scout App v8.16: stronger Auto Scout email rules, captcha/CDN false-positive quarantine, and source-backed email promotion."
 }

@@ -97,6 +97,8 @@ export type MessageTemplate = {
   name: string;
   subject: string;
   subject_variants?: string[] | null;
+  category_id?: string | null;
+  category_name?: string | null;
   message: string;
   active?: boolean | null;
   created_by: string | null;
@@ -139,6 +141,32 @@ export type GmailAccount = {
   sent_today?: number | null;
   paused_until?: string | null;
   last_error?: string | null;
+  raw?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+
+export type MessageCategory = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  active?: boolean | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type MessageSchedule = {
+  id: string;
+  workspace_id: string;
+  type: 'initial' | 'follow_up';
+  category_id?: string | null;
+  template_id?: string | null;
+  target_count?: number | null;
+  scheduled_for: string;
+  status: 'scheduled' | 'due' | 'running' | 'sent' | 'cancelled' | 'failed';
   raw?: Record<string, unknown> | null;
   created_at: string;
   updated_at?: string | null;

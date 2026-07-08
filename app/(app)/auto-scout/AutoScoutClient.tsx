@@ -220,6 +220,27 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     }
   }
 
+
+  async function quarantineFalsePositiveEmails() {
+    setBusy(true);
+    try {
+      setMessage('Checking found/ready emails for captcha, asset, CDN, and code false positives...');
+      const res = await fetch('/api/research/quarantine-false-positives', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, limit: 5000 })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || 'Quarantine request failed.');
+      setMessage(`False-positive check complete. Checked ${Number(json.checked || 0).toLocaleString()} email(s); quarantined ${Number(json.quarantined || 0).toLocaleString()} bad email(s). Re-run Auto Scout for those businesses.`);
+      await loadStats();
+    } catch (error) {
+      setMessage(`False-positive cleanup failed: ${fmtError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function stopAutoScout() {
     stopRef.current = true;
     setMessage('Stopping Auto Scout after the current backend batch finishes...');
@@ -236,7 +257,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Auto Scout Control</h3>
-        <p className="muted">Auto Scout controls the queue and calls your backend email-finder. v8.13 rejects bad @ fragments and now searches deeper: homepage, contact/about/team/impressum/privacy pages, mailto links, obfuscated emails, and Cloudflare-protected emails where possible.</p>
+        <p className="muted">Auto Scout controls the queue and calls your backend email-finder. v8.16 rejects captcha/CDN/code false positives like e.d@aset.hcaptchabound, then searches deeper: homepage, contact/about/team/impressum/privacy pages, mailto links, obfuscated emails, and Cloudflare-protected emails where possible.</p>
         <div className="grid grid-4">
           <div><label className="label">Queue limit</label><input className="input" type="number" min={1} max={50000} value={queueLimit} onChange={(e) => setQueueLimit(Math.max(1, Math.min(50000, Number(e.target.value) || 5000)))} /><p className="muted">How many no-email businesses to add to the research queue.</p></div>
           <div><label className="label">Backend batch size</label><input className="input" type="number" min={1} max={500} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))} /><p className="muted">Maximum queued jobs sent to one Node API run.</p></div>
@@ -248,6 +269,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
           {!running ? <button className="btn" disabled={busy} onClick={startAutoScout}>Start Auto Scout</button> : <button className="btn danger" onClick={stopAutoScout}>Stop Auto Scout</button>}
           <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Run One Backend Batch</button>
           <button className="btn secondary" disabled={busy && !running} onClick={loadStats}>Refresh Progress</button>
+          <button className="btn secondary" disabled={busy || running} onClick={quarantineFalsePositiveEmails}>Clean Bad Found Emails</button>
         </div>
         <div className={message.toLowerCase().includes('failed') || message.toLowerCase().includes('error') ? 'error' : 'notice'} style={{ marginTop: 12 }}>{message}</div>
       </div>

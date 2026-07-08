@@ -22,6 +22,16 @@ const BAD_LOCAL_PARTS = new Set([
 const GOOD_ROLE_PARTS = new Set(['info', 'contact', 'hello', 'sales', 'support', 'office', 'admin', 'team', 'service', 'booking', 'bookings', 'enquiries', 'inquiries']);
 const ASSET_TLDS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'css', 'js', 'ico', 'woff', 'woff2', 'ttf', 'eot', 'map']);
 
+const COMMON_DELIVERABLE_TLDS = new Set([
+  'com', 'net', 'org', 'co', 'io', 'ai', 'app', 'dev', 'shop', 'store', 'online', 'site', 'website', 'ca', 'de', 'uk', 'us', 'fr', 'es', 'it', 'nl', 'be', 'ch', 'at', 'au', 'nz', 'ie', 'se', 'no', 'dk', 'fi', 'pl', 'pt', 'gr', 'cz', 'ro', 'hu', 'sk', 'si', 'hr', 'lt', 'lv', 'ee', 'jp', 'kr', 'cn', 'hk', 'sg', 'my', 'in', 'ph', 'th', 'vn', 'ae', 'sa', 'qa', 'kw', 'ng', 'za', 'mx', 'br', 'ar', 'cl', 'co', 'pe', 'design', 'studio', 'agency', 'marketing', 'media', 'digital', 'consulting', 'group', 'company', 'business', 'solutions', 'services', 'systems', 'tech', 'technology', 'software', 'cloud', 'email', 'support', 'boutique', 'fashion', 'jewelry', 'art', 'gallery', 'photo', 'photography', 'care', 'clinic', 'health', 'life', 'coach', 'fitness', 'club', 'center', 'events', 'wedding', 'flowers', 'florist', 'restaurant', 'cafe', 'bar', 'pizza', 'food', 'realty', 'estate', 'homes', 'properties', 'construction', 'contractors', 'repair', 'parts', 'tools', 'supply', 'supplies', 'school', 'academy', 'education'
+]);
+
+const BAD_DOMAIN_KEYWORDS = [
+  'hcaptcha', 'hcaptchabound', 'recaptcha', 'captcha', 'cloudflarechallenge', 'challenge', 'sentry', 'datadog', 'newrelic', 'googletagmanager', 'google-analytics', 'doubleclick', 'facebook', 'fbcdn', 'shopifycdn', 'cdninstagram', 'cloudfront', 'akamai', 'assets', 'asset', 'static', 'tracking', 'analytics', 'pixel'
+];
+
+const CODE_CONTEXT_RE = /\b(dataset|hcaptcha|recaptcha|captcha|javascript|function\s*\(|=>|var\s+|let\s+|const\s+|webpack|chunk|asset|src=|href=|\.js|\.css|\.png|\.svg|\.webp|\.jpg|\.jpeg|\.gif)\b/i;
+
 type BusinessLike = {
   email?: unknown;
   website?: unknown;
@@ -71,6 +81,26 @@ function domainMatches(emailDomain: string, businessDomain: string) {
   return Boolean(emailRoot && businessRoot && emailRoot === businessRoot);
 }
 
+function looksLikeBlockedInfrastructureDomain(domain: string) {
+  const compact = domain.toLowerCase();
+  return BAD_DOMAIN_KEYWORDS.some((keyword) => compact.includes(keyword));
+}
+
+function hasRecognizedTld(domain: string) {
+  const labels = domain.split('.').filter(Boolean);
+  const tld = labels[labels.length - 1] || '';
+  if (/^[a-z]{2}$/.test(tld)) return true;
+  return COMMON_DELIVERABLE_TLDS.has(tld);
+}
+
+function suspiciousShortCodeLocal(local: string) {
+  return local.length <= 2 || /^[a-z]\.[a-z]$/i.test(local) || /^[a-z]{1,2}\d?$/i.test(local);
+}
+
+function sourceLooksLikeCode(sourceText: string) {
+  return CODE_CONTEXT_RE.test(sourceText || '');
+}
+
 function collectStrings(value: unknown, path = 'payload', depth = 0, out: Array<{ value: string; path: string }> = []) {
   if (depth > 5 || out.length > 250) return out;
   if (value == null) return out;
@@ -115,6 +145,8 @@ function isLikelyAssetOrCode(email: string, sourceText: string) {
   if (/[@][0-9]+x\.(png|jpg|jpeg|webp|gif|svg)/i.test(compact)) return true;
   if (/\.(png|jpg|jpeg|webp|gif|svg|css|js|ico|woff2?|ttf|eot|map)(\?|#|$)/i.test(compact)) return true;
   if (local.length <= 1) return true;
+  if (looksLikeBlockedInfrastructureDomain(domain)) return true;
+  if (sourceLooksLikeCode(sourceText) && suspiciousShortCodeLocal(local)) return true;
   return false;
 }
 
@@ -134,26 +166,35 @@ export function validateEmailCandidate(candidate: { email: string; sourceText?: 
   const labels = domain.split('.');
   const tld = labels[labels.length - 1] || '';
   if (labels.length < 2 || !/^[a-z]{2,24}$/.test(tld)) reasons.push('Domain/TLD does not look deliverable.');
+  if (!hasRecognizedTld(domain)) reasons.push('TLD is not in the deliverable-email allowlist.');
+  if (looksLikeBlockedInfrastructureDomain(domain)) reasons.push('Domain looks like captcha/CDN/tracking infrastructure, not a business inbox.');
   if (DISPOSABLE_OR_TEST_DOMAINS.has(domain) || DISPOSABLE_OR_TEST_DOMAINS.has(rootDomain(domain))) reasons.push('Test/disposable/placeholder domain.');
+  const match = domainMatches(domain, businessDomain);
+  const freeMailbox = FREE_EMAIL_DOMAINS.has(domain);
   if (BAD_LOCAL_PARTS.has(local)) reasons.push('Non-contact mailbox like no-reply/postmaster/abuse.');
+  if (suspiciousShortCodeLocal(local) && !match && !freeMailbox) reasons.push('Very short code-like local part on a non-business domain.');
+  if (sourceLooksLikeCode(sourceText) && !match && !freeMailbox) reasons.push('Candidate came from code/widget text, not visible contact text.');
   if (isLikelyAssetOrCode(email, sourceText)) reasons.push('Looks like an asset/code string, not a contact email.');
 
   if (reasons.length) return { email, valid: false, promote: false, score: 0, quality: 'rejected', sourceEvidence, sourceField: candidate.sourceField || '', reasons };
 
   score = 35;
-  const match = domainMatches(domain, businessDomain);
-  const freeMailbox = FREE_EMAIL_DOMAINS.has(domain);
   if (sourceEvidence) { score += 45; reasons.push('Seen with source evidence.'); }
   if (match) { score += 25; reasons.push('Email domain matches business website/domain.'); }
   if (freeMailbox) { score += 8; reasons.push('Personal/free mailbox accepted but needs normal bounce tracking.'); }
   if (GOOD_ROLE_PARTS.has(local)) { score += 10; reasons.push('Useful role mailbox.'); }
   if (generated) { score -= 40; reasons.push('Backend marked this as generated/guessed.'); }
 
-  const quality: EmailCandidateDecision['quality'] = sourceEvidence ? 'source_seen' : match ? 'domain_match' : freeMailbox ? 'free_mailbox_seen' : 'unverified_candidate';
-  const promote = Boolean(sourceEvidence || (match && !generated) || (freeMailbox && sourceEvidence));
-  if (!promote) reasons.push('Not promoted because there is no source evidence or safe domain match.');
+  const sourceEvidenceIsContactSource = Boolean(sourceEvidence && !sourceLooksLikeCode(sourceText));
+  const quality: EmailCandidateDecision['quality'] = sourceEvidenceIsContactSource ? 'source_seen' : match ? 'domain_match' : freeMailbox ? 'free_mailbox_seen' : 'unverified_candidate';
+  const promote = Boolean((match && !generated) || (sourceEvidenceIsContactSource && (match || freeMailbox || GOOD_ROLE_PARTS.has(local))));
+  if (!promote) reasons.push('Not promoted because it is not a domain match, trusted role mailbox, or free mailbox seen in contact evidence.');
 
   return { email, valid: true, promote, score: Math.max(0, Math.min(100, score)), quality, sourceEvidence, sourceField: candidate.sourceField || '', reasons };
+}
+
+export function isEmailAcceptableForBusiness(email: string, business?: BusinessLike) {
+  return validateEmailCandidate({ email, sourceField: 'existing_business_email', sourceText: '' }, business, '', false);
 }
 
 export function chooseBestEmailCandidate(payload: unknown, business?: BusinessLike, sourceEvidence = '', generated = false): EmailCandidateDecision {

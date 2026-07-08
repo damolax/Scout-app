@@ -1,16 +1,5 @@
-import { getCurrentWorkspace } from '@/lib/workspace';
-import EmailScoutClient from './EmailScoutClient';
+import { redirect } from 'next/navigation';
 
-export default async function EmailScoutPage() {
-  const { workspace, error } = await getCurrentWorkspace();
-  if (!workspace) return <div className="error">Workspace error: {error}</div>;
-  return (
-    <div className="stack">
-      <div className="page-title">
-        <h2>Message</h2>
-        <p>Native message engine: Ready-to-message contacts, templates, sender rotation, fixed batch size, send logs, and performance tracking.</p>
-      </div>
-      <EmailScoutClient workspace={workspace} />
-    </div>
-  );
+export default function EmailScoutPage() {
+  redirect('/message');
 }

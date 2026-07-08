@@ -11,8 +11,19 @@ type TemplateRow = {
   subject: string;
   subject_variants?: string[] | null;
   message: string;
+  category_id?: string | null;
+  category_name?: string | null;
   active?: boolean | null;
   created_at: string;
+};
+
+type MessageCategory = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description?: string | null;
+  active?: boolean | null;
+  created_at?: string | null;
 };
 
 type GmailAccount = {
@@ -39,19 +50,36 @@ type SendLogRow = {
   to_email?: string | null;
   from_email?: string | null;
   subject?: string | null;
-  template_id?: string | null;
-  gmail_account_id?: string | null;
   sent_at?: string | null;
-  raw?: Record<string, unknown> | null;
 };
 
 type ReplyRow = {
   id: string;
   is_real_reply?: boolean | null;
-  classification?: string | null;
   template_id?: string | null;
   gmail_account_id?: string | null;
+};
+
+type DueFollowUp = {
+  business_id: string;
+  business_name: string | null;
+  to_email: string;
+  last_sent_at: string;
+  last_subject: string | null;
+  template_id: string | null;
+  gmail_account_id: string | null;
+};
+
+type ScheduleRow = {
+  id: string;
+  type: string;
+  status: string;
+  category_id?: string | null;
+  template_id?: string | null;
+  target_count?: number | null;
+  scheduled_for: string;
   raw?: Record<string, unknown> | null;
+  created_at: string;
 };
 
 type SendResult = {
@@ -78,12 +106,11 @@ type SendSummary = {
 };
 
 const READY_PAGE_SIZE = 100;
-const MAX_MESSAGE_BATCH_SIZE = 5000;
-const DEFAULT_TEMPLATE_MESSAGE = `Hi {name},\n\nI came across {business} and noticed there may be a few simple ways to improve how prospects move from first visit to enquiry.\n\nI can send you a short review with the first changes I would make for {business}.\n\nBest regards,\nOlalekan`;
-const GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/gmail.readonly'
-].join(' ');
+const MAX_MESSAGE_BATCH_SIZE = 50000;
+const DEFAULT_TEMPLATE_MESSAGE = `Hi {name},\n\nI came across {business} and wanted to ask a quick question about {category}.\n\nWould you like me to send a short, practical review of what I noticed for {business}?\n\nBest regards,\nOlalekan`;
+const DEFAULT_FOLLOWUP_MESSAGE = `Hi {name},\n\nJust following up on my last message about {business}.\n\nIf improving {category} is relevant, I can send over the short review I mentioned.\n\nBest regards,\nOlalekan`;
+const SHORTCODES = ['{name}', '{business}', '{company}', '{email}', '{website}', '{domain}', '{phone}', '{category}', '{industry}', '{location}', '{source}'];
+const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly'].join(' ');
 
 function formatError(error: unknown) {
   if (!error) return 'Unknown error.';
@@ -114,8 +141,7 @@ function getDomain(business: Business) {
   try {
     if (business.website) return new URL(business.website.startsWith('http') ? business.website : `https://${business.website}`).hostname.replace(/^www\./, '');
   } catch {}
-  const emailDomain = String(business.email || '').split('@')[1] || '';
-  return emailDomain;
+  return String(business.email || '').split('@')[1] || '';
 }
 
 function renderTemplate(text: string, business: Business) {
@@ -178,43 +204,61 @@ function toDateTomorrow() {
   return d.toISOString();
 }
 
-function getMessageRoutePath() {
-  if (typeof window === 'undefined') return '/message';
-  return window.location.pathname.startsWith('/message') ? '/message' : '/message';
-}
-
 function getMessageRedirectUri() {
   if (typeof window === 'undefined') return '/message';
-  return `${window.location.origin}${getMessageRoutePath()}`;
+  return `${window.location.origin}/message`;
+}
+
+function asLocalDateTimeValue(date: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function inHours(hours: number) {
+  const d = new Date();
+  d.setHours(d.getHours() + hours);
+  return asLocalDateTimeValue(d);
 }
 
 export default function EmailScoutClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
+  const [categories, setCategories] = useState<MessageCategory[]>([]);
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
   const [readyContacts, setReadyContacts] = useState<Business[]>([]);
   const [readyTotal, setReadyTotal] = useState(0);
   const [selectedContacts, setSelectedContacts] = useState<Record<string, boolean>>({});
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, boolean>>({});
+  const [categoryId, setCategoryId] = useState('');
+  const [newCategoryName, setNewCategoryName] = useState('Shopify marketing scouting');
+  const [newCategoryDescription, setNewCategoryDescription] = useState('Templates for this scouting angle.');
+  const [businessCategoryFilter, setBusinessCategoryFilter] = useState('');
   const [templateId, setTemplateId] = useState('');
-  const [templateName, setTemplateName] = useState('Cold outreach review');
+  const [templateName, setTemplateName] = useState('First message');
   const [subject, setSubject] = useState('{name}, quick question');
   const [subjectVariants, setSubjectVariants] = useState('{business}, quick idea\nQuick idea for {name}');
   const [message, setMessage] = useState(DEFAULT_TEMPLATE_MESSAGE);
+  const [rotateTemplates, setRotateTemplates] = useState(true);
   const [googleClientId, setGoogleClientId] = useState('');
   const [manualEmail, setManualEmail] = useState('');
   const [manualAccessToken, setManualAccessToken] = useState('');
   const [manualRefreshToken, setManualRefreshToken] = useState('');
   const [manualClientId, setManualClientId] = useState('');
   const [showAdvancedTokens, setShowAdvancedTokens] = useState(false);
-  const [sendLimit, setSendLimit] = useState(50);
+  const [sendLimit, setSendLimit] = useState(1000);
   const [delayMs, setDelayMs] = useState(0);
   const [dryRun, setDryRun] = useState(false);
   const [readySearch, setReadySearch] = useState('');
+  const [scheduleType, setScheduleType] = useState<'initial' | 'follow_up'>('initial');
+  const [scheduleFor, setScheduleFor] = useState(inHours(1));
+  const [followUpFor, setFollowUpFor] = useState(inHours(2));
+  const [scheduleCount, setScheduleCount] = useState(1000);
+  const [dueFollowUps, setDueFollowUps] = useState<DueFollowUp[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('Select a template, select Gmail accounts, then send a fixed-size batch from Ready-to-message contacts.');
+  const [status, setStatus] = useState('Ready. Pick a library category, template, sender, and batch size.');
   const [error, setError] = useState('');
   const [backendNote, setBackendNote] = useState('');
   const [lastResults, setLastResults] = useState<Array<Record<string, unknown>>>([]);
@@ -224,18 +268,34 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
 
   const selectedContactIds = Object.keys(selectedContacts).filter((id) => selectedContacts[id]);
   const selectedAccountIds = Object.keys(selectedAccounts).filter((id) => selectedAccounts[id]);
-  const currentTemplate = templates.find((t) => t.id === templateId) || templates[0];
+  const categoryTemplates = templates.filter((t) => !categoryId || t.category_id === categoryId);
+  const currentTemplate = templates.find((t) => t.id === templateId) || categoryTemplates[0] || templates[0];
   const previewBusiness = readyContacts.find((b) => selectedContacts[b.id]) || readyContacts[0];
+  const previewSubject = previewBusiness && currentTemplate ? renderTemplate(splitSubjects(currentTemplate.subject, currentTemplate.subject_variants)[0] || currentTemplate.subject, previewBusiness) : '';
+  const previewBody = previewBusiness && currentTemplate ? renderTemplate(currentTemplate.message, previewBusiness) : '';
 
   async function checkBackend() {
     try {
       const response = await fetch('/api/backend/gmail/status');
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json?.error || json?.message || `Backend returned HTTP ${response.status}`);
-      setBackendNote(`Backend OK · Gmail send endpoint: ${json?.endpoints?.send_selected_batch ? 'available' : 'not confirmed'} · Google secret: ${json?.google_client_secret_set ? 'set' : 'missing'}`);
+      setBackendNote(json?.endpoints?.send_selected_batch ? 'Backend connected' : 'Backend connected, send endpoint not confirmed');
     } catch (err) {
       setBackendNote(`Backend check failed: ${formatError(err)}`);
     }
+  }
+
+  async function loadCategories() {
+    const { data, error: loadError } = await supabase
+      .from('message_categories')
+      .select('*')
+      .eq('workspace_id', workspace.id)
+      .eq('active', true)
+      .order('name', { ascending: true });
+    if (loadError) throw loadError;
+    const rows = (data || []) as MessageCategory[];
+    setCategories(rows);
+    if (!categoryId && rows[0]?.id) setCategoryId(rows[0].id);
   }
 
   async function loadTemplates() {
@@ -243,6 +303,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       .from('templates')
       .select('*')
       .eq('workspace_id', workspace.id)
+      .eq('active', true)
       .order('created_at', { ascending: false });
     if (loadError) throw loadError;
     const rows = (data || []) as TemplateRow[];
@@ -268,6 +329,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
 
   async function loadReadyContacts() {
     const cleanSearch = readySearch.trim().replace(/[%_]/g, '');
+    const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, '');
     const targetBusinessId = typeof window !== 'undefined' ? new URL(window.location.href).searchParams.get('business') : '';
     let query = supabase
       .from('businesses')
@@ -279,12 +341,12 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       .order('updated_at', { ascending: true })
       .limit(READY_PAGE_SIZE);
     if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
+    if (cleanCategory) query = query.ilike('category', `%${cleanCategory}%`);
     const { data, error: loadError, count } = await query;
     if (loadError) throw loadError;
 
     let rows = (data || []) as Business[];
     let selected: Record<string, boolean> = {};
-
     if (targetBusinessId) {
       const { data: target, error: targetError } = await supabase
         .from('businesses')
@@ -296,9 +358,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       if (target?.email) {
         rows = [target as Business, ...rows.filter((b) => b.id !== target.id)].slice(0, READY_PAGE_SIZE);
         selected = { [target.id]: true };
-        setStatus(`Loaded selected business for Message: ${target.name || target.email}.`);
-      } else if (target) {
-        setStatus('Selected business has no email yet. Send it to Auto Scout first, then return to Message.');
+        setStatus(`Loaded selected business: ${target.name || target.email}.`);
       }
     }
 
@@ -309,19 +369,37 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
 
   async function loadPerformance() {
     const [{ data: sentRows }, { data: replyRows }] = await Promise.all([
-      supabase.from('sent_messages').select('id,status,to_email,from_email,subject,template_id,gmail_account_id,sent_at,raw').eq('workspace_id', workspace.id).order('sent_at', { ascending: false }).limit(500),
-      supabase.from('reply_history').select('id,is_real_reply,classification,template_id,gmail_account_id,raw').eq('workspace_id', workspace.id).order('received_at', { ascending: false }).limit(500)
+      supabase.from('sent_messages').select('id,status,to_email,from_email,subject,sent_at').eq('workspace_id', workspace.id).order('sent_at', { ascending: false }).limit(200),
+      supabase.from('reply_history').select('id,is_real_reply,template_id,gmail_account_id').eq('workspace_id', workspace.id).order('received_at', { ascending: false }).limit(500)
     ]);
     setRecentSent((sentRows || []) as SendLogRow[]);
     setReplies((replyRows || []) as ReplyRow[]);
+  }
+
+  async function loadDueFollowUps() {
+    const { data, error: dueError } = await supabase.rpc('get_due_followups', { target_workspace: workspace.id, limit_rows: 100 });
+    if (dueError) throw dueError;
+    setDueFollowUps((data || []) as DueFollowUp[]);
+  }
+
+  async function loadSchedules() {
+    const { data, error: scheduleError } = await supabase
+      .from('message_schedules')
+      .select('*')
+      .eq('workspace_id', workspace.id)
+      .in('status', ['scheduled', 'due', 'running'])
+      .order('scheduled_for', { ascending: true })
+      .limit(50);
+    if (scheduleError) throw scheduleError;
+    setSchedules((data || []) as ScheduleRow[]);
   }
 
   async function refreshAll() {
     setLoading(true);
     setError('');
     try {
-      await Promise.all([loadTemplates(), loadAccounts(), loadReadyContacts(), loadPerformance(), checkBackend()]);
-      setStatus('Loaded templates, Gmail accounts, Ready-to-message contacts, and recent performance.');
+      await Promise.all([loadCategories(), loadTemplates(), loadAccounts(), loadReadyContacts(), loadPerformance(), loadDueFollowUps(), loadSchedules(), checkBackend()]);
+      setStatus('Loaded Message workspace.');
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -330,7 +408,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
   }
 
   useEffect(() => {
-    const savedClientId = localStorage.getItem('scout_v814_google_client_id') || '';
+    const savedClientId = localStorage.getItem('scout_v815_google_client_id') || localStorage.getItem('scout_v814_google_client_id') || '';
     setGoogleClientId(savedClientId);
     setManualClientId(savedClientId);
     refreshAll();
@@ -342,19 +420,25 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [googleClientId]);
 
+  useEffect(() => {
+    if (categoryTemplates[0] && !categoryTemplates.some((t) => t.id === templateId)) {
+      loadTemplateIntoEditor(categoryTemplates[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryId, templates.length]);
+
   async function handleOauthReturn() {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
-    if (!code || state !== 'scout_v814_gmail') return;
-    const clientId = googleClientId || localStorage.getItem('scout_v814_google_client_id') || '';
+    if (!code || state !== 'scout_v815_gmail') return;
+    const clientId = googleClientId || localStorage.getItem('scout_v815_google_client_id') || '';
     if (!clientId) {
       setError('Google OAuth returned a code, but Google Client ID is missing. Save the Client ID and reconnect Gmail.');
       return;
     }
     setBusy(true);
-    setStatus('Completing Gmail connection...');
     try {
       const redirectUri = getMessageRedirectUri();
       const response = await fetch('/api/backend/gmail/exchange', {
@@ -371,13 +455,13 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
         client_id: clientId,
         expires_in: json.expires_in,
         status: 'connected',
-        raw: { scope: json.scope, profile_source: json.profile_source, connected_at: new Date().toISOString() }
+        raw: { scope: json.scope, connected_at: new Date().toISOString() }
       });
       url.searchParams.delete('code');
       url.searchParams.delete('scope');
       url.searchParams.delete('state');
       window.history.replaceState({}, document.title, url.pathname + url.search);
-      setStatus(`Connected Gmail account: ${json.email}`);
+      setStatus(`Connected Gmail: ${json.email}`);
       await loadAccounts();
     } catch (err) {
       setError(formatError(err));
@@ -410,16 +494,15 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       setError('Paste your Google OAuth Client ID first.');
       return;
     }
-    localStorage.setItem('scout_v814_google_client_id', googleClientId.trim());
-    const redirectUri = getMessageRedirectUri();
+    localStorage.setItem('scout_v815_google_client_id', googleClientId.trim());
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', googleClientId.trim());
-    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('redirect_uri', getMessageRedirectUri());
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('scope', GMAIL_SCOPES);
     url.searchParams.set('access_type', 'offline');
     url.searchParams.set('prompt', 'consent');
-    url.searchParams.set('state', 'scout_v814_gmail');
+    url.searchParams.set('state', 'scout_v815_gmail');
     window.location.href = url.toString();
   }
 
@@ -427,7 +510,6 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     setBusy(true);
     setError('');
     try {
-      if (!manualEmail.trim()) throw new Error('Sender email is required.');
       await saveGmailAccount({
         email: manualEmail,
         access_token: manualAccessToken || undefined,
@@ -439,7 +521,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       setManualEmail('');
       setManualAccessToken('');
       setManualRefreshToken('');
-      setStatus('Gmail sender saved. Use Verify Profile before sending if you added tokens manually.');
+      setStatus('Sender saved.');
       await loadAccounts();
     } catch (err) {
       setError(formatError(err));
@@ -455,11 +537,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       const response = await fetch('/api/backend/gmail/profile', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          access_token: account.access_token,
-          refresh_token: account.refresh_token,
-          client_id: account.client_id || googleClientId
-        })
+        body: JSON.stringify({ access_token: account.access_token, refresh_token: account.refresh_token, client_id: account.client_id || googleClientId })
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json?.success === false) throw new Error(json?.error || json?.message || `Profile check failed with HTTP ${response.status}`);
@@ -467,7 +545,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       if (json.access_token) update.access_token = json.access_token;
       const { error: updateError } = await supabase.from('gmail_accounts').update(update).eq('workspace_id', workspace.id).eq('id', account.id);
       if (updateError) throw updateError;
-      setStatus(`Verified sender profile: ${json.email}`);
+      setStatus(`Verified sender: ${json.email}`);
       await loadAccounts();
     } catch (err) {
       const msg = formatError(err);
@@ -479,14 +557,45 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     }
   }
 
+  async function ensureCategory() {
+    if (categoryId) return categories.find((c) => c.id === categoryId) || null;
+    const name = newCategoryName.trim();
+    if (!name) throw new Error('Create or select a message category first.');
+    const { data, error: upsertError } = await supabase
+      .from('message_categories')
+      .upsert({ workspace_id: workspace.id, name, description: newCategoryDescription.trim() || null, active: true }, { onConflict: 'workspace_id,name' })
+      .select('*')
+      .single();
+    if (upsertError) throw upsertError;
+    await loadCategories();
+    setCategoryId(data.id);
+    return data as MessageCategory;
+  }
+
+  async function saveCategory() {
+    setBusy(true);
+    setError('');
+    try {
+      const cat = await ensureCategory();
+      setStatus(`Library category ready: ${cat?.name}.`);
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveTemplate() {
     setBusy(true);
     setError('');
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not signed in.');
+      const category = await ensureCategory();
       const payload = {
         workspace_id: workspace.id,
+        category_id: category?.id || null,
+        category_name: category?.name || newCategoryName.trim() || null,
         name: templateName.trim() || 'Untitled template',
         subject: subject.trim(),
         subject_variants: subjectVariants.split('\n').map((line) => line.trim()).filter(Boolean),
@@ -497,9 +606,9 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       if (!payload.subject || !payload.message) throw new Error('Subject and message are required.');
       const { data, error: insertError } = await supabase.from('templates').insert(payload).select('*').single();
       if (insertError) throw insertError;
-      setStatus('Template saved.');
       await loadTemplates();
       if (data?.id) setTemplateId(data.id);
+      setStatus('Template saved in the message library.');
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -512,9 +621,12 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     setBusy(true);
     setError('');
     try {
+      const category = await ensureCategory();
       const { error: updateError } = await supabase
         .from('templates')
         .update({
+          category_id: category?.id || null,
+          category_name: category?.name || null,
           name: templateName.trim() || currentTemplate.name,
           subject: subject.trim(),
           subject_variants: subjectVariants.split('\n').map((line) => line.trim()).filter(Boolean),
@@ -524,8 +636,8 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
         .eq('workspace_id', workspace.id)
         .eq('id', currentTemplate.id);
       if (updateError) throw updateError;
-      setStatus('Template updated.');
       await loadTemplates();
+      setStatus('Template updated.');
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -535,16 +647,24 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
 
   function loadTemplateIntoEditor(t: TemplateRow) {
     setTemplateId(t.id);
+    if (t.category_id) setCategoryId(t.category_id);
     setTemplateName(t.name);
     setSubject(t.subject);
     setSubjectVariants((t.subject_variants || []).join('\n'));
     setMessage(t.message);
   }
 
-  async function getContactsForSend() {
-    const selected = readyContacts.filter((b) => selectedContacts[b.id]);
+  function useFollowUpTemplate() {
+    setTemplateName('72-hour follow-up');
+    setSubject('Following up, {name}');
+    setSubjectVariants('Quick follow-up for {business}');
+    setMessage(DEFAULT_FOLLOWUP_MESSAGE);
+  }
+
+  async function getContactsForSend(limitOverride?: number, contactsOverride?: Business[]) {
+    const selected = contactsOverride || readyContacts.filter((b) => selectedContacts[b.id]);
     const unique = new Map<string, Business>();
-    const limit = Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(sendLimit || 50)));
+    const limit = Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(limitOverride || sendLimit || 1000)));
 
     if (selected.length) {
       for (const business of selected) {
@@ -555,6 +675,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     }
 
     const cleanSearch = readySearch.trim().replace(/[%_]/g, '');
+    const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, '');
     let query = supabase
       .from('businesses')
       .select('*')
@@ -565,6 +686,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       .order('updated_at', { ascending: true })
       .limit(limit);
     if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
+    if (cleanCategory) query = query.ilike('category', `%${cleanCategory}%`);
     const { data, error: loadError } = await query;
     if (loadError) throw loadError;
     for (const business of (data || []) as Business[]) {
@@ -574,6 +696,11 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     return Array.from(unique.values()).slice(0, limit);
   }
 
+  function templatesForSend() {
+    const pool = rotateTemplates ? categoryTemplates.filter((t) => t.active !== false) : [currentTemplate].filter(Boolean) as TemplateRow[];
+    return pool.length ? pool : templates.filter((t) => t.active !== false);
+  }
+
   async function repairReadyContacts() {
     setBusy(true);
     setError('');
@@ -581,7 +708,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       const { data, error: repairError } = await supabase.rpc('mark_ready_emails_and_pending_no_email', { target_workspace: workspace.id });
       if (repairError) throw repairError;
       const row = Array.isArray(data) ? data[0] : data;
-      setStatus(`Repaired routing. Ready-to-message with email: ${Number(row?.ready_count || 0).toLocaleString()}. Pending without email: ${Number(row?.pending_count || 0).toLocaleString()}.`);
+      setStatus(`Ready with email: ${Number(row?.ready_count || 0).toLocaleString()}. Pending without email: ${Number(row?.pending_count || 0).toLocaleString()}.`);
       await loadReadyContacts();
     } catch (err) {
       setError(formatError(err));
@@ -602,9 +729,11 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       message: renderTemplate(template.message, business),
       templateId: template.id,
       templateName: template.name,
+      categoryId: template.category_id || '',
+      categoryName: template.category_name || '',
       website: business.website || '',
       domain: business.domain || getDomain(business),
-      source: business.source || 'scout_v814'
+      source: business.source || 'scout_v815'
     };
   }
 
@@ -617,10 +746,10 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     await supabase.from('outreach_events').insert({ workspace_id: workspace.id, ...payload });
   }
 
-  async function persistSendOutcome(params: { business: Business; template: TemplateRow; account: GmailAccount; result: SendResult; batchId: string; subject: string; body: string; dryRun: boolean }) {
-    const { business, template, account, result, batchId, subject: sentSubject, body, dryRun: isDryRun } = params;
-    const status = String(result.status || '').toLowerCase();
-    const isSent = status === 'sent';
+  async function persistSendOutcome(params: { business: Business; template: TemplateRow; account: GmailAccount; result: SendResult; batchId: string; subject: string; body: string; dryRun: boolean; isFollowUp?: boolean }) {
+    const { business, template, account, result, batchId, subject: sentSubject, body, dryRun: isDryRun, isFollowUp } = params;
+    const statusText = String(result.status || '').toLowerCase();
+    const isSent = statusText === 'sent';
     const sentAt = new Date().toISOString();
     const row = {
       workspace_id: workspace.id,
@@ -634,7 +763,8 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       body,
       provider_message_id: result.gmailMessageId || null,
       gmail_thread_id: result.gmailThreadId || null,
-      status: isDryRun ? 'dry_run' : (status || 'unknown'),
+      status: isDryRun ? 'dry_run' : (statusText || 'unknown'),
+      is_follow_up: !!isFollowUp,
       raw: result,
       sent_at: sentAt
     };
@@ -642,7 +772,7 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     if (insertError) throw insertError;
 
     if (isSent && !isDryRun) {
-      const raw = { ...(business.raw || {}), last_send: { batch_id: batchId, template_id: template.id, gmail_account_id: account.id, from_email: account.email, subject: sentSubject, gmail_message_id: result.gmailMessageId || '', gmail_thread_id: result.gmailThreadId || '', sent_at: sentAt } };
+      const raw = { ...(business.raw || {}), last_send: { batch_id: batchId, template_id: template.id, gmail_account_id: account.id, from_email: account.email, subject: sentSubject, sent_at: sentAt, is_follow_up: !!isFollowUp } };
       const { error: updateError } = await supabase.from('businesses').update({ status: 'contacted', raw }).eq('workspace_id', workspace.id).eq('id', business.id);
       if (updateError) throw updateError;
       await supabase.from('scout_history').upsert({
@@ -653,37 +783,38 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
         website: business.website,
         name: business.name,
         phone: business.phone,
-        source: 'gmail_api_send',
+        source: isFollowUp ? 'gmail_follow_up' : 'gmail_api_send',
         campaign: batchId,
         status: 'contacted',
-        raw: { template_id: template.id, gmail_account_id: account.id, gmail_message_id: result.gmailMessageId || '', gmail_thread_id: result.gmailThreadId || '' }
+        raw: { template_id: template.id, gmail_account_id: account.id, is_follow_up: !!isFollowUp }
       }, { onConflict: 'workspace_id,normalized_key' });
       await supabase.from('gmail_accounts').update({ sent_today: Number(account.sent_today || 0) + 1, last_error: null }).eq('workspace_id', workspace.id).eq('id', account.id);
     }
   }
 
-  async function sendBatch() {
+  async function sendBatch(contactsOverride?: Business[], options?: { isFollowUp?: boolean; limit?: number }) {
     setBusy(true);
     setError('');
     setProgress(0);
     setLastResults([]);
     setSummary({ requested: 0, attempted: 0, sent: 0, failed: 0, skipped: 0, stopped: false });
     try {
-      if (!currentTemplate) throw new Error('Create or select a template first.');
-      const contacts = await getContactsForSend();
-      if (!contacts.length) throw new Error('No Ready-to-message contacts with email found. Import contacts with emails or run Ready Email Detection first.');
+      const templatePool = templatesForSend();
+      if (!templatePool.length) throw new Error('Create or select a message template first.');
+      const contacts = await getContactsForSend(options?.limit, contactsOverride);
+      if (!contacts.length) throw new Error('No Ready contacts with email found.');
       let activeAccounts = accounts.filter((a) => selectedAccounts[a.id] && a.status === 'connected' && !isPaused(a) && (a.access_token || a.refresh_token));
-      if (!activeAccounts.length) throw new Error('Select at least one connected Gmail account with OAuth tokens.');
+      if (!activeAccounts.length) throw new Error('Select at least one connected Gmail sender.');
 
-      const batchId = `scout_v814_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const batchId = `scout_v815_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const { error: batchError } = await supabase.from('outreach_batches').insert({
         id: batchId,
         workspace_id: workspace.id,
-        template_id: currentTemplate.id,
+        template_id: templatePool[0].id,
         requested_count: contacts.length,
         selected_sender_count: activeAccounts.length,
         status: dryRun ? 'dry_run' : 'running',
-        raw: { selected_accounts: activeAccounts.map((a) => a.email), dryRun, delayMs }
+        raw: { selected_accounts: activeAccounts.map((a) => a.email), dryRun, delayMs, rotateTemplates, categoryId, businessCategoryFilter, isFollowUp: !!options?.isFollowUp }
       });
       if (batchError) throw batchError;
 
@@ -695,23 +826,22 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       let skipped = 0;
       let stopped = false;
       const requested = contacts.length;
-
-      setStatus(`Starting ${requested.toLocaleString()} message batch across ${activeAccounts.length.toLocaleString()} selected sender(s).`);
+      setStatus(`Sending ${requested.toLocaleString()} message(s).`);
 
       for (let i = 0; i < contacts.length; i++) {
         if (!activeAccounts.length) {
           stopped = true;
           skipped += contacts.length - i;
-          setStatus('All selected Gmail accounts are paused/limited. Remaining contacts stayed Ready.');
+          setStatus('All selected Gmail senders are paused/limited. Remaining contacts stayed Ready.');
           break;
         }
-
         const business = contacts[i];
         const account = activeAccounts[cursor % activeAccounts.length];
+        const template = templatePool[i % templatePool.length];
         cursor += 1;
-        const payload = buildContactPayload(business, currentTemplate, i);
+        const payload = buildContactPayload(business, template, i);
         attempted += 1;
-        setStatus(`Sending ${attempted.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`);
+        setStatus(`${attempted.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`);
 
         const response = await fetch('/api/backend/email-scout/send-selected-batch', {
           method: 'POST',
@@ -741,8 +871,8 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
         if (!response.ok && limitHit) {
           const reason = json?.error || result.reason || `Gmail limit reached for ${account.email}`;
           await markSenderPaused(account, reason, String(json?.senderPausedUntil || result.pausedUntil || ''));
-          await logOutreachEvent({ batch_id: batchId, business_id: business.id, gmail_account_id: account.id, template_id: currentTemplate.id, type: 'sender_limit', message: reason, raw: json });
-          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, status: 'not_sent_sender_limit', reason });
+          await logOutreachEvent({ batch_id: batchId, business_id: business.id, gmail_account_id: account.id, template_id: template.id, type: 'sender_limit', message: reason, raw: json });
+          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, template: template.name, status: 'not_sent_sender_limit', reason });
           activeAccounts = activeAccounts.filter((a) => a.id !== account.id);
           failed += 1;
           i -= 1;
@@ -757,19 +887,19 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
         if (!response.ok || json?.success === false) {
           const reason = json?.error || result.reason || `Send failed with HTTP ${response.status}`;
           failed += 1;
-          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, status: 'failed', reason });
-          await persistSendOutcome({ business, template: currentTemplate, account, result: { ...result, status: 'failed', reason }, batchId, subject: payload.subject, body: payload.message, dryRun });
-          await logOutreachEvent({ batch_id: batchId, business_id: business.id, gmail_account_id: account.id, template_id: currentTemplate.id, type: 'send_failed', message: reason, raw: json });
+          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, template: template.name, status: 'failed', reason });
+          await persistSendOutcome({ business, template, account, result: { ...result, status: 'failed', reason }, batchId, subject: payload.subject, body: payload.message, dryRun, isFollowUp: options?.isFollowUp });
+          await logOutreachEvent({ batch_id: batchId, business_id: business.id, gmail_account_id: account.id, template_id: template.id, type: 'send_failed', message: reason, raw: json });
         } else if (statusText === 'sent' || statusText === 'dry_run') {
           if (statusText === 'sent') sent += 1; else skipped += 1;
-          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, status: statusText, subject: payload.subject, gmailMessageId: result.gmailMessageId || '' });
-          await persistSendOutcome({ business, template: currentTemplate, account, result: { ...result, status: statusText }, batchId, subject: payload.subject, body: payload.message, dryRun });
-          await logOutreachEvent({ batch_id: batchId, business_id: business.id, gmail_account_id: account.id, template_id: currentTemplate.id, type: statusText, message: `${statusText}: ${payload.email}`, raw: result });
+          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, template: template.name, status: statusText, subject: payload.subject, gmailMessageId: result.gmailMessageId || '' });
+          await persistSendOutcome({ business, template, account, result: { ...result, status: statusText }, batchId, subject: payload.subject, body: payload.message, dryRun, isFollowUp: options?.isFollowUp });
+          await logOutreachEvent({ batch_id: batchId, business_id: business.id, gmail_account_id: account.id, template_id: template.id, type: statusText, message: `${statusText}: ${payload.email}`, raw: result });
         } else {
           skipped += 1;
           const reason = result.reason || statusText || 'not_sent';
-          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, status: statusText, reason });
-          await persistSendOutcome({ business, template: currentTemplate, account, result: { ...result, status: statusText }, batchId, subject: payload.subject, body: payload.message, dryRun });
+          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, template: template.name, status: statusText, reason });
+          await persistSendOutcome({ business, template, account, result: { ...result, status: statusText }, batchId, subject: payload.subject, body: payload.message, dryRun, isFollowUp: options?.isFollowUp });
         }
 
         setProgress(Math.round(((i + 1) / contacts.length) * 100));
@@ -782,8 +912,8 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
       setProgress(100);
       setSummary({ requested, attempted, sent, failed, skipped, stopped });
       setSelectedContacts({});
-      setStatus(`Batch ${finalStatus}. Requested: ${requested}, attempted: ${attempted}, sent: ${sent}, failed: ${failed}, skipped/not sent: ${skipped}. Unsent contacts stayed Ready.`);
-      await Promise.all([loadReadyContacts(), loadAccounts(), loadPerformance()]);
+      setStatus(`Batch ${finalStatus}. Requested ${requested}, sent ${sent}, failed ${failed}, skipped/not sent ${skipped}.`);
+      await Promise.all([loadReadyContacts(), loadAccounts(), loadPerformance(), loadDueFollowUps()]);
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -791,184 +921,237 @@ export default function EmailScoutClient({ workspace }: { workspace: Workspace }
     }
   }
 
+  async function saveSchedule() {
+    setBusy(true);
+    setError('');
+    try {
+      const templatePool = templatesForSend();
+      if (!templatePool.length) throw new Error('Create/select at least one template first.');
+      const scheduledFor = new Date(scheduleFor).toISOString();
+      const { error: insertError } = await supabase.from('message_schedules').insert({
+        workspace_id: workspace.id,
+        type: scheduleType,
+        category_id: categoryId || null,
+        template_id: rotateTemplates ? null : (currentTemplate?.id || null),
+        target_count: Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(scheduleCount || sendLimit || 1000))),
+        scheduled_for: scheduledFor,
+        status: 'scheduled',
+        raw: { business_category_filter: businessCategoryFilter, rotate_templates: rotateTemplates, delay_ms: delayMs }
+      });
+      if (insertError) throw insertError;
+      setStatus('Message schedule saved. Due schedules appear in the schedule list.');
+      await loadSchedules();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function scheduleFollowUpsForDue() {
+    setBusy(true);
+    setError('');
+    try {
+      if (!dueFollowUps.length) throw new Error('No due follow-ups found.');
+      const { error: insertError } = await supabase.from('message_schedules').insert({
+        workspace_id: workspace.id,
+        type: 'follow_up',
+        category_id: categoryId || null,
+        template_id: rotateTemplates ? null : (currentTemplate?.id || null),
+        target_count: dueFollowUps.length,
+        scheduled_for: new Date(followUpFor).toISOString(),
+        status: 'scheduled',
+        raw: { due_mode: true, followup_after_hours: 72, due_business_ids: dueFollowUps.map((d) => d.business_id), rotate_templates: rotateTemplates }
+      });
+      if (insertError) throw insertError;
+      setStatus(`Scheduled ${dueFollowUps.length.toLocaleString()} due follow-up(s).`);
+      await loadSchedules();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function getDueFollowUpBusinesses(limit = 1000) {
+    const rows = dueFollowUps.slice(0, limit);
+    if (!rows.length) return [] as Business[];
+    const { data, error: loadError } = await supabase
+      .from('businesses')
+      .select('*')
+      .eq('workspace_id', workspace.id)
+      .in('id', rows.map((r) => r.business_id));
+    if (loadError) throw loadError;
+    return (data || []) as Business[];
+  }
+
+  async function sendDueFollowUpsNow() {
+    const contacts = await getDueFollowUpBusinesses(Math.min(Number(sendLimit || 1000), dueFollowUps.length || 1000));
+    await sendBatch(contacts, { isFollowUp: true, limit: contacts.length });
+  }
+
+  async function sendDueSchedulesNow() {
+    const due = schedules.filter((s) => new Date(s.scheduled_for).getTime() <= Date.now() && s.status === 'scheduled');
+    if (!due.length) {
+      setStatus('No due schedules yet.');
+      return;
+    }
+    const first = due[0];
+    setScheduleType(first.type === 'follow_up' ? 'follow_up' : 'initial');
+    const count = Number(first.target_count || sendLimit || 1000);
+    if (first.type === 'follow_up') {
+      const contacts = await getDueFollowUpBusinesses(count);
+      await sendBatch(contacts, { isFollowUp: true, limit: count });
+    } else {
+      await sendBatch(undefined, { limit: count });
+    }
+    await supabase.from('message_schedules').update({ status: 'sent', updated_at: new Date().toISOString() }).eq('workspace_id', workspace.id).eq('id', first.id);
+    await loadSchedules();
+  }
+
   function toggleAllContacts(value: boolean) {
     if (!value) return setSelectedContacts({});
     setSelectedContacts(Object.fromEntries(readyContacts.map((b) => [b.id, true])));
   }
 
-  function templatePerformance() {
-    return templates.map((template) => {
-      const sentRows = recentSent.filter((row) => row.template_id === template.id && row.status === 'sent');
-      const realReplies = replies.filter((row) => row.template_id === template.id && row.is_real_reply !== false);
-      return { template, sent: sentRows.length, replies: realReplies.length, perReply: realReplies.length ? (sentRows.length / realReplies.length).toFixed(1) : '-' };
-    });
+  function selectCategory(value: string) {
+    setCategoryId(value);
+    const first = templates.find((t) => t.category_id === value);
+    if (first) loadTemplateIntoEditor(first);
   }
-
-  function accountPerformance() {
-    return accounts.map((account) => {
-      const sentRows = recentSent.filter((row) => row.gmail_account_id === account.id && row.status === 'sent');
-      const realReplies = replies.filter((row) => row.gmail_account_id === account.id && row.is_real_reply !== false);
-      return { account, sent: sentRows.length, replies: realReplies.length, perReply: realReplies.length ? (sentRows.length / realReplies.length).toFixed(1) : '-' };
-    });
-  }
-
-  const previewSubject = currentTemplate && previewBusiness ? renderTemplate(splitSubjects(currentTemplate.subject, currentTemplate.subject_variants)[0] || currentTemplate.subject, previewBusiness) : '';
-  const previewBody = currentTemplate && previewBusiness ? renderTemplate(currentTemplate.message, previewBusiness) : '';
 
   return (
     <div className="stack">
+      {error ? <div className="error">{error}</div> : null}
+      <div className="success">{status}</div>
+      {backendNote ? <div className="notice">{backendNote}</div> : null}
+      {busy || loading ? <div className="progress-track"><div className="progress-fill" style={{ width: `${progress || (loading ? 30 : 0)}%` }} /></div> : null}
+
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Ready To Message</div><div className="num">{readyTotal.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Connected Senders</div><div className="num">{accounts.filter((a) => a.status === 'connected' && !isPaused(a)).length.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Recent Sent Logs</div><div className="num">{recentSent.filter((r) => r.status === 'sent').length.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{replies.filter((r) => r.is_real_reply !== false).length.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Selected Senders</div><div className="num">{selectedAccountIds.length}</div></div>
+        <div className="card kpi"><div className="title">Templates In Category</div><div className="num">{categoryTemplates.length}</div></div>
+        <div className="card kpi"><div className="title">Due Follow-ups</div><div className="num">{dueFollowUps.length}</div></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <div className="actions" style={{ justifyContent: 'space-between' }}>
-          <div>
-            <h3 style={{ margin: 0 }}>Backend + Gmail</h3>
-            <p className="muted" style={{ marginBottom: 0 }}>Gmail OAuth and Gmail API sending run through your backend. This Node app controls templates, selected senders, sender rotation, limits, and Supabase tracking.</p>
-          </div>
-          <button className="btn secondary" type="button" onClick={checkBackend} disabled={busy}>Check Backend</button>
-        </div>
-        <div className="notice" style={{ marginTop: 12 }}>{backendNote || 'Backend status not checked yet.'}</div>
-        {busy ? <div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div> : null}
-        <div className={error ? 'error' : 'success'} style={{ marginTop: 12 }}>{error || status}</div>
-      </div>
-
-      <div className="grid grid-2">
-        <div className="card" style={{ padding: 18 }}>
-          <h3>Gmail Senders</h3>
-          <p className="muted">Use <strong>Connect Gmail</strong>. You normally do not paste access tokens or refresh tokens; OAuth creates those behind the scenes so Gmail can send and read replies. Select only accounts that should join the rotation. If one hits a limit, it is removed immediately.</p>
-          <label className="label">Google OAuth Client ID</label>
-          <div className="actions">
-            <input className="input" style={{ flex: 1, minWidth: 260 }} value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} placeholder="Google OAuth Client ID" />
-            <button className="btn" type="button" onClick={startGmailOauth} disabled={busy}>Connect Gmail</button>
-          </div>
-          <p className="muted" style={{ fontSize: 12 }}>Authorized redirect URI in Google Cloud must be: <strong>{typeof window !== 'undefined' ? getMessageRedirectUri() : '/message'}</strong></p>
-
-          <div className="actions" style={{ marginTop: 14 }}>
-            <button className="btn secondary" type="button" onClick={() => setShowAdvancedTokens((value) => !value)}>{showAdvancedTokens ? 'Hide Advanced Sender Setup' : 'Advanced: Manual Sender Setup'}</button>
-          </div>
-          {showAdvancedTokens ? <div className="card" style={{ padding: 14, marginTop: 12 }}>
-            <p className="muted">Advanced fallback only. Use this only if the backend returned tokens manually. For normal use, click Connect Gmail instead.</p>
-            <div className="grid grid-2" style={{ marginTop: 14 }}>
-              <div><label className="label">Manual sender email</label><input className="input" value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="sender@gmail.com" /></div>
-              <div><label className="label">Client ID</label><input className="input" value={manualClientId} onChange={(e) => setManualClientId(e.target.value)} placeholder="optional if saved above" /></div>
-            </div>
-            <label className="label" style={{ marginTop: 10 }}>Access token</label>
-            <input className="input" value={manualAccessToken} onChange={(e) => setManualAccessToken(e.target.value)} placeholder="advanced only" />
-            <label className="label" style={{ marginTop: 10 }}>Refresh token</label>
-            <input className="input" value={manualRefreshToken} onChange={(e) => setManualRefreshToken(e.target.value)} placeholder="advanced only" />
-            <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={addManualAccount}>Add / Update Sender</button></div>
-          </div> : null}
-
-          <div className="table-wrap" style={{ marginTop: 14 }}>
-            <table>
-              <thead><tr><th>Use</th><th>Email</th><th>Status</th><th>Sent Today</th><th>Action</th></tr></thead>
-              <tbody>
-                {accounts.map((account) => (
-                  <tr key={account.id}>
-                    <td><input type="checkbox" disabled={account.status !== 'connected' || isPaused(account)} checked={!!selectedAccounts[account.id]} onChange={(e) => setSelectedAccounts((cur) => ({ ...cur, [account.id]: e.target.checked }))} /></td>
-                    <td><strong>{account.email}</strong><br /><span className="muted">{account.last_error || (account.paused_until ? `Paused until ${new Date(account.paused_until).toLocaleString()}` : 'Ready')}</span></td>
-                    <td><span className={`status ${account.status}`}>{isPaused(account) ? 'paused' : account.status}</span></td>
-                    <td>{Number(account.sent_today || 0).toLocaleString()}</td>
-                    <td><button className="btn secondary" type="button" disabled={busy || !(account.access_token || account.refresh_token)} onClick={() => verifySenderProfile(account)}>Verify Profile</button></td>
-                  </tr>
-                ))}
-                {!accounts.length ? <tr><td colSpan={5} className="muted">No Gmail senders connected yet.</td></tr> : null}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: 18 }}>
-          <h3>Templates</h3>
-          <p className="muted">Use shortcodes like {'{name}'}, {'{business}'}, {'{category}'}, {'{location}'}, {'{website}'}, {'{domain}'}, {'{email}'}.</p>
-          <div className="grid grid-2">
-            <div><label className="label">Template</label><select className="select" value={templateId} onChange={(e) => { const t = templates.find((x) => x.id === e.target.value); if (t) loadTemplateIntoEditor(t); else setTemplateId(e.target.value); }}><option value="">Select template</option>{templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-            <div><label className="label">Name</label><input className="input" value={templateName} onChange={(e) => setTemplateName(e.target.value)} /></div>
-          </div>
-          <label className="label" style={{ marginTop: 10 }}>Primary subject</label>
-          <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
-          <label className="label" style={{ marginTop: 10 }}>Extra subject variants, one per line</label>
-          <textarea className="textarea" style={{ minHeight: 80 }} value={subjectVariants} onChange={(e) => setSubjectVariants(e.target.value)} />
-          <label className="label" style={{ marginTop: 10 }}>Message</label>
-          <textarea className="textarea" value={message} onChange={(e) => setMessage(e.target.value)} />
-          <div className="actions" style={{ marginTop: 12 }}>
-            <button className="btn" type="button" onClick={saveTemplate} disabled={busy}>Save New Template</button>
-            <button className="btn secondary" type="button" onClick={updateTemplateFromEditor} disabled={busy || !currentTemplate}>Update Selected</button>
-          </div>
-        </div>
-      </div>
-
-      <div className="card" style={{ padding: 18 }}>
-        <h3>Batch Send</h3>
+        <h3>Send Message</h3>
         <div className="grid grid-4">
-          <div><label className="label">Fixed number to send</label><input className="input" type="number" min={1} max={MAX_MESSAGE_BATCH_SIZE} value={sendLimit} onChange={(e) => setSendLimit(Number(e.target.value || 50))} /><p className="muted" style={{ fontSize: 12 }}>If no contacts are selected, Scout pulls the next Ready-to-message contacts from Supabase, not only the 100-row preview.</p></div>
-          <div><label className="label">Delay per email/ms</label><input className="input" type="number" min={0} max={60000} value={delayMs} onChange={(e) => setDelayMs(Number(e.target.value || 0))} /></div>
-          <div><label className="label">Selected contacts</label><div className="badge">{selectedContactIds.length ? selectedContactIds.length.toLocaleString() : 'Auto next Ready'}</div></div>
-          <div><label className="label">Selected senders</label><div className="badge">{selectedAccountIds.length.toLocaleString()}</div></div>
+          <div>
+            <label className="label">Message category</label>
+            <select className="select" value={categoryId} onChange={(e) => selectCategory(e.target.value)}>
+              <option value="">All categories</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Business category filter</label>
+            <input className="input" value={businessCategoryFilter} onChange={(e) => setBusinessCategoryFilter(e.target.value)} placeholder="Optional: Shopify, Airtable..." />
+          </div>
+          <div>
+            <label className="label">Fixed number to send</label>
+            <input className="input" type="number" min={1} max={MAX_MESSAGE_BATCH_SIZE} value={sendLimit} onChange={(e) => setSendLimit(Number(e.target.value || 1000))} />
+          </div>
+          <div>
+            <label className="label">Delay per email/ms</label>
+            <input className="input" type="number" min={0} max={60000} value={delayMs} onChange={(e) => setDelayMs(Number(e.target.value || 0))} />
+          </div>
         </div>
-        <label className="checkbox-row"><input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> Dry run only. Prepare/log without sending real Gmail messages.</label>
-        <div className="actions">
-          <button className="btn" type="button" onClick={sendBatch} disabled={busy || loading}>Start Fixed Batch</button>
-          <button className="btn secondary" type="button" onClick={refreshAll} disabled={busy || loading}>Refresh</button>
-          <button className="btn secondary" type="button" onClick={repairReadyContacts} disabled={busy || loading}>Repair Ready List</button>
-          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-message-last-send-results.csv', lastResults)}>Download Last Results</button>
+        <div className="actions" style={{ marginTop: 12 }}>
+          <label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={rotateTemplates} onChange={(e) => setRotateTemplates(e.target.checked)} /> Rotate templates from selected category</label>
+          <label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> Dry run</label>
+          <button className="btn" type="button" disabled={busy || loading} onClick={() => sendBatch()}>Start Batch</button>
+          <button className="btn secondary" type="button" disabled={busy || loading} onClick={refreshAll}>Refresh</button>
+          <button className="btn secondary" type="button" disabled={busy || loading} onClick={repairReadyContacts}>Repair Ready</button>
+          <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-message-last-results.csv', lastResults)}>Download Results</button>
         </div>
         <div className="grid grid-4" style={{ marginTop: 14 }}>
           <div className="card kpi"><div className="title">Requested</div><div className="num">{summary.requested}</div></div>
           <div className="card kpi"><div className="title">Attempted</div><div className="num">{summary.attempted}</div></div>
           <div className="card kpi"><div className="title">Sent</div><div className="num">{summary.sent}</div></div>
-          <div className="card kpi"><div className="title">Failed/Skipped</div><div className="num">{summary.failed + summary.skipped}</div></div>
+          <div className="card kpi"><div className="title">Failed / Skipped</div><div className="num">{summary.failed + summary.skipped}</div></div>
         </div>
       </div>
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <div className="actions" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-            <h3 style={{ margin: 0 }}>Ready To Message</h3>
-            <div className="actions"><input className="input" style={{ width: 260 }} value={readySearch} onChange={(e) => setReadySearch(e.target.value)} placeholder="Search ready contacts" onKeyDown={(e) => { if (e.key === 'Enter') loadReadyContacts(); }} /><button className="btn secondary" type="button" onClick={loadReadyContacts}>Search</button></div>
+          <h3>Message Library</h3>
+          <div className="notice">Shortcodes: {SHORTCODES.map((s) => <code key={s}>{s}</code>)}</div>
+          <div className="grid grid-2" style={{ marginTop: 12 }}>
+            <div><label className="label">New / selected category name</label><input className="input" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} /></div>
+            <div><label className="label">Category note</label><input className="input" value={newCategoryDescription} onChange={(e) => setNewCategoryDescription(e.target.value)} /></div>
           </div>
-          <div className="actions" style={{ marginBottom: 12 }}><label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={readyContacts.length > 0 && selectedContactIds.length === readyContacts.length} onChange={(e) => toggleAllContacts(e.target.checked)} /> Select current page</label><span className="badge">Showing {readyContacts.length.toLocaleString()} of {readyTotal.toLocaleString()} ready-to-message</span></div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Use</th><th>Business</th><th>Email</th><th>Website</th></tr></thead>
-              <tbody>
-                {readyContacts.map((b) => <tr key={b.id}><td><input type="checkbox" checked={!!selectedContacts[b.id]} onChange={(e) => setSelectedContacts((cur) => ({ ...cur, [b.id]: e.target.checked }))} /></td><td><strong>{b.name || '-'}</strong><br /><span className="muted">{b.category || ''} {b.location ? `· ${b.location}` : ''}</span></td><td>{b.email}</td><td>{b.website || b.domain || '-'}</td></tr>)}
-                {!readyContacts.length ? <tr><td colSpan={4} className="muted">No Ready-to-message contacts found. Import contacts with emails, run Ready Email Detection, or click Repair Ready List.</td></tr> : null}
-              </tbody>
-            </table>
+          <div className="actions" style={{ marginTop: 10 }}><button className="btn secondary" type="button" onClick={saveCategory} disabled={busy}>Save Category</button><button className="btn secondary" type="button" onClick={useFollowUpTemplate}>Use Follow-up Draft</button></div>
+          <div className="grid grid-2" style={{ marginTop: 12 }}>
+            <div><label className="label">Template</label><select className="select" value={templateId} onChange={(e) => { const t = templates.find((x) => x.id === e.target.value); if (t) loadTemplateIntoEditor(t); else setTemplateId(e.target.value); }}><option value="">Select template</option>{categoryTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+            <div><label className="label">Template name</label><input className="input" value={templateName} onChange={(e) => setTemplateName(e.target.value)} /></div>
           </div>
+          <label className="label" style={{ marginTop: 10 }}>Primary subject</label><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
+          <label className="label" style={{ marginTop: 10 }}>Extra subject variants</label><textarea className="textarea" style={{ minHeight: 70 }} value={subjectVariants} onChange={(e) => setSubjectVariants(e.target.value)} />
+          <label className="label" style={{ marginTop: 10 }}>Message</label><textarea className="textarea" value={message} onChange={(e) => setMessage(e.target.value)} />
+          <div className="actions" style={{ marginTop: 12 }}><button className="btn" type="button" onClick={saveTemplate} disabled={busy}>Save New Template</button><button className="btn secondary" type="button" onClick={updateTemplateFromEditor} disabled={busy || !currentTemplate}>Update Selected</button></div>
         </div>
 
         <div className="card" style={{ padding: 18 }}>
-          <h3>Message Preview</h3>
-          {previewBusiness && currentTemplate ? <>
-            <p className="muted">Previewing with: <strong>{previewBusiness.name || previewBusiness.email}</strong></p>
-            <label className="label">Subject</label>
-            <div className="notice">{previewSubject}</div>
-            <label className="label" style={{ marginTop: 12 }}>Body</label>
-            <div className="card" style={{ padding: 14, whiteSpace: 'pre-wrap' }}>{previewBody}</div>
-          </> : <p className="muted">Select a template and load Ready-to-message contacts to preview.</p>}
-        </div>
-      </div>
-
-      <div className="grid grid-2">
-        <div className="card" style={{ padding: 18 }}>
-          <h3>Template Performance</h3>
-          <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Real Replies</th><th>Emails / Reply</th></tr></thead><tbody>
-            {templatePerformance().map((row) => <tr key={row.template.id}><td>{row.template.name}</td><td>{row.sent}</td><td>{row.replies}</td><td>{row.perReply}</td></tr>)}
-            {!templates.length ? <tr><td colSpan={4} className="muted">No templates yet.</td></tr> : null}
+          <h3>Gmail Senders</h3>
+          <div className="grid grid-2">
+            <div><label className="label">Google OAuth Client ID</label><input className="input" value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} placeholder="Paste once" /></div>
+            <div style={{ display: 'flex', alignItems: 'end' }}><button className="btn" type="button" onClick={startGmailOauth}>Connect Gmail</button></div>
+          </div>
+          <button className="btn secondary" type="button" style={{ marginTop: 10 }} onClick={() => setShowAdvancedTokens((v) => !v)}>Advanced manual sender</button>
+          {showAdvancedTokens ? <div className="card" style={{ padding: 12, marginTop: 10 }}>
+            <div className="grid grid-2"><div><label className="label">Sender email</label><input className="input" value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} /></div><div><label className="label">Client ID</label><input className="input" value={manualClientId} onChange={(e) => setManualClientId(e.target.value)} /></div></div>
+            <label className="label" style={{ marginTop: 10 }}>Access token</label><input className="input" value={manualAccessToken} onChange={(e) => setManualAccessToken(e.target.value)} />
+            <label className="label" style={{ marginTop: 10 }}>Refresh token</label><input className="input" value={manualRefreshToken} onChange={(e) => setManualRefreshToken(e.target.value)} />
+            <button className="btn secondary" type="button" style={{ marginTop: 10 }} disabled={busy} onClick={addManualAccount}>Add / Update Sender</button>
+          </div> : null}
+          <div className="table-wrap" style={{ marginTop: 14 }}><table><thead><tr><th>Use</th><th>Email</th><th>Status</th><th>Sent Today</th><th>Action</th></tr></thead><tbody>
+            {accounts.map((account) => <tr key={account.id}><td><input type="checkbox" disabled={account.status !== 'connected' || isPaused(account)} checked={!!selectedAccounts[account.id]} onChange={(e) => setSelectedAccounts((cur) => ({ ...cur, [account.id]: e.target.checked }))} /></td><td><strong>{account.email}</strong><br /><span className="muted">{account.last_error || (account.paused_until ? `Paused until ${new Date(account.paused_until).toLocaleString()}` : 'Ready')}</span></td><td><span className={`status ${account.status}`}>{isPaused(account) ? 'paused' : account.status}</span></td><td>{Number(account.sent_today || 0).toLocaleString()}</td><td><button className="btn secondary" type="button" disabled={busy || !(account.access_token || account.refresh_token)} onClick={() => verifySenderProfile(account)}>Verify</button></td></tr>)}
+            {!accounts.length ? <tr><td colSpan={5} className="muted">No senders connected.</td></tr> : null}
           </tbody></table></div>
         </div>
+      </div>
+
+      <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <h3>Sender Performance</h3>
-          <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Sent</th><th>Real Replies</th><th>Emails / Reply</th></tr></thead><tbody>
-            {accountPerformance().map((row) => <tr key={row.account.id}><td>{row.account.email}</td><td>{row.sent}</td><td>{row.replies}</td><td>{row.perReply}</td></tr>)}
-            {!accounts.length ? <tr><td colSpan={4} className="muted">No sender accounts yet.</td></tr> : null}
+          <div className="actions" style={{ justifyContent: 'space-between', marginBottom: 12 }}><h3 style={{ margin: 0 }}>Ready Contacts</h3><div className="actions"><input className="input" style={{ width: 260 }} value={readySearch} onChange={(e) => setReadySearch(e.target.value)} placeholder="Search contacts" onKeyDown={(e) => { if (e.key === 'Enter') loadReadyContacts(); }} /><button className="btn secondary" type="button" onClick={loadReadyContacts}>Search</button></div></div>
+          <div className="actions" style={{ marginBottom: 12 }}><label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={readyContacts.length > 0 && selectedContactIds.length === readyContacts.length} onChange={(e) => toggleAllContacts(e.target.checked)} /> Select preview page</label><span className="badge">Showing {readyContacts.length.toLocaleString()} of {readyTotal.toLocaleString()}</span></div>
+          <div className="table-wrap"><table><thead><tr><th>Use</th><th>Business</th><th>Email</th><th>Category</th></tr></thead><tbody>
+            {readyContacts.map((b) => <tr key={b.id}><td><input type="checkbox" checked={!!selectedContacts[b.id]} onChange={(e) => setSelectedContacts((cur) => ({ ...cur, [b.id]: e.target.checked }))} /></td><td><strong>{b.name || '-'}</strong><br /><span className="muted">{b.website || b.domain || ''}</span></td><td>{b.email}</td><td>{b.category || '-'}</td></tr>)}
+            {!readyContacts.length ? <tr><td colSpan={4} className="muted">No Ready contacts found.</td></tr> : null}
+          </tbody></table></div>
+        </div>
+
+        <div className="card" style={{ padding: 18 }}>
+          <h3>Preview</h3>
+          {previewBusiness && currentTemplate ? <><p className="muted">{previewBusiness.name || previewBusiness.email}</p><label className="label">Subject</label><div className="notice">{previewSubject}</div><label className="label" style={{ marginTop: 12 }}>Body</label><div className="card" style={{ padding: 14, whiteSpace: 'pre-wrap' }}>{previewBody}</div></> : <p className="muted">Select a template and load contacts.</p>}
+          <h3 style={{ marginTop: 18 }}>Recent Sent Logs</h3>
+          <div className="table-wrap"><table><thead><tr><th>To</th><th>From</th><th>Status</th><th>When</th></tr></thead><tbody>
+            {recentSent.slice(0, 8).map((row) => <tr key={row.id}><td>{row.to_email}</td><td>{row.from_email}</td><td>{row.status}</td><td>{row.sent_at ? new Date(row.sent_at).toLocaleString() : '-'}</td></tr>)}
+            {!recentSent.length ? <tr><td colSpan={4} className="muted">No sent logs yet.</td></tr> : null}
+          </tbody></table></div>
+        </div>
+      </div>
+
+      <div className="grid grid-2">
+        <div className="card" style={{ padding: 18 }}>
+          <h3>Follow-ups</h3>
+          <p className="muted">Contacts become due 72 hours after a sent message when there is no real reply and no no-inbox/bounce record.</p>
+          <div className="grid grid-2"><div><label className="label">Schedule due follow-ups for</label><input className="input" type="datetime-local" value={followUpFor} onChange={(e) => setFollowUpFor(e.target.value)} /></div><div style={{ display: 'flex', alignItems: 'end' }}><button className="btn secondary" type="button" disabled={busy || !dueFollowUps.length} onClick={scheduleFollowUpsForDue}>Schedule Due Follow-ups</button></div></div>
+          <div className="actions" style={{ marginTop: 12 }}><button className="btn" type="button" disabled={busy || !dueFollowUps.length} onClick={sendDueFollowUpsNow}>Send Due Follow-ups Now</button><button className="btn secondary" type="button" onClick={loadDueFollowUps}>Refresh Due</button></div>
+          <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Business</th><th>Email</th><th>Last Sent</th><th>Subject</th></tr></thead><tbody>
+            {dueFollowUps.map((row) => <tr key={`${row.business_id}-${row.last_sent_at}`}><td>{row.business_name || '-'}</td><td>{row.to_email}</td><td>{new Date(row.last_sent_at).toLocaleString()}</td><td>{row.last_subject || '-'}</td></tr>)}
+            {!dueFollowUps.length ? <tr><td colSpan={4} className="muted">No follow-ups due.</td></tr> : null}
+          </tbody></table></div>
+        </div>
+
+        <div className="card" style={{ padding: 18 }}>
+          <h3>Schedules</h3>
+          <div className="grid grid-3"><div><label className="label">Type</label><select className="select" value={scheduleType} onChange={(e) => setScheduleType(e.target.value as 'initial' | 'follow_up')}><option value="initial">Initial batch</option><option value="follow_up">Follow-up</option></select></div><div><label className="label">Date & time</label><input className="input" type="datetime-local" value={scheduleFor} onChange={(e) => setScheduleFor(e.target.value)} /></div><div><label className="label">Count</label><input className="input" type="number" value={scheduleCount} onChange={(e) => setScheduleCount(Number(e.target.value || 1000))} /></div></div>
+          <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={saveSchedule}>Save Schedule</button><button className="btn" type="button" disabled={busy} onClick={sendDueSchedulesNow}>Send Due Schedule Now</button></div>
+          <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Type</th><th>For</th><th>Count</th><th>Status</th></tr></thead><tbody>
+            {schedules.map((s) => <tr key={s.id}><td>{s.type}</td><td>{new Date(s.scheduled_for).toLocaleString()}</td><td>{Number(s.target_count || 0).toLocaleString()}</td><td>{s.status}</td></tr>)}
+            {!schedules.length ? <tr><td colSpan={4} className="muted">No schedules yet.</td></tr> : null}
           </tbody></table></div>
         </div>
       </div>

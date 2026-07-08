@@ -8,7 +8,7 @@ export default async function MessagePage() {
     <div className="stack">
       <div className="page-title">
         <h2>Message</h2>
-        <p>Send messages to Ready contacts. If nothing is selected, this page pulls the next Ready-to-message contacts from Supabase, not just the preview table.</p>
+        <p>Library, sender rotation, ready contacts, scheduled batches, and 72-hour follow-ups.</p>
       </div>
       <EmailScoutClient workspace={workspace} />
     </div>
