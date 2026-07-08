@@ -131,6 +131,11 @@ function isLimitPayload(json: any, result?: SendResult) {
   return json?.forceStopped || result?.stopBatch || code.includes('limit') || message.includes('limit reached') || message.includes('sending limit') || message.includes('quota');
 }
 
+function isBlockedPayload(json: any, result?: SendResult) {
+  const text = [json?.error, json?.message, json?.code, result?.status, result?.reason, result?.code].filter(Boolean).join(' ').toLowerCase();
+  return text.includes('message blocked') || text.includes('blocked') || text.includes('policy') || text.includes('spam') || text.includes('rejected');
+}
+
 function toDateTomorrow() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -162,6 +167,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
   const [selectedContacts, setSelectedContacts] = useState<Record<string, boolean>>({});
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, boolean>>({});
+  const [senderRunLimits, setSenderRunLimits] = useState<Record<string, string>>({});
   const [specificSenderId, setSpecificSenderId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [templateId, setTemplateId] = useState('');
@@ -177,7 +183,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [scheduleCount, setScheduleCount] = useState(1000);
   const [followUpFor, setFollowUpFor] = useState(inHours(2));
 
-  const [status, setStatus] = useState('Select a category, template option, sender option, and fixed number.');
+  const [status, setStatus] = useState('Select category, template option, sender option, total count, and optional per-sender caps.');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -310,6 +316,18 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     return connectedAccounts.filter((a) => selectedAccounts[a.id]);
   }
 
+  function senderCap(account: GmailAccount) {
+    const raw = senderRunLimits[account.id];
+    if (raw === undefined || raw === null || String(raw).trim() === '') return Number.POSITIVE_INFINITY;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return Number.POSITIVE_INFINITY;
+    return Math.floor(parsed);
+  }
+
+  function describeSenderCaps(accountsToUse: GmailAccount[]) {
+    return accountsToUse.map((account) => `${account.email}: ${Number.isFinite(senderCap(account)) ? senderCap(account).toLocaleString() : 'auto'}`).join(' · ');
+  }
+
   async function getContactsForSend(limitOverride?: number, contactsOverride?: Business[]) {
     const selected = contactsOverride || readyContacts.filter((b) => selectedContacts[b.id]);
     const unique = new Map<string, Business>();
@@ -429,12 +447,16 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     try {
       const templatePool = templatesForSend();
       if (!templatePool.length) throw new Error('Create/select at least one template in Templates first.');
-      const contacts = await getContactsForSend(options?.limit, contactsOverride);
-      if (!contacts.length) throw new Error('No Ready contacts with email found.');
       let activeAccounts = accountsForSend();
       if (!activeAccounts.length) throw new Error('Connect Gmail in Settings, then select at least one connected sender here.');
+      const totalRequested = Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(options?.limit || sendLimit || 1000)));
+      const finiteCapSum = activeAccounts.reduce((sum, account) => sum + (Number.isFinite(senderCap(account)) ? senderCap(account) : 0), 0);
+      const everySenderCapped = activeAccounts.every((account) => Number.isFinite(senderCap(account)));
+      const effectiveLimit = everySenderCapped ? Math.min(totalRequested, finiteCapSum || totalRequested) : totalRequested;
+      const contacts = await getContactsForSend(effectiveLimit, contactsOverride);
+      if (!contacts.length) throw new Error('No Ready contacts with email found.');
 
-      const batchId = `scout_v818_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const batchId = `scout_v821_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const { error: batchError } = await supabase.from('outreach_batches').insert({
         id: batchId,
         workspace_id: workspace.id,
@@ -442,19 +464,20 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         requested_count: contacts.length,
         selected_sender_count: activeAccounts.length,
         status: dryRun ? 'dry_run' : 'running',
-        raw: { selected_accounts: activeAccounts.map((a) => a.email), dryRun, delayMs, templateMode, senderMode, categoryId, businessCategoryFilter, isFollowUp: !!options?.isFollowUp }
+        raw: { selected_accounts: activeAccounts.map((a) => a.email), sender_run_limits: Object.fromEntries(activeAccounts.map((a) => [a.email, Number.isFinite(senderCap(a)) ? senderCap(a) : 'auto'])), dryRun, delayMs, templateMode, senderMode, categoryId, businessCategoryFilter, isFollowUp: !!options?.isFollowUp }
       });
       if (batchError) throw batchError;
 
       const rowsForDownload: Array<Record<string, unknown>> = [];
       let cursor = 0;
+      const sentBySender: Record<string, number> = Object.fromEntries(activeAccounts.map((a) => [a.id, 0]));
       let attempted = 0;
       let sent = 0;
       let failed = 0;
       let skipped = 0;
       let stopped = false;
       const requested = contacts.length;
-      setStatus(`Sending ${requested.toLocaleString()} message(s).`);
+      setStatus(`Sending ${requested.toLocaleString()} message(s). Sender caps: ${describeSenderCaps(activeAccounts)}.`);
 
       for (let i = 0; i < contacts.length; i++) {
         if (!activeAccounts.length) {
@@ -464,7 +487,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           break;
         }
         const business = contacts[i];
-        const account = senderMode === 'specific' ? activeAccounts[0] : activeAccounts[cursor % activeAccounts.length];
+        const eligibleAccounts = activeAccounts.filter((account) => (sentBySender[account.id] || 0) < senderCap(account));
+        if (!eligibleAccounts.length) {
+          stopped = true;
+          skipped += contacts.length - i;
+          setStatus('All selected Gmail senders reached their run caps or were paused. Remaining contacts stayed Ready.');
+          break;
+        }
+        const account = senderMode === 'specific' ? eligibleAccounts[0] : eligibleAccounts[cursor % eligibleAccounts.length];
         const template = templateMode === 'specific' ? templatePool[0] : templatePool[i % templatePool.length];
         cursor += 1;
         const payload = buildContactPayload(business, template, i);
@@ -510,15 +540,18 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         }
 
         if (!response.ok || json?.success === false) {
+          const blocked = isBlockedPayload(json, result);
+          const failedStatus = blocked ? 'message_blocked' : 'failed';
           const reason = json?.error || result.reason || `Send failed with HTTP ${response.status}`;
           failed += 1;
-          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, template: template.name, status: 'failed', reason });
-          await persistSendOutcome({ business, template, account, result: { ...result, status: 'failed', reason }, batchId, subject: payload.subject, body: payload.message, dryRun, isFollowUp: options?.isFollowUp });
-          await logOutreachEvent({ batch_id: batchId, business_id: business.id, gmail_account_id: account.id, template_id: template.id, type: 'send_failed', message: reason, raw: json });
+          rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, template: template.name, status: failedStatus, reason });
+          await persistSendOutcome({ business, template, account, result: { ...result, status: failedStatus, reason, code: result.code || (blocked ? 'message_blocked' : undefined) }, batchId, subject: payload.subject, body: payload.message, dryRun, isFollowUp: options?.isFollowUp });
+          await logOutreachEvent({ batch_id: batchId, business_id: business.id, gmail_account_id: account.id, template_id: template.id, type: failedStatus, message: reason, raw: json });
         } else if (statusText === 'sent' || statusText === 'dry_run') {
           if (statusText === 'sent') sent += 1; else skipped += 1;
           rowsForDownload.push({ business: business.name, email: business.email, sender: account.email, template: template.name, status: statusText, subject: payload.subject, gmailMessageId: result.gmailMessageId || '' });
           await persistSendOutcome({ business, template, account, result: { ...result, status: statusText }, batchId, subject: payload.subject, body: payload.message, dryRun, isFollowUp: options?.isFollowUp });
+          if (statusText === 'sent') sentBySender[account.id] = (sentBySender[account.id] || 0) + 1;
           await logOutreachEvent({ batch_id: batchId, business_id: business.id, gmail_account_id: account.id, template_id: template.id, type: statusText, message: `${statusText}: ${payload.email}`, raw: result });
         } else {
           skipped += 1;
@@ -562,7 +595,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         target_count: Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(scheduleCount || sendLimit || 1000))),
         scheduled_for: new Date(scheduleFor).toISOString(),
         status: 'scheduled',
-        raw: { business_category_filter: businessCategoryFilter, template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), delay_ms: delayMs, dry_run: dryRun }
+        raw: { business_category_filter: businessCategoryFilter, template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])), delay_ms: delayMs, dry_run: dryRun }
       });
       if (insertError) throw insertError;
       setStatus('Schedule saved with the current template and sender options.');
@@ -591,7 +624,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         target_count: dueFollowUps.length,
         scheduled_for: new Date(followUpFor).toISOString(),
         status: 'scheduled',
-        raw: { due_mode: true, followup_after_hours: 72, due_business_ids: dueFollowUps.map((d) => d.business_id), template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email) }
+        raw: { due_mode: true, followup_after_hours: 72, due_business_ids: dueFollowUps.map((d) => d.business_id), template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])) }
       });
       if (insertError) throw insertError;
       setStatus(`Scheduled ${dueFollowUps.length.toLocaleString()} due follow-up(s).`);
@@ -629,6 +662,37 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     }
     await supabase.from('message_schedules').update({ status: 'sent', updated_at: new Date().toISOString() }).eq('workspace_id', workspace.id).eq('id', first.id);
     await loadSchedules();
+  }
+
+  async function syncBlockedAndBounced() {
+    const selected = accountsForSend();
+    if (!selected.length) return setError('Select at least one connected sender first.');
+    setBusy(true);
+    setError('');
+    try {
+      let scanned = 0;
+      let noInbox = 0;
+      let blocked = 0;
+      for (const account of selected) {
+        setStatus(`Checking ${account.email} for bounces, no-inbox, and blocked-message notices...`);
+        const response = await fetch('/api/gmail/sync-bounces', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspace_id: workspace.id, gmail_account_id: account.id })
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok || json?.success === false) throw new Error(json?.error || `Bounce sync failed for ${account.email}`);
+        scanned += Number(json.scanned || 0);
+        noInbox += Number(json.noInbox || 0);
+        blocked += Number(json.blocked || 0);
+      }
+      setStatus(`Bounce/block sync finished. Scanned ${scanned}, no-inbox/bounce ${noInbox}, message-blocked ${blocked}.`);
+      await Promise.all([loadRecentSent(), loadDueFollowUps()]);
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function toggleAllContacts(value: boolean) {
@@ -680,8 +744,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             <h3>Sender Choice</h3>
             <label className="checkbox-row"><input type="radio" checked={senderMode === 'specific'} onChange={() => setSenderMode('specific')} /> Use one selected Gmail</label>
             <label className="checkbox-row"><input type="radio" checked={senderMode === 'rotate'} onChange={() => setSenderMode('rotate')} /> Rotate selected Gmail senders</label>
-            {senderMode === 'specific' ? <select className="select" value={specificSenderId} onChange={(e) => setSpecificSenderId(e.target.value)}><option value="">Select sender</option>{connectedAccounts.map((a) => <option key={a.id} value={a.id}>{a.email}</option>)}</select> : <div className="stack" style={{ gap: 6 }}>{connectedAccounts.map((a) => <label key={a.id} className="checkbox-row"><input type="checkbox" checked={!!selectedAccounts[a.id]} onChange={(e) => setSelectedAccounts((cur) => ({ ...cur, [a.id]: e.target.checked }))} /> {a.email}</label>)}</div>}
+            {senderMode === 'specific' ? <select className="select" value={specificSenderId} onChange={(e) => setSpecificSenderId(e.target.value)}><option value="">Select sender</option>{connectedAccounts.map((a) => <option key={a.id} value={a.id}>{a.email}</option>)}</select> : <div className="stack" style={{ gap: 8 }}>{connectedAccounts.map((a) => <div key={a.id} className="card" style={{ padding: 10 }}><label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={!!selectedAccounts[a.id]} onChange={(e) => setSelectedAccounts((cur) => ({ ...cur, [a.id]: e.target.checked }))} /> {a.email}</label><div className="grid grid-2" style={{ marginTop: 8 }}><div><label className="label">Max this run</label><input className="input" type="number" min={1} placeholder="Auto" value={senderRunLimits[a.id] || ''} onChange={(e) => setSenderRunLimits((cur) => ({ ...cur, [a.id]: e.target.value }))} /></div><div><label className="label">Sent today</label><div className="notice">{Number(a.sent_today || 0).toLocaleString()} / {Number(a.daily_limit || 0).toLocaleString()}</div></div></div></div>)}</div>}
+            {senderMode === 'specific' && specificSenderId ? <div style={{ marginTop: 10 }}><label className="label">Max this selected sender should send in this run</label><input className="input" type="number" min={1} placeholder="Use total count" value={senderRunLimits[specificSenderId] || ''} onChange={(e) => setSenderRunLimits((cur) => ({ ...cur, [specificSenderId]: e.target.value }))} /></div> : null}
             {!connectedAccounts.length ? <div className="notice" style={{ marginTop: 10 }}>No connected senders. <Link href="/settings">Connect Gmail in Settings</Link>.</div> : null}
+            <p className="muted" style={{ marginTop: 10 }}>Total count controls the whole run. Per-sender caps control how much each selected Gmail contributes. Blank means auto-fill the remaining rotation.</p>
           </div>
         </div>
 
@@ -690,6 +756,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           <button className="btn" type="button" disabled={busy || loading} onClick={() => sendBatch()}>Start Batch</button>
           <button className="btn secondary" type="button" disabled={busy || loading} onClick={refreshAll}>Refresh</button>
           <button className="btn secondary" type="button" disabled={busy || loading} onClick={repairReadyContacts}>Repair Ready</button>
+          <button className="btn secondary" type="button" disabled={busy || loading} onClick={syncBlockedAndBounced}>Sync Bounces/Blocked</button>
           <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-message-last-results.csv', lastResults)}>Download Results</button>
         </div>
       </div>

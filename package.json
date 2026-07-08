@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-20-dashboard-analytics",
-  "version": "8.20.0",
+  "name": "scout-app-v8-21-message-blocked-sender-caps",
+  "version": "8.21.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.20: home/dashboard analytics filters, period comparisons, and cleaner performance tracking."
+  "description": "Scout App v8.21: per-sender run caps, message blocked detection, bounce/no-inbox sync, and clearer deliverability controls."
 }

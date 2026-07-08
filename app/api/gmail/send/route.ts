@@ -18,6 +18,11 @@ function looksLikeLimit(message: string, status: number) {
   return status === 429 || text.includes('rate limit') || text.includes('daily') || text.includes('quota') || text.includes('user-rate') || text.includes('limit exceeded');
 }
 
+function looksLikeMessageBlocked(message: string, status: number) {
+  const text = message.toLowerCase();
+  return status === 403 || text.includes('message blocked') || text.includes('blocked') || text.includes('policy') || text.includes('spam') || text.includes('rejected');
+}
+
 async function refreshAccessToken(refreshToken: string) {
   const clientId = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -55,6 +60,7 @@ async function sendWithGmail(accessToken: string, from: string, to: string, subj
     err.status = response.status;
     err.payload = json;
     err.limitHit = looksLikeLimit(msg, response.status);
+    (err as Error & { blocked?: boolean }).blocked = looksLikeMessageBlocked(msg, response.status);
     throw err;
   }
   return json as { id?: string; threadId?: string; labelIds?: string[] };
@@ -95,7 +101,7 @@ export async function POST(request: NextRequest) {
       const result = await sendWithGmail(accessToken, String(account.email), to, subject, body);
       return NextResponse.json({ success: true, access_token: accessToken, results: [{ status: 'sent', gmailMessageId: result.id || '', gmailThreadId: result.threadId || '', raw: result }] });
     } catch (sendErr) {
-      const err = sendErr as Error & { status?: number; payload?: unknown; limitHit?: boolean };
+      const err = sendErr as Error & { status?: number; payload?: unknown; limitHit?: boolean; blocked?: boolean };
       if (err.status === 401 && account.refresh_token) {
         const refreshed = await refreshAccessToken(String(account.refresh_token));
         accessToken = refreshed.access_token;
@@ -107,6 +113,10 @@ export async function POST(request: NextRequest) {
         const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         await supabase.from('gmail_accounts').update({ status: 'limit_hit', paused_until: until, last_error: err.message }).eq('workspace_id', workspaceId).eq('id', accountId);
         return NextResponse.json({ success: false, error: err.message, senderPausedUntil: until, results: [{ status: 'limit_hit', reason: err.message }] }, { status: 429 });
+      }
+      if (err.blocked) {
+        await supabase.from('gmail_accounts').update({ last_error: err.message }).eq('workspace_id', workspaceId).eq('id', accountId);
+        return NextResponse.json({ success: false, error: err.message, code: 'message_blocked', results: [{ status: 'message_blocked', code: 'message_blocked', reason: err.message }] }, { status: err.status || 403 });
       }
       throw err;
     }
