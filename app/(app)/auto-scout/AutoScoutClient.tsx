@@ -241,6 +241,27 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     }
   }
 
+
+  async function quarantineRepeatedEmails() {
+    setBusy(true);
+    try {
+      setMessage('Checking for the same email repeated across unrelated businesses...');
+      const res = await fetch('/api/research/quarantine-repeated-emails', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, limit: 50000 })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || 'Repeated-email guard request failed.');
+      setMessage(`Repeated-email guard complete. Checked ${Number(json.checkedGroups || 0).toLocaleString()} repeated email group(s); quarantined ${Number(json.quarantined || 0).toLocaleString()} suspicious business email(s). Those businesses are back in Review for re-scouting.`);
+      await loadStats();
+    } catch (error) {
+      setMessage(`Repeated-email cleanup failed: ${fmtError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function stopAutoScout() {
     stopRef.current = true;
     setMessage('Stopping Auto Scout after the current backend batch finishes...');
@@ -257,7 +278,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Auto Scout Control</h3>
-        <p className="muted">Auto Scout controls the queue and calls your backend email-finder. v8.16 rejects captcha/CDN/code false positives like e.d@aset.hcaptchabound, then searches deeper: homepage, contact/about/team/impressum/privacy pages, mailto links, obfuscated emails, and Cloudflare-protected emails where possible.</p>
+        <p className="muted">Auto Scout controls the queue and calls your backend email-finder. v8.17 rejects captcha/CDN/code false positives, blocks repeated emails across unrelated businesses, then searches deeper: homepage, contact/about/team/impressum/privacy pages, mailto links, obfuscated emails, and Cloudflare-protected emails where possible.</p>
         <div className="grid grid-4">
           <div><label className="label">Queue limit</label><input className="input" type="number" min={1} max={50000} value={queueLimit} onChange={(e) => setQueueLimit(Math.max(1, Math.min(50000, Number(e.target.value) || 5000)))} /><p className="muted">How many no-email businesses to add to the research queue.</p></div>
           <div><label className="label">Backend batch size</label><input className="input" type="number" min={1} max={500} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))} /><p className="muted">Maximum queued jobs sent to one Node API run.</p></div>
@@ -270,6 +291,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
           <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Run One Backend Batch</button>
           <button className="btn secondary" disabled={busy && !running} onClick={loadStats}>Refresh Progress</button>
           <button className="btn secondary" disabled={busy || running} onClick={quarantineFalsePositiveEmails}>Clean Bad Found Emails</button>
+          <button className="btn secondary" disabled={busy || running} onClick={quarantineRepeatedEmails}>Clean Repeated Emails</button>
         </div>
         <div className={message.toLowerCase().includes('failed') || message.toLowerCase().includes('error') ? 'error' : 'notice'} style={{ marginTop: 12 }}>{message}</div>
       </div>
@@ -301,7 +323,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       </div>
 
       <div className="notice">
-        <strong>Trust rule:</strong> Auto Scout can find email candidates, but a real inbox is only confirmed after sending and bounce/no-inbox detection. Emails are filtered before promotion, but a real inbox is only confirmed after sending and bounce/no-inbox detection.
+        <strong>Trust rule:</strong> Auto Scout can find email candidates, but a real inbox is only confirmed after sending and bounce/no-inbox detection. v8.17 also blocks one exact email from being promoted across unrelated businesses unless it has business-domain/source evidence.
       </div>
     </div>
   );

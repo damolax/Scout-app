@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-16-autoscout-quality-guard",
-  "version": "8.16.0",
+  "name": "scout-app-v8-17-autoscout-duplicate-guard",
+  "version": "8.17.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.16: stronger Auto Scout email rules, captcha/CDN false-positive quarantine, and source-backed email promotion."
+  "description": "Scout App v8.17: Auto Scout duplicate-email guard, suspicious repeated-email audit, and safer promotion rules."
 }

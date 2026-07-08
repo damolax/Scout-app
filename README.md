@@ -1,17 +1,15 @@
-# Scout App v8.16
+# Scout App v8.17
 
-Native Scout App with import, Auto Scout, Message, replies, and dashboard analytics.
+## v8.17 focus
 
-## v8.16 focus
+Auto Scout duplicate-email guard.
 
-- Message replaces Email Scout in the main flow.
-- Message library categories for different scouting angles.
-- Multiple templates per category.
-- Rotate templates only inside the selected category.
-- Ready contacts appear in Message.
-- Batch size is user controlled.
-- 72-hour follow-up due list.
-- Scheduled batches and follow-up schedules.
-- Template/sender analytics moved to Dashboard.
+This version keeps v8.16 strict email filtering and adds a second protection layer:
 
-Run the Supabase migration after deploying.
+- blocks one exact email from being promoted across unrelated businesses;
+- quarantines suspicious repeated emails already stored in the database;
+- keeps those businesses available for re-scouting instead of marking them Ready;
+- adds an Auto Scout button: **Clean Repeated Emails**;
+- stores the reason in `raw.repeated_email_guard` for audit.
+
+This is important because bad crawlers can scrape the same widget/captcha/script email-like string from many unrelated sites. Scout must not treat that as a real business inbox.

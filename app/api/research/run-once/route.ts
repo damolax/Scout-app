@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { chooseBestEmailCandidate, type EmailCandidateDecision } from '@/lib/email-candidate-rules';
 import { findEmailsDeepFromWebsite, type DeepWebsiteFinderResult } from '@/lib/website-email-finder';
+import { duplicateEmailRisk } from '@/lib/repeated-email-guard';
 
 function errorMessage(error: unknown) {
   if (!error) return 'Unknown error';
@@ -197,18 +198,43 @@ async function runOnce(request: NextRequest) {
       const enrichedResult = { ...merged.payload, email, emailDecision: decision, quality: decision.quality, sourceEvidence: decision.sourceEvidence, method: merged.method, backendError };
 
       if (email && decision.valid && decision.promote) {
-        await supabase.from('email_candidates').upsert({
-          workspace_id: job.workspace_id,
-          business_id: business.id,
-          email,
-          source: merged.method === 'deep_website_finder' ? `deep_${deepResult?.sourceType || 'website'}` : (decision.sourceEvidence ? 'backend_source_seen' : 'backend_domain_match'),
-          score: decision.score,
-          status: decision.sourceEvidence ? 'source_seen_candidate' : 'domain_match_candidate',
-          raw: enrichedResult
-        }, { onConflict: 'workspace_id,business_id,email' });
-        await supabase.from('businesses').update({ email, status: 'found', score: decision.score, raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
-        await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
-        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'found', email, method: merged.method, quality: decision.quality, evidence: decision.sourceEvidence, pagesChecked: deepResult?.pagesChecked || 0, reason: merged.reason || 'Email passed strict candidate rules.' });
+        const { data: sameEmailRows, error: sameEmailError } = await supabase
+          .from('businesses')
+          .select('id,name,email,website,domain,raw')
+          .eq('workspace_id', job.workspace_id)
+          .ilike('email', email)
+          .neq('id', business.id)
+          .limit(20);
+        if (sameEmailError) throw sameEmailError;
+        const duplicateRisk = duplicateEmailRisk(email, business, (sameEmailRows || []) as any[]);
+        if (duplicateRisk.risky) {
+          const guardedResult = { ...enrichedResult, duplicateEmailGuard: duplicateRisk };
+          await supabase.from('email_candidates').upsert({
+            workspace_id: job.workspace_id,
+            business_id: business.id,
+            email,
+            source: merged.method,
+            score: Math.min(decision.score, 35),
+            status: 'rejected_repeated_across_unrelated_businesses',
+            raw: guardedResult
+          }, { onConflict: 'workspace_id,business_id,email' });
+          await supabase.from('businesses').update({ email: null, status: 'review', raw: { ...(business.raw || {}), backend_email_research: guardedResult } }).eq('id', business.id);
+          await supabase.from('email_research_jobs').update({ status: 'done', result: guardedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
+          results.push({ job: job.id, business: business.id, businessName: business.name, status: 'rejected_repeated_email', email, method: merged.method, quality: 'repeated_email_guard', evidence: decision.sourceEvidence, pagesChecked: deepResult?.pagesChecked || 0, reason: duplicateRisk.reason });
+        } else {
+          await supabase.from('email_candidates').upsert({
+            workspace_id: job.workspace_id,
+            business_id: business.id,
+            email,
+            source: merged.method === 'deep_website_finder' ? `deep_${deepResult?.sourceType || 'website'}` : (decision.sourceEvidence ? 'backend_source_seen' : 'backend_domain_match'),
+            score: decision.score,
+            status: decision.sourceEvidence ? 'source_seen_candidate' : 'domain_match_candidate',
+            raw: enrichedResult
+          }, { onConflict: 'workspace_id,business_id,email' });
+          await supabase.from('businesses').update({ email, status: 'found', score: decision.score, raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
+          await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
+          results.push({ job: job.id, business: business.id, businessName: business.name, status: 'found', email, method: merged.method, quality: decision.quality, evidence: decision.sourceEvidence, pagesChecked: deepResult?.pagesChecked || 0, reason: merged.reason || 'Email passed strict candidate rules.' });
+        }
       } else if (email && decision.valid && !decision.promote) {
         await supabase.from('email_candidates').upsert({
           workspace_id: job.workspace_id,
