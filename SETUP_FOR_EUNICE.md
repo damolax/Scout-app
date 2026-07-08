@@ -1,12 +1,17 @@
-# Scout App v8.17 Setup
+# Setup for Eunice — v8.18
 
-Deploy the same way as previous versions.
+1. Push the zip contents to `damolax/Scout-app`.
+2. Deploy to Vercel.
+3. Open `/settings` and connect Gmail senders.
+4. Open `/templates` and create message categories such as:
+   - Airtable Google Map scouting
+   - Shopify design scouting
+   - Shopify marketing scouting
+5. Add multiple templates under each category.
+6. Open `/message` to choose category, template mode, sender mode, count, schedule, and send.
 
-After deployment:
+Google OAuth redirect URI for v8.18:
 
-1. Open Auto Scout.
-2. Click **Clean Bad Found Emails**.
-3. Click **Clean Repeated Emails**.
-4. Re-run Auto Scout on businesses moved back to Review.
+`https://scout-app-oyeola.vercel.app/settings`
 
-No new Supabase table is required for v8.17. It uses the existing `businesses`, `email_candidates`, and `email_research_jobs` tables.
+Also add the Vercel preview/alias domain if you deploy to another URL.

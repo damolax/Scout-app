@@ -1,16 +1,16 @@
 import { getCurrentWorkspace } from '@/lib/workspace';
-import MessageClient from './MessageClient';
+import TemplateLibraryClient from './TemplateLibraryClient';
 
-export default async function MessagePage() {
+export default async function TemplatesPage() {
   const { workspace, error } = await getCurrentWorkspace();
   if (!workspace) return <div className="error">Workspace error: {error}</div>;
   return (
     <div className="stack">
       <div className="page-title">
-        <h2>Message</h2>
-        <p>Select templates, senders, ready contacts, and schedules.</p>
+        <h2>Templates</h2>
+        <p>Create message categories and save multiple templates inside each category.</p>
       </div>
-      <MessageClient workspace={workspace} />
+      <TemplateLibraryClient workspace={workspace} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-17-autoscout-duplicate-guard",
-  "version": "8.17.0",
+  "name": "scout-app-v8-18-message-auth-templates",
+  "version": "8.18.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.17: Auto Scout duplicate-email guard, suspicious repeated-email audit, and safer promotion rules."
+  "description": "Scout App v8.18: dedicated template library, Message send controls, Gmail sender auth in Settings, and scheduling option cleanup."
 }

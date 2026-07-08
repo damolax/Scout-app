@@ -1,15 +1,13 @@
-# Scout App v8.17
+# Scout App v8.18
 
-## v8.17 focus
+v8.18 focuses on messaging readiness:
 
-Auto Scout duplicate-email guard.
+- Dedicated `/templates` page for categories and template library.
+- `/message` is now only for selecting templates, senders, ready contacts, sending, schedules, and follow-ups.
+- Gmail sender connection moved to `/settings`.
+- Message batches can use one selected template or rotate all templates in a category.
+- Message batches can use one selected Gmail sender or rotate selected Gmail senders.
+- Schedules store the chosen template/sender mode and selected senders in the schedule raw metadata.
+- `/email-scout` redirects to `/message`.
 
-This version keeps v8.16 strict email filtering and adds a second protection layer:
-
-- blocks one exact email from being promoted across unrelated businesses;
-- quarantines suspicious repeated emails already stored in the database;
-- keeps those businesses available for re-scouting instead of marking them Ready;
-- adds an Auto Scout button: **Clean Repeated Emails**;
-- stores the reason in `raw.repeated_email_guard` for audit.
-
-This is important because bad crawlers can scrape the same widget/captcha/script email-like string from many unrelated sites. Scout must not treat that as a real business inbox.
+Run the Supabase migration after deploying if your database has not been updated through v8.15+.

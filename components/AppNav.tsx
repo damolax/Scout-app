@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Upload, Building2, ShieldCheck, Search, Mail, MessageSquareReply, Ban, Settings, Database } from 'lucide-react';
+import { BarChart3, Upload, Building2, ShieldCheck, Search, Mail,  MessageSquareReply, Ban, Settings, Database } from 'lucide-react';
 
 const items = [
   { href: '/dashboard', label: 'Dashboard', icon: BarChart3 },
@@ -10,6 +10,7 @@ const items = [
   { href: '/businesses', label: 'Businesses', icon: Building2 },
   { href: '/verify', label: 'Verify Emails', icon: ShieldCheck },
   { href: '/auto-scout', label: 'Auto Scout', icon: Search },
+  { href: '/templates', label: 'Templates', icon: Mail },
   { href: '/message', label: 'Message', icon: Mail },
   { href: '/replies', label: 'Replies', icon: MessageSquareReply },
   { href: '/no-inbox', label: 'No Inbox', icon: Ban },
