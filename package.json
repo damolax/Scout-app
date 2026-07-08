@@ -1,5 +1,5 @@
 {
-  "name": "scout-app-v8-20-gmail-oauth-diagnostics",
+  "name": "scout-app-v8-20-dashboard-analytics",
   "version": "8.20.0",
   "private": true,
   "scripts": {
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.20: Gmail OAuth diagnostics, clearer errors, forced consent scopes, and sender persistence checks."
+  "description": "Scout App v8.20: home/dashboard analytics filters, period comparisons, and cleaner performance tracking."
 }

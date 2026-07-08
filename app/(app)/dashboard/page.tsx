@@ -1,34 +1,305 @@
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
 
-async function countRows(table: string, workspaceId: string, filter?: { column: string; value: unknown }) {
+type RangeKey = 'today' | 'yesterday' | 'last7' | 'last30' | 'last90' | 'all';
+
+type DashboardSearchParams = Promise<{ range?: string }> | { range?: string } | undefined;
+
+type CountFilter = { column: string; value: unknown };
+type DateWindow = { start?: Date; end?: Date };
+
+type PeriodDefinition = {
+  key: RangeKey;
+  label: string;
+  shortLabel: string;
+  current: DateWindow;
+  previous?: DateWindow;
+  compareLabel: string;
+};
+
+const rangeOptions: Array<{ key: RangeKey; label: string }> = [
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'last7', label: 'Last 7 days' },
+  { key: 'last30', label: 'Last 30 days' },
+  { key: 'last90', label: 'Last 3 months' },
+  { key: 'all', label: 'All time' }
+];
+
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function periodFor(key: string | undefined): PeriodDefinition {
+  const selected = rangeOptions.some((option) => option.key === key) ? (key as RangeKey) : 'today';
+  const now = new Date();
+  const todayStart = startOfDay(now);
+  const yesterdayStart = addDays(todayStart, -1);
+  const twoDaysAgo = addDays(todayStart, -2);
+
+  if (selected === 'yesterday') {
+    return {
+      key: 'yesterday',
+      label: 'Yesterday',
+      shortLabel: 'Yesterday',
+      current: { start: yesterdayStart, end: todayStart },
+      previous: { start: twoDaysAgo, end: yesterdayStart },
+      compareLabel: 'vs previous day'
+    };
+  }
+
+  if (selected === 'last7') {
+    const start = addDays(now, -7);
+    const previousStart = addDays(start, -7);
+    return {
+      key: 'last7',
+      label: 'Last 7 days',
+      shortLabel: '7 days',
+      current: { start, end: now },
+      previous: { start: previousStart, end: start },
+      compareLabel: 'vs previous 7 days'
+    };
+  }
+
+  if (selected === 'last30') {
+    const start = addDays(now, -30);
+    const previousStart = addDays(start, -30);
+    return {
+      key: 'last30',
+      label: 'Last 30 days',
+      shortLabel: '30 days',
+      current: { start, end: now },
+      previous: { start: previousStart, end: start },
+      compareLabel: 'vs previous 30 days'
+    };
+  }
+
+  if (selected === 'last90') {
+    const start = addDays(now, -90);
+    const previousStart = addDays(start, -90);
+    return {
+      key: 'last90',
+      label: 'Last 3 months',
+      shortLabel: '3 months',
+      current: { start, end: now },
+      previous: { start: previousStart, end: start },
+      compareLabel: 'vs previous 3 months'
+    };
+  }
+
+  if (selected === 'all') {
+    return {
+      key: 'all',
+      label: 'All time',
+      shortLabel: 'All time',
+      current: {},
+      compareLabel: 'no comparison'
+    };
+  }
+
+  return {
+    key: 'today',
+    label: 'Today',
+    shortLabel: 'Today',
+    current: { start: todayStart, end: now },
+    previous: { start: yesterdayStart, end: todayStart },
+    compareLabel: 'vs yesterday'
+  };
+}
+
+function applyDateRange(query: any, dateColumn: string | undefined, window?: DateWindow) {
+  if (!dateColumn || !window) return query;
+  if (window.start) query = query.gte(dateColumn, window.start.toISOString());
+  if (window.end) query = query.lt(dateColumn, window.end.toISOString());
+  return query;
+}
+
+async function countRows(
+  table: string,
+  workspaceId: string,
+  options?: { filters?: CountFilter[]; inFilters?: Array<{ column: string; values: unknown[] }>; dateColumn?: string; window?: DateWindow }
+) {
   const supabase = await createClient();
-  let query = supabase.from(table).select('*', { count: 'exact', head: true }).eq('workspace_id', workspaceId);
-  if (filter) query = query.eq(filter.column, filter.value);
-  const { count } = await query;
+  let query: any = supabase.from(table).select('*', { count: 'exact', head: true }).eq('workspace_id', workspaceId);
+  for (const filter of options?.filters || []) query = query.eq(filter.column, filter.value);
+  for (const filter of options?.inFilters || []) query = query.in(filter.column, filter.values as any[]);
+  query = applyDateRange(query, options?.dateColumn, options?.window);
+  const { count, error } = await query;
+  if (error) throw error;
   return count || 0;
 }
 
-async function safeCount(table: string, workspaceId: string, filter?: { column: string; value: unknown }) {
-  try { return await countRows(table, workspaceId, filter); } catch { return 0; }
+async function safeCount(
+  table: string,
+  workspaceId: string,
+  options?: { filters?: CountFilter[]; inFilters?: Array<{ column: string; values: unknown[] }>; dateColumn?: string; window?: DateWindow }
+) {
+  try {
+    return await countRows(table, workspaceId, options);
+  } catch {
+    return 0;
+  }
 }
 
-export default async function DashboardPage() {
+function pctChange(current: number, previous: number) {
+  if (previous === 0 && current === 0) return { text: 'No change', tone: 'muted' as const };
+  if (previous === 0) return { text: `+${current.toLocaleString()} new`, tone: 'ok' as const };
+  const diff = current - previous;
+  const pct = (diff / previous) * 100;
+  const sign = diff >= 0 ? '+' : '';
+  return {
+    text: `${sign}${diff.toLocaleString()} (${sign}${pct.toFixed(1)}%)`,
+    tone: diff >= 0 ? ('ok' as const) : ('bad' as const)
+  };
+}
+
+function toneStyle(tone: 'ok' | 'bad' | 'muted') {
+  if (tone === 'ok') return { color: 'var(--ok)' };
+  if (tone === 'bad') return { color: 'var(--bad)' };
+  return { color: 'var(--muted)' };
+}
+
+function ratio(numerator: number, denominator: number, decimals = 1) {
+  return denominator ? `${((numerator / denominator) * 100).toFixed(decimals)}%` : '0%';
+}
+
+function emailsPerReply(sent: number, replies: number) {
+  return replies ? (sent / replies).toFixed(1) : '-';
+}
+
+function KpiCard({ title, value, previous, compareLabel, helper }: { title: string; value: number | string; previous?: number; compareLabel?: string; helper?: string }) {
+  const numeric = typeof value === 'number' ? value : null;
+  const change = numeric !== null && previous !== undefined ? pctChange(numeric, previous) : null;
+  return (
+    <div className="card kpi">
+      <div className="title">{title}</div>
+      <div className="num">{typeof value === 'number' ? value.toLocaleString() : value}</div>
+      {change ? <div style={{ marginTop: 8, fontSize: 12, fontWeight: 900, ...toneStyle(change.tone) }}>{change.text}</div> : null}
+      {compareLabel ? <div className="muted" style={{ marginTop: 3, fontSize: 12 }}>{compareLabel}</div> : null}
+      {helper ? <div className="muted" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.45 }}>{helper}</div> : null}
+    </div>
+  );
+}
+
+async function fetchPeriodMessages(workspaceId: string, period: PeriodDefinition) {
+  const supabase = await createClient();
+  let sentQuery: any = supabase
+    .from('sent_messages')
+    .select('id, template_id, gmail_account_id')
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'sent')
+    .limit(10000);
+  sentQuery = applyDateRange(sentQuery, 'sent_at', period.current);
+  const { data: sentRows } = await sentQuery;
+
+  let replyQuery: any = supabase
+    .from('reply_history')
+    .select('id, template_id, gmail_account_id')
+    .eq('workspace_id', workspaceId)
+    .eq('is_real_reply', true)
+    .limit(10000);
+  replyQuery = applyDateRange(replyQuery, 'received_at', period.current);
+  const { data: replyRows } = await replyQuery;
+
+  const templateIds = Array.from(new Set([...(sentRows || []).map((row: any) => row.template_id), ...(replyRows || []).map((row: any) => row.template_id)].filter(Boolean)));
+  const senderIds = Array.from(new Set([...(sentRows || []).map((row: any) => row.gmail_account_id), ...(replyRows || []).map((row: any) => row.gmail_account_id)].filter(Boolean)));
+
+  const templateNames = new Map<string, string>();
+  const senderEmails = new Map<string, string>();
+
+  if (templateIds.length) {
+    const { data } = await supabase.from('templates').select('id,name').eq('workspace_id', workspaceId).in('id', templateIds);
+    for (const row of data || []) templateNames.set(row.id, row.name || 'Untitled template');
+  }
+  if (senderIds.length) {
+    const { data } = await supabase.from('gmail_accounts').select('id,email').eq('workspace_id', workspaceId).in('id', senderIds);
+    for (const row of data || []) senderEmails.set(row.id, row.email || 'Unknown sender');
+  }
+
+  const templateMap = new Map<string, { id: string; name: string; sent: number; replies: number }>();
+  const senderMap = new Map<string, { id: string; email: string; sent: number; replies: number }>();
+
+  for (const row of sentRows || []) {
+    const tid = row.template_id || 'none';
+    const sid = row.gmail_account_id || 'none';
+    const t = templateMap.get(tid) || { id: tid, name: tid === 'none' ? 'No template tracked' : (templateNames.get(tid) || 'Unknown template'), sent: 0, replies: 0 };
+    t.sent += 1;
+    templateMap.set(tid, t);
+    const s = senderMap.get(sid) || { id: sid, email: sid === 'none' ? 'No sender tracked' : (senderEmails.get(sid) || 'Unknown sender'), sent: 0, replies: 0 };
+    s.sent += 1;
+    senderMap.set(sid, s);
+  }
+
+  for (const row of replyRows || []) {
+    const tid = row.template_id || 'none';
+    const sid = row.gmail_account_id || 'none';
+    const t = templateMap.get(tid) || { id: tid, name: tid === 'none' ? 'No template tracked' : (templateNames.get(tid) || 'Unknown template'), sent: 0, replies: 0 };
+    t.replies += 1;
+    templateMap.set(tid, t);
+    const s = senderMap.get(sid) || { id: sid, email: sid === 'none' ? 'No sender tracked' : (senderEmails.get(sid) || 'Unknown sender'), sent: 0, replies: 0 };
+    s.replies += 1;
+    senderMap.set(sid, s);
+  }
+
+  return {
+    templates: Array.from(templateMap.values()).sort((a, b) => b.sent - a.sent).slice(0, 10),
+    senders: Array.from(senderMap.values()).sort((a, b) => b.sent - a.sent).slice(0, 10)
+  };
+}
+
+export default async function DashboardPage({ searchParams }: { searchParams?: DashboardSearchParams }) {
+  const params = await Promise.resolve(searchParams || {});
+  const period = periodFor((params as any).range);
   const { workspace, error } = await getCurrentWorkspace();
   if (!workspace) return <div className="error">Workspace error: {error}</div>;
   const supabase = await createClient();
 
-  const [businesses, pending, ready, contacted, responded, realReplies, noInbox, sent, templates, schedules] = await Promise.all([
+  const previous = period.previous;
+  const [
+    totalBusinesses,
+    currentPending,
+    currentReady,
+    currentContacted,
+    currentResponded,
+    periodImported,
+    prevImported,
+    periodFoundEmails,
+    prevFoundEmails,
+    periodResearchDone,
+    prevResearchDone,
+    periodSent,
+    prevSent,
+    periodReplies,
+    prevReplies,
+    periodNoInbox,
+    prevNoInbox,
+    scheduled
+  ] = await Promise.all([
     safeCount('businesses', workspace.id),
-    safeCount('businesses', workspace.id, { column: 'status', value: 'pending' }),
-    safeCount('businesses', workspace.id, { column: 'status', value: 'ready' }),
-    safeCount('businesses', workspace.id, { column: 'status', value: 'contacted' }),
-    safeCount('businesses', workspace.id, { column: 'status', value: 'responded' }),
-    safeCount('reply_history', workspace.id, { column: 'is_real_reply', value: 'true' }),
-    safeCount('businesses', workspace.id, { column: 'status', value: 'no_inbox' }),
-    safeCount('sent_messages', workspace.id, { column: 'status', value: 'sent' }),
-    safeCount('templates', workspace.id),
-    safeCount('message_schedules', workspace.id, { column: 'status', value: 'scheduled' })
+    safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'pending' }] }),
+    safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'ready' }] }),
+    safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'contacted' }] }),
+    safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'responded' }] }),
+    safeCount('businesses', workspace.id, { dateColumn: 'created_at', window: period.current }),
+    previous ? safeCount('businesses', workspace.id, { dateColumn: 'created_at', window: previous }) : Promise.resolve(0),
+    safeCount('email_candidates', workspace.id, { dateColumn: 'created_at', window: period.current }),
+    previous ? safeCount('email_candidates', workspace.id, { dateColumn: 'created_at', window: previous }) : Promise.resolve(0),
+    safeCount('email_research_jobs', workspace.id, { filters: [{ column: 'status', value: 'done' }], dateColumn: 'finished_at', window: period.current }),
+    previous ? safeCount('email_research_jobs', workspace.id, { filters: [{ column: 'status', value: 'done' }], dateColumn: 'finished_at', window: previous }) : Promise.resolve(0),
+    safeCount('sent_messages', workspace.id, { filters: [{ column: 'status', value: 'sent' }], dateColumn: 'sent_at', window: period.current }),
+    previous ? safeCount('sent_messages', workspace.id, { filters: [{ column: 'status', value: 'sent' }], dateColumn: 'sent_at', window: previous }) : Promise.resolve(0),
+    safeCount('reply_history', workspace.id, { filters: [{ column: 'is_real_reply', value: true }], dateColumn: 'received_at', window: period.current }),
+    previous ? safeCount('reply_history', workspace.id, { filters: [{ column: 'is_real_reply', value: true }], dateColumn: 'received_at', window: previous }) : Promise.resolve(0),
+    safeCount('no_inbox_records', workspace.id, { dateColumn: 'created_at', window: period.current }),
+    previous ? safeCount('no_inbox_records', workspace.id, { dateColumn: 'created_at', window: previous }) : Promise.resolve(0),
+    safeCount('message_schedules', workspace.id, { filters: [{ column: 'status', value: 'scheduled' }] })
   ]);
 
   let dueFollowups = 0;
@@ -37,70 +308,97 @@ export default async function DashboardPage() {
     dueFollowups = (data || []).length;
   } catch {}
 
-  let templateRows: any[] = [];
-  let senderRows: any[] = [];
   let scheduleRows: any[] = [];
   try {
-    const { data } = await supabase.from('template_response_performance').select('*').eq('workspace_id', workspace.id).order('sent_count', { ascending: false }).limit(10);
-    templateRows = data || [];
-  } catch {}
-  try {
-    const { data } = await supabase.from('sender_response_performance').select('*').eq('workspace_id', workspace.id).order('sent_count', { ascending: false }).limit(10);
-    senderRows = data || [];
-  } catch {}
-  try {
-    const { data } = await supabase.from('message_schedules').select('id,type,status,target_count,scheduled_for,raw').eq('workspace_id', workspace.id).in('status', ['scheduled','due','running']).order('scheduled_for', { ascending: true }).limit(8);
+    const { data } = await supabase
+      .from('message_schedules')
+      .select('id,type,status,target_count,scheduled_for,raw')
+      .eq('workspace_id', workspace.id)
+      .in('status', ['scheduled', 'due', 'running'])
+      .order('scheduled_for', { ascending: true })
+      .limit(8);
     scheduleRows = data || [];
   } catch {}
 
-  const responseRate = sent ? `${((realReplies / sent) * 100).toFixed(1)}%` : '0%';
-  const emailsPerReply = realReplies ? (sent / realReplies).toFixed(1) : '-';
+  const periodPerformance = await fetchPeriodMessages(workspace.id, period).catch(() => ({ templates: [], senders: [] }));
+  const periodResponseRate = ratio(periodReplies, periodSent);
+  const periodEmailsPerReply = emailsPerReply(periodSent, periodReplies);
 
   return (
     <div className="stack">
       <div className="topbar">
         <div className="page-title">
           <h2>Dashboard</h2>
-          <p>Queue, sending, follow-ups, and template performance.</p>
+          <p>Home view for scouting, message sending, replies, and performance by time period.</p>
         </div>
         <span className="badge">Workspace: {workspace.name}</span>
       </div>
 
-      <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Businesses</div><div className="num">{businesses.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Pending</div><div className="num">{pending.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Ready To Message</div><div className="num">{ready.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Contacted</div><div className="num">{contacted.toLocaleString()}</div></div>
+      <div className="card" style={{ padding: 16 }}>
+        <div className="actions" style={{ justifyContent: 'space-between' }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Analytics filter</h3>
+            <p className="muted" style={{ margin: '6px 0 0' }}>Showing {period.label}. Comparisons use the matching previous period.</p>
+          </div>
+          <div className="actions">
+            {rangeOptions.map((option) => (
+              <Link
+                key={option.key}
+                className={`btn ${period.key === option.key ? '' : 'secondary'}`}
+                href={`/dashboard?range=${option.key}`}
+                style={{ padding: '9px 12px' }}
+              >
+                {option.label}
+              </Link>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Sent</div><div className="num">{sent.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{realReplies.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Response Rate</div><div className="num">{responseRate}</div></div>
-        <div className="card kpi"><div className="title">Emails / Reply</div><div className="num">{emailsPerReply}</div></div>
+        <KpiCard title="Total Businesses" value={totalBusinesses} helper="All records currently in this workspace." />
+        <KpiCard title="Pending No Email" value={currentPending} helper="Needs Auto Scout or cleanup." />
+        <KpiCard title="Ready To Message" value={currentReady} helper="Can be used in Message." />
+        <KpiCard title="Responded" value={currentResponded} helper="Businesses with real replies." />
       </div>
 
       <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Due Follow-ups</div><div className="num">{dueFollowups.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Scheduled</div><div className="num">{schedules.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">No Inbox</div><div className="num">{noInbox.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Templates</div><div className="num">{templates.toLocaleString()}</div></div>
+        <KpiCard title={`Imported / Added (${period.shortLabel})`} value={periodImported} previous={previous ? prevImported : undefined} compareLabel={period.compareLabel} />
+        <KpiCard title={`Auto Scout Found Emails (${period.shortLabel})`} value={periodFoundEmails} previous={previous ? prevFoundEmails : undefined} compareLabel={period.compareLabel} />
+        <KpiCard title={`Auto Scout Completed (${period.shortLabel})`} value={periodResearchDone} previous={previous ? prevResearchDone : undefined} compareLabel={period.compareLabel} />
+        <KpiCard title="Currently Contacted" value={currentContacted} helper="Current businesses already messaged and waiting/replied/no-inbox cleanup." />
+      </div>
+
+      <div className="grid grid-4">
+        <KpiCard title={`Messages Sent (${period.shortLabel})`} value={periodSent} previous={previous ? prevSent : undefined} compareLabel={period.compareLabel} />
+        <KpiCard title={`Real Replies (${period.shortLabel})`} value={periodReplies} previous={previous ? prevReplies : undefined} compareLabel={period.compareLabel} />
+        <KpiCard title="Response Rate" value={periodResponseRate} helper={`${periodReplies.toLocaleString()} real replies from ${periodSent.toLocaleString()} sent messages.`} />
+        <KpiCard title="Emails / Reply" value={periodEmailsPerReply} helper="Lower is better." />
+      </div>
+
+      <div className="grid grid-4">
+        <KpiCard title={`No Inbox / Bounces (${period.shortLabel})`} value={periodNoInbox} previous={previous ? prevNoInbox : undefined} compareLabel={period.compareLabel} />
+        <KpiCard title="Due Follow-ups" value={dueFollowups} helper="Sent 72+ hours ago with no real reply and no no-inbox record." />
+        <KpiCard title="Scheduled Messages" value={scheduled} helper="Waiting for scheduled send/follow-up worker." />
+        <KpiCard title="Selected Period" value={period.label} helper={period.compareLabel} />
       </div>
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <h3>Template Performance</h3>
-          <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Real Replies</th><th>Emails / Reply</th></tr></thead><tbody>
-            {(templateRows || []).map((row: any) => <tr key={row.template_id}><td>{row.template_name}</td><td>{Number(row.sent_count || 0).toLocaleString()}</td><td>{Number(row.real_reply_count || 0).toLocaleString()}</td><td>{row.emails_per_reply || '-'}</td></tr>)}
-            {!(templateRows || []).length ? <tr><td colSpan={4} className="muted">No template performance yet.</td></tr> : null}
+          <h3>Template Performance — {period.label}</h3>
+          <p className="muted" style={{ marginTop: -4 }}>Filtered by sent/reply dates in the selected period.</p>
+          <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Real Replies</th><th>Response Rate</th><th>Emails / Reply</th></tr></thead><tbody>
+            {(periodPerformance.templates || []).map((row) => <tr key={row.id}><td>{row.name}</td><td>{row.sent.toLocaleString()}</td><td>{row.replies.toLocaleString()}</td><td>{ratio(row.replies, row.sent)}</td><td>{emailsPerReply(row.sent, row.replies)}</td></tr>)}
+            {!(periodPerformance.templates || []).length ? <tr><td colSpan={5} className="muted">No template performance in this period yet.</td></tr> : null}
           </tbody></table></div>
         </div>
 
         <div className="card" style={{ padding: 18 }}>
-          <h3>Sender Performance</h3>
-          <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Sent</th><th>Real Replies</th><th>Emails / Reply</th></tr></thead><tbody>
-            {(senderRows || []).map((row: any) => <tr key={row.gmail_account_id}><td>{row.sender_email}</td><td>{Number(row.sent_count || 0).toLocaleString()}</td><td>{Number(row.real_reply_count || 0).toLocaleString()}</td><td>{row.emails_per_reply || '-'}</td></tr>)}
-            {!(senderRows || []).length ? <tr><td colSpan={4} className="muted">No sender performance yet.</td></tr> : null}
+          <h3>Sender Performance — {period.label}</h3>
+          <p className="muted" style={{ marginTop: -4 }}>Filtered by sent/reply dates in the selected period.</p>
+          <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Sent</th><th>Real Replies</th><th>Response Rate</th><th>Emails / Reply</th></tr></thead><tbody>
+            {(periodPerformance.senders || []).map((row) => <tr key={row.id}><td>{row.email}</td><td>{row.sent.toLocaleString()}</td><td>{row.replies.toLocaleString()}</td><td>{ratio(row.replies, row.sent)}</td><td>{emailsPerReply(row.sent, row.replies)}</td></tr>)}
+            {!(periodPerformance.senders || []).length ? <tr><td colSpan={5} className="muted">No sender performance in this period yet.</td></tr> : null}
           </tbody></table></div>
         </div>
       </div>

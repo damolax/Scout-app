@@ -7,13 +7,10 @@ import { GmailAccount, Workspace } from '@/lib/types';
 function formatError(error: unknown) {
   if (!error) return 'Unknown error.';
   if (error instanceof Error) return error.message;
-  if (typeof error === 'string') {
-    if (error === '[object Object]') return 'Scout received an unreadable OAuth error object. v8.20 will now show the real error after reconnecting.';
-    return error;
-  }
+  if (typeof error === 'string') return error;
   try {
-    const value = error as { message?: string; code?: string; details?: string; hint?: string; error?: string; error_description?: string; reason?: string; problems?: string[] };
-    return [value.error_description, value.message || value.error, value.reason, value.code ? `Code: ${value.code}` : '', value.details, value.hint, ...(value.problems || [])].filter(Boolean).join(' | ') || JSON.stringify(error);
+    const value = error as { message?: string; code?: string; details?: string; hint?: string; error?: string; reason?: string };
+    return [value.message || value.error, value.reason, value.code ? `Code: ${value.code}` : '', value.details, value.hint].filter(Boolean).join(' | ') || JSON.stringify(error);
   } catch {
     return String(error);
   }
@@ -58,16 +55,13 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
 
   async function checkGmailOauth() {
     try {
-      const response = await fetch('/api/gmail/oauth/status', { cache: 'no-store' });
+      const response = await fetch('/api/gmail/oauth/status');
       const json = await response.json().catch(() => ({}));
       setOauthReady(Boolean(json?.success));
       if (json?.success) {
-        setStatus('Gmail OAuth is ready. Connect Gmail should ask for send/read permission and then save the sender below.');
-        setError('');
+        setStatus('Gmail OAuth is configured. Connect Gmail should show Google consent for send/read permissions.');
       } else {
-        const detail = formatError(json);
-        setStatus('Gmail OAuth is not fully ready. Fix the items shown in red, redeploy, then reconnect Gmail.');
-        setError(detail);
+        setStatus('Gmail OAuth is not fully configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID/GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Vercel, then redeploy.');
       }
     } catch (err) {
       setOauthReady(false);
@@ -116,8 +110,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       loadAccounts().catch((err) => setError(formatError(err)));
     }
     if (oauthError) {
-      setError(formatError(decodeURIComponent(oauthError)));
-      setStatus('Gmail connection did not save. Read the error above, fix it, then reconnect Gmail.');
+      setError(oauthError);
       url.searchParams.delete('gmail_error');
       window.history.replaceState({}, document.title, url.pathname + url.search);
     }
@@ -236,7 +229,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           Add this authorized redirect URI in Google Cloud: <strong>{callbackUri()}</strong>
         </div>
         <div className="notice" style={{ marginTop: 10 }}>
-          Required Vercel env vars: <strong>NEXT_PUBLIC_GOOGLE_CLIENT_ID</strong> or <strong>GOOGLE_CLIENT_ID</strong>, plus server-only <strong>GOOGLE_CLIENT_SECRET</strong>. The consent screen should ask for Gmail send/read permissions when you connect. If it does not, remove the old app grant from Google Account access and reconnect.
+          Required Vercel env vars: <strong>NEXT_PUBLIC_GOOGLE_CLIENT_ID</strong> or <strong>GOOGLE_CLIENT_ID</strong>, plus server-only <strong>GOOGLE_CLIENT_SECRET</strong>. The consent screen should ask for Gmail send/read permissions when you connect.
         </div>
         <div className="actions" style={{ marginTop: 14 }}>
           <button className="btn" type="button" disabled={busy} onClick={connectGmail}>Connect Gmail</button>

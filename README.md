@@ -1,9 +1,3 @@
-# Scout App v8.20 Gmail OAuth Diagnostics
-
-This build fixes Gmail OAuth saving/diagnostics so connected senders show in Settings.
-
-See docs/V8_20_GMAIL_OAUTH_DIAGNOSTICS.md.
-
 # Scout App v8.18
 
 v8.18 focuses on messaging readiness:
