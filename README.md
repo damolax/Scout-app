@@ -1,28 +1,28 @@
-# Scout App v8.18
+# Scout App v8.26 — Scheduled Worker + Seed Inbox Solid Fix
 
-v8.18 focuses on messaging readiness:
+This build solidifies the scheduled sender worker and fixes the Settings seed inbox confusion.
 
-- Dedicated `/templates` page for categories and template library.
-- `/message` is now only for selecting templates, senders, ready contacts, sending, schedules, and follow-ups.
-- Gmail sender connection moved to `/settings`.
-- Message batches can use one selected template or rotate all templates in a category.
-- Message batches can use one selected Gmail sender or rotate selected Gmail senders.
-- Schedules store the chosen template/sender mode and selected senders in the schedule raw metadata.
-- `/email-scout` redirects to `/message`.
+## What changed
 
-Run the Supabase migration after deploying if your database has not been updated through v8.15+.
+- Removed the visible Google Cloud redirect URI/env-var setup notices from Settings.
+- Seed receiver checkbox now auto-saves immediately.
+- Running a seed test now saves all sender/seed settings first.
+- Seed test route accepts connected/ready Gmail accounts and waits briefly before checking placement.
+- Scheduled sender worker is the v8.26 focus.
+- Scheduled worker accepts Vercel cron bearer auth if CRON_SECRET/SCHEDULE_WORKER_SECRET is used.
+- Message schedule UI text now describes v8.26 behavior.
 
-## v8.19 Gmail OAuth
+## Test status
 
-Gmail connection is handled natively by the Node app. Add these Vercel env vars:
+- `npm run typecheck` passed.
+- `npm run build` passed.
 
-```txt
-NEXT_PUBLIC_GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...
+## Supabase migration
+
+Run:
+
+```bash
+cat supabase/migrations/202607090826_scheduled_worker_seed_solid.sql | clip.exe
 ```
 
-Google Cloud OAuth redirect URI:
-
-```txt
-https://scout-app-oyeola.vercel.app/api/gmail/oauth/callback
-```
+Paste it into Supabase SQL Editor and run it.

@@ -33,6 +33,12 @@ function formatError(error: unknown) {
   try { return JSON.stringify(error); } catch { return String(error); }
 }
 
+function scheduleWorkerSecretFromRequest(request: NextRequest, body?: Record<string, unknown>) {
+  const auth = request.headers.get('authorization') || '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  return String(body?.token || request.nextUrl.searchParams.get('token') || request.headers.get('x-schedule-worker-secret') || bearer || '');
+}
+
 function normalizeEmail(email: unknown) {
   return String(email || '').trim().toLowerCase();
 }
@@ -407,7 +413,7 @@ async function runSchedules(limit = MAX_SCHEDULES_PER_RUN) {
 export async function GET(request: NextRequest) {
   try {
     const secret = process.env.SCHEDULE_WORKER_SECRET || process.env.CRON_SECRET || '';
-    const provided = request.nextUrl.searchParams.get('token') || request.headers.get('x-schedule-worker-secret') || '';
+    const provided = scheduleWorkerSecretFromRequest(request);
     if (secret && provided !== secret) {
       return NextResponse.json({ success: false, error: 'Invalid schedule worker token.' }, { status: 401 });
     }
@@ -423,7 +429,7 @@ export async function POST(request: NextRequest) {
   try {
     const input = await request.json().catch(() => ({}));
     const secret = process.env.SCHEDULE_WORKER_SECRET || process.env.CRON_SECRET || '';
-    const provided = String(input.token || request.headers.get('x-schedule-worker-secret') || '');
+    const provided = scheduleWorkerSecretFromRequest(request, input);
     if (secret && provided !== secret) {
       return NextResponse.json({ success: false, error: 'Invalid schedule worker token.' }, { status: 401 });
     }

@@ -829,7 +829,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedules</h3>
-          <p className="muted">v8.25 adds the server-side scheduled sender worker. Saved schedules can now run from this button or from the deployed worker route.</p>
+          <p className="muted">v8.26 solidifies scheduled sending. Saved schedules run automatically from the deployed worker route when due, and you can also run the due-schedule worker manually here.</p>
           <div className="grid grid-3"><div><label className="label">Type</label><select className="select" value={scheduleType} onChange={(e) => setScheduleType(e.target.value as 'initial' | 'follow_up')}><option value="initial">Initial batch</option><option value="follow_up">Follow-up</option></select></div><div><label className="label">Date & time</label><input className="input" type="datetime-local" value={scheduleFor} onChange={(e) => setScheduleFor(e.target.value)} /></div><div><label className="label">Count</label><input className="input" type="number" value={scheduleCount} onChange={(e) => setScheduleCount(Number(e.target.value || 1000))} /></div></div>
           <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={saveSchedule}>Save Schedule</button><button className="btn" type="button" disabled={busy} onClick={sendDueSchedulesNow}>Run Scheduled Worker Now</button></div>
           <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Type</th><th>For</th><th>Count</th><th>Status</th></tr></thead><tbody>

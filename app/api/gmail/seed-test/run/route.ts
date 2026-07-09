@@ -73,14 +73,14 @@ async function runSeedInboxTest(workspaceId: string) {
     .from('gmail_accounts')
     .select('*')
     .eq('workspace_id', workspaceId)
-    .eq('status', 'connected');
+    .in('status', ['connected', 'ready']);
   if (accountError) throw accountError;
 
   const readyAccounts = (accounts || []).filter((a: any) => a.access_token || a.refresh_token);
   const senders = readyAccounts.filter((a: any) => !a.paused_until || new Date(a.paused_until).getTime() <= Date.now());
   const seeds = readyAccounts.filter((a: any) => Boolean(a.seed_inbox_enabled));
   if (!senders.length) throw new Error('No connected Gmail senders found.');
-  if (!seeds.length) throw new Error('No seed inbox is enabled in Settings. Tick “Use as seed inbox”, click Save limits on that row, then run the test.');
+  if (!seeds.length) throw new Error('No seed receiver is saved yet. Turn on Use as seed receiver for at least one connected Gmail account, then click Run seed inbox test now. v8.26 saves the checkbox automatically.');
   const possiblePairs = senders.flatMap((sender: any) => seeds.map((seed: any) => ({ sender, seed }))).filter(({ sender, seed }: any) => sender.id !== seed.id);
   if (!possiblePairs.length) throw new Error('Seed inbox testing needs at least 2 connected Gmail accounts: one sender and one seed inbox. Scout does not count sending an account to itself as a useful spam placement test.');
 
@@ -109,6 +109,10 @@ async function runSeedInboxTest(workspaceId: string) {
         sent += 1;
       } catch (err) {
         placement = String(formatError(err)).toLowerCase().includes('blocked') ? 'blocked' : 'bounced';
+      }
+
+      if (placement === 'sent_pending_check') {
+        await new Promise((resolve) => setTimeout(resolve, 3500));
       }
 
       try {
@@ -142,7 +146,7 @@ async function runSeedInboxTest(workspaceId: string) {
         checked_at: new Date().toISOString(),
         gmail_message_id: gmailMessageId || null,
         gmail_thread_id: gmailThreadId || null,
-        raw: { source: 'v8.22_seed_test', placement, subject }
+        raw: { source: 'v8.26_seed_test', placement, subject, checked_after_ms: 3500 }
       });
 
       const risk = placement === 'spam' ? 'spam_risk' : placement === 'promotions' ? 'promotion_risk' : placement === 'inbox' ? 'seed_inbox_ok' : placement;

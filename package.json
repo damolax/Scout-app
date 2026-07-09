@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-25-reply-intelligence-business-hub",
-  "version": "8.25.0",
+  "name": "scout-app-v8-26-scheduled-worker-seed-solid",
+  "version": "8.26.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.25: reply intelligence classification, auto-reply tracking, delivery-failure handling, and business conversation reply hub."
+  "description": "Scout App v8.26: scheduled sender worker, cleaned Gmail Settings UI, auto-saving seed receivers, and more reliable seed inbox checks."
 }

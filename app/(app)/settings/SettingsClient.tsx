@@ -25,10 +25,6 @@ function isPaused(account: GmailAccount) {
   return new Date(account.paused_until).getTime() > Date.now();
 }
 
-function callbackUri() {
-  if (typeof window === 'undefined') return '/api/gmail/oauth/callback';
-  return `${window.location.origin}/api/gmail/oauth/callback`;
-}
 
 export default function SettingsClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
@@ -90,9 +86,9 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       const json = await response.json().catch(() => ({}));
       setOauthReady(Boolean(json?.success));
       if (json?.success) {
-        setStatus('Gmail OAuth is configured. Connect Gmail should show Google consent for send/read permissions.');
+        setStatus('Gmail OAuth is ready. Connect Gmail should work from this page.');
       } else {
-        setStatus('Gmail OAuth is not fully configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID/GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Vercel, then redeploy.');
+        setStatus('Gmail OAuth is not ready yet. Check the project environment setup, then redeploy.');
       }
     } catch (err) {
       setOauthReady(false);
@@ -199,28 +195,73 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     }
   }
 
-  async function saveSenderSettings(account: GmailAccount) {
-    setBusy(true);
-    setError('');
+  function senderSettingsPatch(account: GmailAccount) {
+    const draft = limitDrafts[account.id];
+    const dailyLimit = Math.max(1, Math.min(50000, Number(draft?.daily_limit || account.daily_limit || 150)));
+    const defaultRunLimit = Math.max(1, Math.min(dailyLimit, Number(draft?.default_run_limit || account.default_run_limit || Math.min(dailyLimit, 100))));
+    return {
+      account_type: draft?.account_type || account.account_type || 'gmail',
+      daily_limit: dailyLimit,
+      default_run_limit: defaultRunLimit,
+      seed_inbox_enabled: Boolean(draft?.seed_inbox_enabled),
+      seed_test_address: normalizeEmail(draft?.seed_test_address || account.seed_test_address || account.email),
+      updated_at: new Date().toISOString()
+    };
+  }
+
+  async function saveSenderSettings(account: GmailAccount, quiet = false) {
+    if (!quiet) {
+      setBusy(true);
+      setError('');
+    }
     try {
-      const draft = limitDrafts[account.id];
-      const dailyLimit = Math.max(1, Math.min(50000, Number(draft?.daily_limit || account.daily_limit || 150)));
-      const defaultRunLimit = Math.max(1, Math.min(dailyLimit, Number(draft?.default_run_limit || account.default_run_limit || Math.min(dailyLimit, 100))));
-      const { error: updateError } = await supabase.from('gmail_accounts').update({
-        account_type: draft?.account_type || 'gmail',
-        daily_limit: dailyLimit,
-        default_run_limit: defaultRunLimit,
-        seed_inbox_enabled: Boolean(draft?.seed_inbox_enabled),
-        seed_test_address: normalizeEmail(draft?.seed_test_address || account.email),
-        updated_at: new Date().toISOString()
-      }).eq('workspace_id', workspace.id).eq('id', account.id);
+      const { error: updateError } = await supabase
+        .from('gmail_accounts')
+        .update(senderSettingsPatch(account))
+        .eq('workspace_id', workspace.id)
+        .eq('id', account.id);
       if (updateError) throw updateError;
-      setStatus(`Saved settings for ${account.email}. If you enabled seed inbox, now click Run seed inbox test now. Seed testing needs at least 2 connected Gmail accounts for cross-account testing.`);
+      if (!quiet) {
+        setStatus(`Saved sender settings for ${account.email}.`);
+        await loadAccounts();
+      }
+    } catch (err) {
+      if (!quiet) setError(formatError(err));
+      throw err;
+    } finally {
+      if (!quiet) setBusy(false);
+    }
+  }
+
+  async function saveAllSenderDrafts() {
+    const rows = accounts.filter((account) => limitDrafts[account.id]);
+    for (const account of rows) await saveSenderSettings(account, true);
+  }
+
+  async function toggleSeedInbox(account: GmailAccount, enabled: boolean) {
+    const draft = limitDrafts[account.id] || {
+      daily_limit: String(account.daily_limit || 150),
+      default_run_limit: String(account.default_run_limit || 100),
+      account_type: String(account.account_type || 'gmail'),
+      seed_inbox_enabled: Boolean(account.seed_inbox_enabled),
+      seed_test_address: String(account.seed_test_address || account.email || '')
+    };
+    setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_inbox_enabled: enabled } }));
+    setStatus(enabled ? `Seed receiver enabled for ${account.email}. Click Run seed inbox test now to check placement.` : `Seed receiver disabled for ${account.email}.`);
+    try {
+      const { error: updateError } = await supabase
+        .from('gmail_accounts')
+        .update({
+          seed_inbox_enabled: enabled,
+          seed_test_address: normalizeEmail(draft.seed_test_address || account.email),
+          updated_at: new Date().toISOString()
+        })
+        .eq('workspace_id', workspace.id)
+        .eq('id', account.id);
+      if (updateError) throw updateError;
       await loadAccounts();
     } catch (err) {
       setError(formatError(err));
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -228,6 +269,9 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     setBusy(true);
     setError('');
     try {
+      setStatus('Saving sender/seed settings, then running seed inbox test...');
+      await saveAllSenderDrafts();
+      await loadAccounts();
       const response = await fetch('/api/gmail/seed-test/run', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -235,7 +279,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json?.success === false) throw new Error(json?.error || `Seed test failed with HTTP ${response.status}`);
-      setStatus(`Seed test complete. Sent ${Number(json.sent || 0)} test(s). Inbox ${Number(json.inbox || 0)}, spam ${Number(json.spam || 0)}, promotions ${Number(json.promotions || 0)}, not found/pending ${Number(json.not_found || 0)}.`);
+      setStatus(`Seed test complete. Sent ${Number(json.sent || 0)} test(s). Inbox ${Number(json.inbox || 0)}, spam ${Number(json.spam || 0)}, promotions ${Number(json.promotions || 0)}, not found/pending ${Number(json.not_found || 0)}. If a result says not found, run the check again after a minute.`);
       await Promise.all([loadAccounts(), loadSeedTests()]);
     } catch (err) {
       setError(formatError(err));
@@ -303,12 +347,6 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       <div className="card" style={{ padding: 18 }}>
         <h3>Gmail Senders</h3>
         <p className="muted">Connect Gmail once here. Message will use these connected senders for selected or rotated sending.</p>
-        <div className="notice" style={{ marginTop: 12 }}>
-          Add this authorized redirect URI in Google Cloud: <strong>{callbackUri()}</strong>
-        </div>
-        <div className="notice" style={{ marginTop: 10 }}>
-          Required Vercel env vars: <strong>NEXT_PUBLIC_GOOGLE_CLIENT_ID</strong> or <strong>GOOGLE_CLIENT_ID</strong>, plus server-only <strong>GOOGLE_CLIENT_SECRET</strong>. The consent screen should ask for Gmail send/read permissions when you connect.
-        </div>
         <div className="actions" style={{ marginTop: 14 }}>
           <button className="btn" type="button" disabled={busy} onClick={connectGmail}>Connect Gmail</button>
           <button className="btn secondary" type="button" disabled={busy} onClick={checkGmailOauth}>Check OAuth setup</button>
@@ -327,24 +365,24 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           <button className="btn secondary" type="button" style={{ marginTop: 10 }} disabled={busy} onClick={addManualAccount}>Add / Update Sender</button>
         </div> : null}
 
-        <div className="table-wrap" style={{ marginTop: 14 }}><table><thead><tr><th>Email</th><th>Status</th><th>Limits</th><th>Seed inbox</th><th>Today / Risk</th><th>Actions</th></tr></thead><tbody>
+        <div className="table-wrap" style={{ marginTop: 14 }}><table><thead><tr><th>Email</th><th>Status</th><th>Limits</th><th>Seed receiver</th><th>Today / Risk</th><th>Actions</th></tr></thead><tbody>
           {accounts.map((account) => {
             const draft = limitDrafts[account.id] || { daily_limit: String(account.daily_limit || 150), default_run_limit: String(account.default_run_limit || 100), account_type: String(account.account_type || 'gmail'), seed_inbox_enabled: Boolean(account.seed_inbox_enabled), seed_test_address: String(account.seed_test_address || account.email || '') };
             return <tr key={account.id}>
               <td><strong>{account.email}</strong><br /><span className="muted">{account.last_error || (account.paused_until ? `Paused until ${new Date(account.paused_until).toLocaleString()}` : 'Ready')}</span></td>
               <td><span className={`status ${isPaused(account) ? 'paused' : account.status}`}>{isPaused(account) ? 'paused' : account.status}</span><br /><select className="select" value={draft.account_type} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, account_type: e.target.value } }))}><option value="gmail">Gmail</option><option value="workspace">Workspace</option><option value="custom">Custom</option></select></td>
               <td><div className="grid grid-2"><div><label className="label">Daily safe limit</label><input className="input" type="number" min={1} value={draft.daily_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, daily_limit: e.target.value } }))} /></div><div><label className="label">Default max/run</label><input className="input" type="number" min={1} value={draft.default_run_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, default_run_limit: e.target.value } }))} /></div></div></td>
-              <td><label className="checkbox-row"><input type="checkbox" checked={draft.seed_inbox_enabled} onChange={(e) => { setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_inbox_enabled: e.target.checked } })); setStatus('Seed inbox checkbox changed. Click Save limits on that row, then click Run seed inbox test now. The checkbox alone does not run a spam test.'); }} /> Use as seed inbox</label><input className="input" value={draft.seed_test_address} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_test_address: e.target.value } }))} placeholder="seed inbox email" /></td>
+              <td><label className="checkbox-row"><input type="checkbox" checked={draft.seed_inbox_enabled} onChange={(e) => toggleSeedInbox(account, e.target.checked)} /> Use as seed receiver</label><input className="input" value={draft.seed_test_address} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_test_address: e.target.value } }))} placeholder="seed inbox email" /></td>
               <td>{Number(account.sent_today || 0).toLocaleString()} / {Number(account.daily_limit || 0).toLocaleString()}<br /><span className="badge">{account.spam_risk_status || account.last_seed_result || 'unknown'}</span></td>
-              <td><button className="btn secondary" type="button" disabled={busy} onClick={() => saveSenderSettings(account)}>Save limits</button> <button className="btn secondary" type="button" disabled={busy || !(account.access_token || account.refresh_token)} onClick={() => verifySenderProfile(account)}>Verify</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => pauseOrResume(account)}>{isPaused(account) || account.status !== 'connected' ? 'Resume' : 'Pause'}</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => removeAccount(account)}>Remove</button></td>
+              <td><button className="btn secondary" type="button" disabled={busy} onClick={() => saveSenderSettings(account)}>Save sender settings</button> <button className="btn secondary" type="button" disabled={busy || !(account.access_token || account.refresh_token)} onClick={() => verifySenderProfile(account)}>Verify</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => pauseOrResume(account)}>{isPaused(account) || account.status !== 'connected' ? 'Resume' : 'Pause'}</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => removeAccount(account)}>Remove</button></td>
             </tr>;
           })}
           {!accounts.length ? <tr><td colSpan={6} className="muted">No senders connected yet. Click Connect Gmail, approve permissions, and this table should update after Google redirects back.</td></tr> : null}
         </tbody></table></div>
-        <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={runSeedTestNow}>Run seed inbox test now</button><span className="muted">Save the seed inbox row first. For real testing, connect at least 2 Gmail accounts so they can test each other.</span></div>
-        <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Sender</th><th>Seed inbox</th><th>Placement</th><th>Checked</th></tr></thead><tbody>
+        <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={runSeedTestNow}>Run seed inbox test now</button><span className="muted">Seed receiver checkboxes save automatically. For real testing, connect at least 2 Gmail accounts so they can test each other.</span></div>
+        <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Sender</th><th>Seed receiver</th><th>Placement</th><th>Checked</th></tr></thead><tbody>
           {seedTests.map((row) => <tr key={row.id}><td>{row.sender_email}</td><td>{row.seed_email}</td><td><span className={`status ${row.placement || 'pending'}`}>{row.placement || 'pending'}</span></td><td>{row.checked_at || row.created_at ? new Date(row.checked_at || row.created_at || '').toLocaleString() : '-'}</td></tr>)}
-          {!seedTests.length ? <tr><td colSpan={4} className="muted">No seed inbox tests yet. Checking the seed box only enables the account as a receiver. Click Save limits on that row, then Run seed inbox test now. You need at least 2 connected Gmail accounts for cross-account testing.</td></tr> : null}
+          {!seedTests.length ? <tr><td colSpan={4} className="muted">No seed inbox tests yet. Turn on Use as seed receiver for one account, then click Run seed inbox test now. You need at least 2 connected Gmail accounts for cross-account testing.</td></tr> : null}
         </tbody></table></div>
       </div>
 
