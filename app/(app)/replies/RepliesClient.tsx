@@ -169,7 +169,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, boolean>>({});
   const [syncLimit, setSyncLimit] = useState(100);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('Sync replies from selected Gmail accounts. Only real prospect replies count as responses. Bounces/no-inbox are separated.');
+  const [status, setStatus] = useState('Native Gmail reply sync is ready. It reads connected Gmail accounts, separates real replies from bounces/no-inbox/message-blocked notices, and updates businesses automatically.');
   const [error, setError] = useState('');
   const [lastStats, setLastStats] = useState<SyncStats>({ scanned: 0, realReplies: 0, noInbox: 0, ignored: 0, inserted: 0, errors: [] });
 
@@ -292,7 +292,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   }
 
   async function syncReplies() {
-    const selected = accounts.filter((account) => selectedAccounts[account.id] && account.status === 'connected');
+    const selected = accounts.filter((account) => selectedAccounts[account.id] && ['connected', 'ready'].includes(String(account.status || '')));
     if (!selected.length) {
       setError('Select at least one connected Gmail account first.');
       return;
@@ -301,26 +301,28 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     setError('');
     const stats: SyncStats = { scanned: 0, realReplies: 0, noInbox: 0, ignored: 0, inserted: 0, errors: [] };
     try {
-      setStatus(`Syncing replies from ${selected.length} Gmail account(s)...`);
+      setStatus(`Syncing replies, bounces, no-inbox, and blocked notices from ${selected.length} Gmail account(s)...`);
       for (const account of selected) {
         try {
-          setStatus(`Checking ${account.email} for replies and bounces...`);
-          const messages = await fetchBackendReplies(account);
-          for (const message of messages) {
-            stats.scanned += 1;
-            const sentMatch = matchSent(message);
-            const c = await saveMessage(account, message, sentMatch);
-            stats.inserted += 1;
-            if (c.isReal) stats.realReplies += 1;
-            else if (c.noInbox) stats.noInbox += 1;
-            else stats.ignored += 1;
-          }
+          setStatus(`Native Gmail sync: checking ${account.email}...`);
+          const response = await fetch('/api/gmail/sync-replies', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ workspace_id: workspace.id, gmail_account_id: account.id, max_results: Math.max(1, Math.min(500, syncLimit)), days: 30 })
+          });
+          const json = await response.json().catch(() => ({}));
+          if (!response.ok || json?.success === false) throw new Error(json?.error || `Native Gmail sync failed with HTTP ${response.status}`);
+          stats.scanned += Number(json.scanned || 0);
+          stats.realReplies += Number(json.realReplies || 0);
+          stats.noInbox += Number(json.noInbox || 0) + Number(json.blocked || 0);
+          stats.ignored += Number(json.ignored || 0) + Number(json.temporary || 0) + Number(json.unmatched || 0);
+          stats.inserted += Number(json.saved || 0);
         } catch (err) {
           stats.errors.push(`${account.email}: ${formatError(err)}`);
         }
       }
       setLastStats(stats);
-      setStatus(`Reply sync finished. Scanned ${stats.scanned}, real replies ${stats.realReplies}, no-inbox/bounce ${stats.noInbox}, ignored ${stats.ignored}.`);
+      setStatus(`Native Gmail sync finished. Scanned ${stats.scanned}, saved ${stats.inserted}, real replies ${stats.realReplies}, no-inbox/blocked ${stats.noInbox}, ignored/unmatched ${stats.ignored}.`);
       if (stats.errors.length) setError(stats.errors.join('\n'));
       await loadAll();
     } catch (err) {
@@ -365,7 +367,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
         <div className="actions" style={{ justifyContent: 'space-between' }}>
           <div>
             <h3 style={{ margin: 0 }}>Reply Sync</h3>
-            <p className="muted" style={{ marginBottom: 0 }}>Counts only real prospect replies. Mailer-daemon, bounces, no-inbox, out-of-office, and Gmail limit notices are ignored or moved to No Inbox.</p>
+            <p className="muted" style={{ marginBottom: 0 }}>Native Gmail sync. Real prospect replies move businesses to Responded. Address-not-found, bounces, and message-blocked notices are saved to No Inbox/Blocked and excluded from response counts.</p>
           </div>
           <button className="btn secondary" onClick={() => loadAll().catch((err) => setError(formatError(err)))} disabled={busy}>Refresh</button>
         </div>
@@ -383,10 +385,10 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
             </div>
           </div>
           <div>
-            <label className="label">Max messages per account</label>
+            <label className="label">Max Gmail messages to scan per account</label>
             <input className="input" type="number" min={1} max={500} value={syncLimit} onChange={(event) => setSyncLimit(Number(event.target.value || 100))} />
             <div className="actions" style={{ marginTop: 12 }}>
-              <button className="btn" disabled={busy} onClick={syncReplies}>{busy ? 'Syncing...' : 'Sync selected accounts'}</button>
+              <button className="btn" disabled={busy} onClick={syncReplies}>{busy ? 'Syncing...' : 'Sync replies + bounces'}</button>
               {replyRows.length ? <button className="btn secondary" type="button" onClick={() => downloadCsv('scout-real-replies.csv', realReplies as unknown as Array<Record<string, unknown>>)}>Export real replies</button> : null}
               {noInboxRows.length ? <button className="btn secondary" type="button" onClick={() => downloadCsv('scout-no-inbox.csv', noInboxRows as unknown as Array<Record<string, unknown>>)}>Export no inbox</button> : null}
             </div>

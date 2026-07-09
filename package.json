@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-23-source-scout-extension-bridge",
-  "version": "8.23.0",
+  "name": "scout-app-v8-24-reply-sync-no-inbox",
+  "version": "8.24.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.23: Source Scout tab for Google/Bing dork workflows, directory result parsing, direct email capture, website discovery, extension bridge visibility, and Auto Scout queue handoff."
+  "description": "Scout App v8.24: native Gmail reply sync, no-inbox/bounce/message-blocked tracking, matched response counting, and improved No Inbox reporting."
 }

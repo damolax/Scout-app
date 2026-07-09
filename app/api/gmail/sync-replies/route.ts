@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     const maxResults = Number(input.max_results || input.limit || 100);
     const days = Number(input.days || 30);
     const supabase = createAdminClient();
-    const result = await syncGmailInbound({ supabase, workspaceId, accountId, maxResults, days, mode: 'bounces' });
+    const result = await syncGmailInbound({ supabase, workspaceId, accountId, maxResults, days, mode: 'replies' });
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json({ success: false, error: formatInboundError(err) }, { status: 400 });
