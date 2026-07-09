@@ -8,6 +8,10 @@
     {
       "path": "/api/gmail/seed-test/run",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/message/run-schedules",
+      "schedule": "0 8 * * *"
     }
   ]
 }

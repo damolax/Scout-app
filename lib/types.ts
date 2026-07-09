@@ -33,6 +33,12 @@ export type Business = {
   score: number | null;
   normalized_key: string;
   raw: Record<string, unknown> | null;
+  reply_state?: string | null;
+  last_reply_classification?: string | null;
+  last_inbound_at?: string | null;
+  last_auto_reply_at?: string | null;
+  last_real_reply_at?: string | null;
+  social_links?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };
@@ -121,6 +127,12 @@ export type ReplyHistory = {
   body?: string | null;
   classification?: string | null;
   is_real_reply?: boolean | null;
+  is_auto_reply?: boolean | null;
+  is_delivery_failure?: boolean | null;
+  is_blocked?: boolean | null;
+  is_limit_notice?: boolean | null;
+  is_temporary?: boolean | null;
+  reply_bucket?: string | null;
   received_at?: string | null;
   gmail_message_id?: string | null;
   gmail_thread_id?: string | null;

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
 import BusinessDetailActions from './BusinessDetailActions';
+import BusinessConversationPanel from './BusinessConversationPanel';
 import type { Business } from '@/lib/types';
 
 function display(value: unknown) {
@@ -17,6 +18,20 @@ function sourceFromRaw(raw: any) {
 
 function prettyJson(value: unknown) {
   try { return JSON.stringify(value || {}, null, 2); } catch { return '{}'; }
+}
+
+function extractSocialLinks(raw: unknown) {
+  const urls = new Set<string>();
+  const text = (() => {
+    try { return JSON.stringify(raw || {}); } catch { return String(raw || ''); }
+  })();
+  const matches = text.match(/https?:\\?\/\\?\/[^\s"'<>]+/gi) || [];
+  const socialTerms = ['facebook.com', 'instagram.com', 'linkedin.com', 'twitter.com', 'x.com/', 'tiktok.com', 'youtube.com', 'youtu.be', 'pinterest.com'];
+  for (const match of matches) {
+    const cleaned = match.replace(/\\\//g, '/').replace(/[),.;]+$/g, '');
+    if (socialTerms.some((term) => cleaned.toLowerCase().includes(term))) urls.add(cleaned);
+  }
+  return Array.from(urls).slice(0, 12);
 }
 
 export default async function BusinessDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,15 +51,18 @@ export default async function BusinessDetailPage({ params }: { params: Promise<{
   if (!business) return <div className="error">Business not found.</div>;
 
   const typedBusiness = business as Business;
-  const [jobsRes, sentRes, repliesRes, candidatesRes] = await Promise.all([
+  const [jobsRes, sentRes, repliesRes, candidatesRes, noInboxRes, accountsRes] = await Promise.all([
     supabase.from('email_research_jobs').select('*').eq('workspace_id', workspace.id).eq('business_id', id).order('created_at', { ascending: false }).limit(25),
     supabase.from('sent_messages').select('*').eq('workspace_id', workspace.id).eq('business_id', id).order('sent_at', { ascending: false }).limit(25),
-    supabase.from('reply_history').select('*').eq('workspace_id', workspace.id).eq('business_id', id).order('received_at', { ascending: false }).limit(25),
-    supabase.from('email_candidates').select('*').eq('workspace_id', workspace.id).eq('business_id', id).order('created_at', { ascending: false }).limit(25)
+    supabase.from('reply_history').select('*').eq('workspace_id', workspace.id).eq('business_id', id).order('received_at', { ascending: false }).limit(50),
+    supabase.from('email_candidates').select('*').eq('workspace_id', workspace.id).eq('business_id', id).order('created_at', { ascending: false }).limit(25),
+    supabase.from('no_inbox_records').select('*').eq('workspace_id', workspace.id).eq('business_id', id).order('created_at', { ascending: false }).limit(50),
+    supabase.from('gmail_accounts').select('id,workspace_id,email,display_name,status,created_at,updated_at').eq('workspace_id', workspace.id).order('created_at', { ascending: false })
   ]);
 
   const sourceEvidence = sourceFromRaw((typedBusiness.raw as any)?.backend_email_research || typedBusiness.raw);
   const hasEmail = Boolean(String(typedBusiness.email || '').trim());
+  const socialLinks = extractSocialLinks(typedBusiness.raw);
 
   return (
     <div className="stack">
@@ -63,6 +81,8 @@ export default async function BusinessDetailPage({ params }: { params: Promise<{
       </div>
 
       <BusinessDetailActions workspace={workspace} businessId={id} hasEmail={hasEmail} currentStatus={typedBusiness.status} />
+
+      <BusinessConversationPanel workspace={workspace} business={typedBusiness as any} accounts={(accountsRes.data || []) as any} sentRows={(sentRes.data || []) as any} replyRows={(repliesRes.data || []) as any} noInboxRows={(noInboxRes.data || []) as any} socialLinks={socialLinks} />
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
@@ -99,11 +119,11 @@ export default async function BusinessDetailPage({ params }: { params: Promise<{
         </div>
 
         <div className="card" style={{ padding: 18 }}>
-          <h3>Conversation</h3>
-          <p className="muted">This is where you confirm whether this business was contacted and whether they actually replied.</p>
+          <h3>Reply Classification Summary</h3>
+          <p className="muted">Compact record of sent messages and classified inbound messages. Use the full conversation panel above to respond.</p>
           <div className="table-wrap"><table><thead><tr><th>Type</th><th>Email</th><th>Subject</th><th>Date</th></tr></thead><tbody>
             {(sentRes.data || []).map((row: any) => <tr key={`s-${row.id}`}><td>Sent</td><td>{row.to_email}</td><td>{row.subject}</td><td>{new Date(row.sent_at).toLocaleString()}</td></tr>)}
-            {(repliesRes.data || []).map((row: any) => <tr key={`r-${row.id}`}><td>{row.is_real_reply ? 'Real reply' : 'Ignored reply'}</td><td>{row.from_email}</td><td>{row.subject}</td><td>{new Date(row.received_at).toLocaleString()}</td></tr>)}
+            {(repliesRes.data || []).map((row: any) => <tr key={`r-${row.id}`}><td>{row.is_real_reply ? 'Real reply' : row.is_auto_reply ? 'Auto reply' : row.classification || 'Other inbound'}</td><td>{row.from_email}</td><td>{row.subject}</td><td>{new Date(row.received_at).toLocaleString()}</td></tr>)}
             {!(sentRes.data || []).length && !(repliesRes.data || []).length ? <tr><td colSpan={4} className="muted">No messages or replies recorded yet.</td></tr> : null}
           </tbody></table></div>
         </div>

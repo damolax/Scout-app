@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { GmailAccount, MessageTemplate, Workspace } from '@/lib/types';
@@ -19,6 +20,12 @@ type ReplyRow = {
   snippet?: string | null;
   classification?: string | null;
   is_real_reply?: boolean | null;
+  is_auto_reply?: boolean | null;
+  is_delivery_failure?: boolean | null;
+  is_blocked?: boolean | null;
+  is_limit_notice?: boolean | null;
+  is_temporary?: boolean | null;
+  reply_bucket?: string | null;
   received_at?: string | null;
   template_id?: string | null;
   gmail_account_id?: string | null;
@@ -67,7 +74,11 @@ type NormalizedMessage = {
 type SyncStats = {
   scanned: number;
   realReplies: number;
+  autoReplies: number;
   noInbox: number;
+  blocked: number;
+  bounced: number;
+  limitNotices: number;
   ignored: number;
   inserted: number;
   errors: string[];
@@ -169,9 +180,9 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, boolean>>({});
   const [syncLimit, setSyncLimit] = useState(100);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('Native Gmail reply sync is ready. It reads connected Gmail accounts, separates real replies from bounces/no-inbox/message-blocked notices, and updates businesses automatically.');
+  const [status, setStatus] = useState('Native Gmail reply sync is ready. It separates real replies, auto replies, no-inbox failures, message-blocked notices, and Gmail limit notices so response analytics stay clean.');
   const [error, setError] = useState('');
-  const [lastStats, setLastStats] = useState<SyncStats>({ scanned: 0, realReplies: 0, noInbox: 0, ignored: 0, inserted: 0, errors: [] });
+  const [lastStats, setLastStats] = useState<SyncStats>({ scanned: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, ignored: 0, inserted: 0, errors: [] });
 
   async function loadAll() {
     setError('');
@@ -299,7 +310,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     }
     setBusy(true);
     setError('');
-    const stats: SyncStats = { scanned: 0, realReplies: 0, noInbox: 0, ignored: 0, inserted: 0, errors: [] };
+    const stats: SyncStats = { scanned: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, ignored: 0, inserted: 0, errors: [] };
     try {
       setStatus(`Syncing replies, bounces, no-inbox, and blocked notices from ${selected.length} Gmail account(s)...`);
       for (const account of selected) {
@@ -314,7 +325,11 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
           if (!response.ok || json?.success === false) throw new Error(json?.error || `Native Gmail sync failed with HTTP ${response.status}`);
           stats.scanned += Number(json.scanned || 0);
           stats.realReplies += Number(json.realReplies || 0);
-          stats.noInbox += Number(json.noInbox || 0) + Number(json.blocked || 0);
+          stats.autoReplies += Number(json.autoReplies || 0);
+          stats.noInbox += Number(json.noInbox || 0);
+          stats.blocked += Number(json.blocked || 0);
+          stats.bounced += Number(json.bounced || 0);
+          stats.limitNotices += Number(json.limitNotices || 0);
           stats.ignored += Number(json.ignored || 0) + Number(json.temporary || 0) + Number(json.unmatched || 0);
           stats.inserted += Number(json.saved || 0);
         } catch (err) {
@@ -322,7 +337,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
         }
       }
       setLastStats(stats);
-      setStatus(`Native Gmail sync finished. Scanned ${stats.scanned}, saved ${stats.inserted}, real replies ${stats.realReplies}, no-inbox/blocked ${stats.noInbox}, ignored/unmatched ${stats.ignored}.`);
+      setStatus(`Native Gmail sync finished. Scanned ${stats.scanned}, saved ${stats.inserted}, real replies ${stats.realReplies}, auto replies ${stats.autoReplies}, no-inbox ${stats.noInbox}, blocked ${stats.blocked}, bounces ${stats.bounced}, Gmail limit notices ${stats.limitNotices}, ignored/unmatched ${stats.ignored}.`);
       if (stats.errors.length) setError(stats.errors.join('\n'));
       await loadAll();
     } catch (err) {
@@ -336,8 +351,9 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     return templates.map((template) => {
       const sent = sentRows.filter((row) => row.template_id === template.id).length;
       const realReplies = replyRows.filter((row) => row.template_id === template.id && row.is_real_reply === true).length;
-      const ignored = replyRows.filter((row) => row.template_id === template.id && row.is_real_reply === false).length;
-      return { template, sent, realReplies, ignored, perReply: realReplies ? (sent / realReplies).toFixed(1) : '-' };
+      const auto = replyRows.filter((row) => row.template_id === template.id && (row.is_auto_reply === true || row.reply_bucket === 'auto_reply')).length;
+      const failures = replyRows.filter((row) => row.template_id === template.id && (row.is_delivery_failure === true || row.is_limit_notice === true)).length;
+      return { template, sent, realReplies, auto, failures, perReply: realReplies ? (sent / realReplies).toFixed(1) : '-' };
     });
   }
 
@@ -345,13 +361,17 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     return accounts.map((account) => {
       const sent = sentRows.filter((row) => row.gmail_account_id === account.id).length;
       const realReplies = replyRows.filter((row) => row.gmail_account_id === account.id && row.is_real_reply === true).length;
+      const auto = replyRows.filter((row) => row.gmail_account_id === account.id && (row.is_auto_reply === true || row.reply_bucket === 'auto_reply')).length;
       const noInbox = noInboxRows.filter((row) => normalizeEmail(row.email) && sentRows.some((sent) => sent.gmail_account_id === account.id && normalizeEmail(sent.to_email) === normalizeEmail(row.email))).length;
-      return { account, sent, realReplies, noInbox, perReply: realReplies ? (sent / realReplies).toFixed(1) : '-' };
+      return { account, sent, realReplies, auto, noInbox, perReply: realReplies ? (sent / realReplies).toFixed(1) : '-' };
     });
   }
 
-  const realReplies = replyRows.filter((row) => row.is_real_reply === true);
-  const ignoredReplies = replyRows.filter((row) => row.is_real_reply === false);
+  const realReplies = replyRows.filter((row) => row.is_real_reply === true || row.reply_bucket === 'real_reply');
+  const autoReplies = replyRows.filter((row) => row.is_auto_reply === true || row.reply_bucket === 'auto_reply' || row.classification === 'auto_reply');
+  const deliverySignals = replyRows.filter((row) => row.is_delivery_failure === true || ['no_inbox', 'message_blocked', 'bounce_notice'].includes(String(row.classification || row.reply_bucket || '')));
+  const limitSignals = replyRows.filter((row) => row.is_limit_notice === true || row.classification === 'gmail_limit_notice');
+  const ignoredReplies = replyRows.filter((row) => row.is_real_reply !== true && row.is_auto_reply !== true && row.is_delivery_failure !== true && row.is_limit_notice !== true && !['real_reply','auto_reply','no_inbox','message_blocked','bounce_notice','gmail_limit_notice'].includes(String(row.classification || row.reply_bucket || '')));
   const sentCount = sentRows.length;
 
   return (
@@ -359,15 +379,15 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Sent Tracked</div><div className="num">{sentCount.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Real Replies</div><div className="num">{realReplies.length.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">No Inbox / Bounce</div><div className="num">{noInboxRows.length.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Emails Per Reply</div><div className="num">{realReplies.length ? (sentCount / realReplies.length).toFixed(1) : '-'}</div></div>
+        <div className="card kpi"><div className="title">Auto Replies</div><div className="num">{autoReplies.length.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">No Inbox / Blocked</div><div className="num">{noInboxRows.length.toLocaleString()}</div></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <div className="actions" style={{ justifyContent: 'space-between' }}>
           <div>
             <h3 style={{ margin: 0 }}>Reply Sync</h3>
-            <p className="muted" style={{ marginBottom: 0 }}>Native Gmail sync. Real prospect replies move businesses to Responded. Address-not-found, bounces, and message-blocked notices are saved to No Inbox/Blocked and excluded from response counts.</p>
+            <p className="muted" style={{ marginBottom: 0 }}>Native Gmail sync. Real human replies move businesses to Responded. Auto replies are tracked separately. Address-not-found, bounces, message-blocked, and Gmail limit notices are not counted as real replies.</p>
           </div>
           <button className="btn secondary" onClick={() => loadAll().catch((err) => setError(formatError(err)))} disabled={busy}>Refresh</button>
         </div>
@@ -400,38 +420,56 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Last Sync Scanned</div><div className="num">{lastStats.scanned.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Last Sync Real</div><div className="num">{lastStats.realReplies.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Last Sync No Inbox</div><div className="num">{lastStats.noInbox.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Last Sync Ignored</div><div className="num">{lastStats.ignored.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Last Sync Auto</div><div className="num">{lastStats.autoReplies.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Failures / Limits</div><div className="num">{(lastStats.noInbox + lastStats.blocked + lastStats.bounced + lastStats.limitNotices).toLocaleString()}</div></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Template Response Tracking</h3>
-        <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Real Replies</th><th>Ignored / Bounce</th><th>Emails Per Reply</th></tr></thead><tbody>
-          {templatePerformance().map((row) => <tr key={row.template.id}><td>{row.template.name}</td><td>{row.sent}</td><td>{row.realReplies}</td><td>{row.ignored}</td><td>{row.perReply}</td></tr>)}
-          {!templates.length ? <tr><td colSpan={5} className="muted">No templates yet.</td></tr> : null}
+        <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Real Replies</th><th>Auto Replies</th><th>Failures</th><th>Emails Per Reply</th></tr></thead><tbody>
+          {templatePerformance().map((row) => <tr key={row.template.id}><td>{row.template.name}</td><td>{row.sent}</td><td>{row.realReplies}</td><td>{row.auto}</td><td>{row.failures}</td><td>{row.perReply}</td></tr>)}
+          {!templates.length ? <tr><td colSpan={6} className="muted">No templates yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Sender Response Tracking</h3>
-        <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Status</th><th>Sent</th><th>Real Replies</th><th>No Inbox</th><th>Emails Per Reply</th></tr></thead><tbody>
-          {senderPerformance().map((row) => <tr key={row.account.id}><td>{row.account.email}</td><td>{row.account.status}</td><td>{row.sent}</td><td>{row.realReplies}</td><td>{row.noInbox}</td><td>{row.perReply}</td></tr>)}
-          {!accounts.length ? <tr><td colSpan={6} className="muted">No senders yet.</td></tr> : null}
+        <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Status</th><th>Sent</th><th>Real Replies</th><th>Auto Replies</th><th>No Inbox</th><th>Emails Per Reply</th></tr></thead><tbody>
+          {senderPerformance().map((row) => <tr key={row.account.id}><td>{row.account.email}</td><td>{row.account.status}</td><td>{row.sent}</td><td>{row.realReplies}</td><td>{row.auto}</td><td>{row.noInbox}</td><td>{row.perReply}</td></tr>)}
+          {!accounts.length ? <tr><td colSpan={7} className="muted">No senders yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Real Replies</h3>
-        <div className="table-wrap"><table><thead><tr><th>From</th><th>Subject</th><th>Snippet</th><th>Template</th><th>Received</th></tr></thead><tbody>
-          {realReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{templates.find((t) => t.id === r.template_id)?.name || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
-          {!realReplies.length ? <tr><td colSpan={5} className="muted">No real replies yet.</td></tr> : null}
+        <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Template</th><th>Received</th></tr></thead><tbody>
+          {realReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{templates.find((t) => t.id === r.template_id)?.name || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
+          {!realReplies.length ? <tr><td colSpan={6} className="muted">No real replies yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Ignored / No Inbox Signals</h3>
+        <h3>Auto Replies</h3>
+        <p className="muted">Auto replies are real inbound messages, but they are not human responses. If the same business later sends a human reply, Scout moves it to Real Reply automatically.</p>
+        <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Received</th></tr></thead><tbody>
+          {autoReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
+          {!autoReplies.length ? <tr><td colSpan={5} className="muted">No auto replies yet.</td></tr> : null}
+        </tbody></table></div>
+      </div>
+
+      <div className="card" style={{ padding: 18 }}>
+        <h3>Delivery / Limit Signals</h3>
+        <p className="muted">No-inbox, bounces, message-blocked, and limit notices are not counted as real replies.</p>
+        <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Classification</th><th>Received</th></tr></thead><tbody>
+          {[...deliverySignals, ...limitSignals].slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.classification || r.reply_bucket || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
+          {![...deliverySignals, ...limitSignals].length ? <tr><td colSpan={5} className="muted">No delivery or limit signals yet.</td></tr> : null}
+        </tbody></table></div>
+      </div>
+
+      <div className="card" style={{ padding: 18 }}>
+        <h3>Other Ignored / Unmatched Signals</h3>
         <div className="table-wrap"><table><thead><tr><th>From</th><th>Subject</th><th>Classification</th><th>Counts as Response?</th><th>Received</th></tr></thead><tbody>
-          {ignoredReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.classification || '-'}</td><td>No</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
+          {ignoredReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.classification || r.reply_bucket || '-'}</td><td>No</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
           {!ignoredReplies.length ? <tr><td colSpan={5} className="muted">No ignored/bounce records yet.</td></tr> : null}
         </tbody></table></div>
       </div>

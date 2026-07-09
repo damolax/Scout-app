@@ -20,9 +20,13 @@ type NormalizedInbound = {
 
 type Classification = {
   classification: string;
+  replyBucket: 'real_reply' | 'auto_reply' | 'no_inbox' | 'blocked' | 'bounce_notice' | 'limit_notice' | 'temporary_failure' | 'unmatched' | 'ignored';
   isRealReply: boolean;
+  isAutoReply: boolean;
+  deliveryFailure: boolean;
   noInbox: boolean;
   blocked: boolean;
+  limitNotice: boolean;
   temporary: boolean;
   ignored: boolean;
   businessStatus?: 'responded' | 'no_inbox' | 'bounced';
@@ -45,8 +49,11 @@ type InboundStats = {
   saved: number;
   matched: number;
   realReplies: number;
+  autoReplies: number;
   noInbox: number;
   blocked: number;
+  bounced: number;
+  limitNotices: number;
   temporary: number;
   ignored: number;
   unmatched: number;
@@ -182,32 +189,37 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
   const noInboxTerms = [
     'address not found', 'user unknown', 'no such user', 'mailbox unavailable', 'mailbox not found',
     'recipient address rejected', 'does not exist', 'doesn\'t exist', '550 5.1.1', '5.1.1',
-    'recipient not found', 'unknown recipient', 'invalid recipient', 'delivery to the following recipient failed permanently'
+    'recipient not found', 'unknown recipient', 'invalid recipient', 'delivery to the following recipient failed permanently',
+    'the email account that you tried to reach does not exist', 'unable to receive mail', 'no such recipient'
   ];
   const blockedTerms = [
     'message blocked', 'blocked', 'rejected due to security', 'rejected by our system', 'policy reason',
-    'spam content', 'looks like spam', 'similar to messages that were identified as spam', 'unsolicited mail'
+    'spam content', 'looks like spam', 'similar to messages that were identified as spam', 'unsolicited mail',
+    'not accepted due to spam', 'rejected as spam', 'policy violation', 'our system has detected that this message is suspicious'
   ];
   const bounceTerms = [
     'mailer-daemon', 'mail delivery subsystem', 'postmaster', 'delivery status notification', 'undeliverable',
-    'message not delivered', 'delivery incomplete', 'delivery failed', 'permanent failure', 'failure notice'
+    'message not delivered', 'delivery incomplete', 'delivery failed', 'permanent failure', 'failure notice',
+    'returned mail', 'delivery has failed'
   ];
-  const limitTerms = ['sending limit', 'rate limit', 'quota exceeded', 'daily user sending quota exceeded', 'too many messages', 'user-rate limit'];
-  const autoTerms = ['out of office', 'automatic reply', 'auto-reply', 'vacation responder', 'autoreply', 'auto reply'];
-  const temporaryTerms = ['temporary failure', 'try again later', 'deferred', '4.2.0', '4.4.1', '4.7.0', 'temporarily unavailable'];
+  const limitTerms = ['sending limit', 'rate limit', 'quota exceeded', 'daily user sending quota exceeded', 'too many messages', 'user-rate limit', 'mail sending limit exceeded'];
+  const autoTerms = [
+    'out of office', 'automatic reply', 'auto-reply', 'vacation responder', 'autoreply', 'auto reply',
+    'away from the office', 'i am currently away', 'i am out of the office', 'this is an automated response',
+    'this is an automatic response', 'automatic email reply'
+  ];
+  const temporaryTerms = ['temporary failure', 'try again later', 'deferred', '4.2.0', '4.4.1', '4.7.0', 'temporarily unavailable', 'greylisted'];
 
-  if (limitTerms.some((term) => text.includes(term))) return { classification: 'gmail_limit_notice', isRealReply: false, noInbox: false, blocked: false, temporary: false, ignored: true };
-  if (noInboxTerms.some((term) => text.includes(term))) return { classification: 'no_inbox', isRealReply: false, noInbox: true, blocked: false, temporary: false, ignored: false, businessStatus: 'no_inbox' };
-  if (blockedTerms.some((term) => text.includes(term)) && bounceTerms.some((term) => text.includes(term))) return { classification: 'message_blocked', isRealReply: false, noInbox: false, blocked: true, temporary: false, ignored: false, businessStatus: 'bounced' };
-  if (bounceTerms.some((term) => text.includes(term))) return { classification: 'bounce_notice', isRealReply: false, noInbox: false, blocked: false, temporary: false, ignored: true, businessStatus: 'bounced' };
-  if (blockedTerms.some((term) => text.includes(term))) return { classification: 'message_blocked', isRealReply: false, noInbox: false, blocked: true, temporary: false, ignored: false, businessStatus: 'bounced' };
-  if (temporaryTerms.some((term) => text.includes(term))) return { classification: 'temporary_failure', isRealReply: false, noInbox: false, blocked: false, temporary: true, ignored: true };
-  if (autoTerms.some((term) => text.includes(term))) return { classification: 'auto_reply_ignored', isRealReply: false, noInbox: false, blocked: false, temporary: false, ignored: true };
-  if (isSelf) return { classification: 'self_message_ignored', isRealReply: false, noInbox: false, blocked: false, temporary: false, ignored: true };
-  if (!sentMatch) return { classification: 'unmatched_inbound', isRealReply: false, noInbox: false, blocked: false, temporary: false, ignored: true };
-  return { classification: 'real_reply', isRealReply: true, noInbox: false, blocked: false, temporary: false, ignored: false, businessStatus: 'responded' };
+  if (limitTerms.some((term) => text.includes(term))) return { classification: 'gmail_limit_notice', replyBucket: 'limit_notice', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: true, temporary: false, ignored: false };
+  if (noInboxTerms.some((term) => text.includes(term))) return { classification: 'no_inbox', replyBucket: 'no_inbox', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: true, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'no_inbox' };
+  if (blockedTerms.some((term) => text.includes(term))) return { classification: 'message_blocked', replyBucket: 'blocked', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: true, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
+  if (bounceTerms.some((term) => text.includes(term))) return { classification: 'bounce_notice', replyBucket: 'bounce_notice', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
+  if (temporaryTerms.some((term) => text.includes(term))) return { classification: 'temporary_failure', replyBucket: 'temporary_failure', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: true, ignored: false };
+  if (autoTerms.some((term) => text.includes(term))) return { classification: 'auto_reply', replyBucket: 'auto_reply', isRealReply: false, isAutoReply: true, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false };
+  if (isSelf) return { classification: 'self_message_ignored', replyBucket: 'ignored', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
+  if (!sentMatch) return { classification: 'unmatched_inbound', replyBucket: 'unmatched', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
+  return { classification: 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
 }
-
 async function findSentMatch(supabase: SupabaseClient<any, any, any>, workspaceId: string, message: NormalizedInbound) {
   if (message.gmailThreadId) {
     const { data, error } = await supabase
@@ -319,7 +331,13 @@ async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any
     snippet: message.snippet || message.body.slice(0, 240),
     body: message.body,
     classification: classification.classification,
+    reply_bucket: classification.replyBucket,
     is_real_reply: classification.isRealReply,
+    is_auto_reply: classification.isAutoReply,
+    is_delivery_failure: classification.deliveryFailure,
+    is_blocked: classification.blocked,
+    is_limit_notice: classification.limitNotice,
+    is_temporary: classification.temporary,
     received_at: message.receivedAt,
     gmail_message_id: message.gmailMessageId,
     gmail_thread_id: message.gmailThreadId || sentMatch?.gmail_thread_id || null,
@@ -328,19 +346,41 @@ async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any
   });
 
   if (sentMatch?.id) {
-    const deliveryStatus = classification.isRealReply ? 'replied' : classification.classification;
+    const deliveryStatus = classification.isRealReply ? 'replied' : classification.isAutoReply ? 'auto_replied' : classification.classification;
     await supabase.from('sent_messages').update({
       delivery_status: deliveryStatus,
-      error_code: classification.isRealReply ? null : classification.classification,
-      last_reply_at: message.receivedAt
+      error_code: classification.isRealReply || classification.isAutoReply ? null : classification.classification,
+      last_reply_at: classification.isRealReply || classification.isAutoReply ? message.receivedAt : sentMatch.last_reply_at || null
     }).eq('workspace_id', workspaceId).eq('id', sentMatch.id);
   }
 
-  if (classification.businessStatus && sentMatch?.business_id) {
-    await supabase.from('businesses').update({
-      status: classification.businessStatus,
+  if (sentMatch?.business_id) {
+    const businessPatch: AnyRecord = {
+      reply_state: classification.replyBucket,
+      last_reply_classification: classification.classification,
+      last_inbound_at: message.receivedAt,
       updated_at: new Date().toISOString()
-    }).eq('workspace_id', workspaceId).eq('id', sentMatch.business_id);
+    };
+    if (classification.isRealReply) {
+      businessPatch.status = 'responded';
+      businessPatch.reply_state = 'real_reply';
+      businessPatch.last_real_reply_at = message.receivedAt;
+    } else if (classification.isAutoReply) {
+      businessPatch.reply_state = 'auto_reply';
+      businessPatch.last_auto_reply_at = message.receivedAt;
+    } else if (classification.businessStatus) {
+      businessPatch.status = classification.businessStatus;
+    }
+    await supabase.from('businesses').update(businessPatch).eq('workspace_id', workspaceId).eq('id', sentMatch.business_id);
+  }
+
+  if (classification.limitNotice) {
+    await supabase.from('gmail_accounts').update({
+      status: 'limit_hit',
+      paused_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      last_error: message.subject || 'Gmail sending limit notice detected',
+      updated_at: new Date().toISOString()
+    }).eq('workspace_id', workspaceId).eq('id', accountId);
   }
 
   if ((classification.noInbox || classification.blocked || classification.classification === 'bounce_notice') && targetEmail) {
@@ -352,6 +392,13 @@ async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any
       template_id: sentMatch?.template_id || null,
       email: targetEmail,
       reason: classification.classification,
+      status: classification.noInbox ? 'no_inbox' : classification.blocked ? 'message_blocked' : 'bounce_notice',
+      type: classification.replyBucket,
+      bounce_type: classification.classification,
+      from_email: message.fromEmail || message.fromRaw || null,
+      to_email: message.toEmail || targetEmail,
+      subject: message.subject,
+      snippet: message.snippet || message.body.slice(0, 240),
       gmail_message_id: message.gmailMessageId,
       gmail_thread_id: message.gmailThreadId || sentMatch?.gmail_thread_id || null,
       raw: { ...message.raw, classification, sent_match_id: sentMatch?.id || null, candidateEmails: message.candidateEmails }
@@ -378,7 +425,7 @@ export async function syncGmailInbound({ supabase, workspaceId, accountId, maxRe
   const list = await gmailJson(accessToken, listUrl);
   const messages: Array<{ id: string; threadId?: string }> = Array.isArray(list.messages) ? list.messages : [];
 
-  const stats: InboundStats = { success: true, scanned: 0, saved: 0, matched: 0, realReplies: 0, noInbox: 0, blocked: 0, temporary: 0, ignored: 0, unmatched: 0, accountEmail: String((account as AnyRecord).email || '') };
+  const stats: InboundStats = { success: true, scanned: 0, saved: 0, matched: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, temporary: 0, ignored: 0, unmatched: 0, accountEmail: String((account as AnyRecord).email || '') };
 
   for (const item of messages) {
     stats.scanned += 1;
@@ -396,8 +443,11 @@ export async function syncGmailInbound({ supabase, workspaceId, accountId, maxRe
     await applyClassificationUpdates(supabase, workspaceId, normalized, sentMatch, classification, accountId, String((account as AnyRecord).email || ''));
     stats.saved += 1;
     if (classification.isRealReply) stats.realReplies += 1;
+    else if (classification.isAutoReply) stats.autoReplies += 1;
     else if (classification.noInbox) stats.noInbox += 1;
     else if (classification.blocked) stats.blocked += 1;
+    else if (classification.classification === 'bounce_notice') stats.bounced += 1;
+    else if (classification.limitNotice) stats.limitNotices += 1;
     else if (classification.temporary) stats.temporary += 1;
     else if (classification.classification === 'unmatched_inbound') stats.unmatched += 1;
     else stats.ignored += 1;

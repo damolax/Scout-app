@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
 
@@ -49,7 +50,7 @@ export default async function NoInboxPage() {
         <div className="table-wrap"><table><thead><tr><th>Email</th><th>Business</th><th>Reason</th><th>Website</th><th>Gmail Thread</th><th>Created</th></tr></thead><tbody>
           {rows.map((r) => {
             const business = Array.isArray(r.businesses) ? r.businesses[0] : r.businesses;
-            return <tr key={r.id}><td>{text(r.email)}</td><td>{text(business?.name)}</td><td>{text(r.reason)}</td><td>{text(business?.website || business?.domain)}</td><td>{text(r.gmail_thread_id)}</td><td>{r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td></tr>;
+            return <tr key={r.id}><td>{text(r.email)}</td><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>{text(business?.name)}</Link> : text(business?.name)}</td><td>{text(r.reason)}</td><td>{text(business?.website || business?.domain)}</td><td>{text(r.gmail_thread_id)}</td><td>{r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td></tr>;
           })}
           {!rows.length ? <tr><td colSpan={6} className="muted">No Gmail delivery failure records yet. Run Replies → Sync replies + bounces, or Message → Sync Bounces/Blocked.</td></tr> : null}
         </tbody></table></div>
@@ -58,7 +59,7 @@ export default async function NoInboxPage() {
       <div className="card" style={{ padding: 18 }}>
         <h3>Businesses Marked No Inbox / Bounced / Invalid</h3>
         <div className="table-wrap"><table><thead><tr><th>Business</th><th>Email</th><th>Website</th><th>Status</th><th>Updated</th></tr></thead><tbody>
-          {fallbackBusinesses.map((b) => <tr key={b.id}><td>{text(b.name)}</td><td>{text(b.email)}</td><td>{text(b.website || b.domain)}</td><td className={`status ${b.status}`}>{text(b.status)}</td><td>{b.updated_at ? new Date(b.updated_at).toLocaleString() : '-'}</td></tr>)}
+          {fallbackBusinesses.map((b) => <tr key={b.id}><td><Link href={`/businesses/${b.id}`}>{text(b.name)}</Link></td><td>{text(b.email)}</td><td>{text(b.website || b.domain)}</td><td className={`status ${b.status}`}>{text(b.status)}</td><td>{b.updated_at ? new Date(b.updated_at).toLocaleString() : '-'}</td></tr>)}
           {!fallbackBusinesses.length ? <tr><td colSpan={5} className="muted">No businesses currently marked no_inbox, bounced, or invalid.</td></tr> : null}
         </tbody></table></div>
       </div>

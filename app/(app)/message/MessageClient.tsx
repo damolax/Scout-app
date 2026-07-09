@@ -609,7 +609,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         target_count: Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(scheduleCount || sendLimit || 1000))),
         scheduled_for: new Date(scheduleFor).toISOString(),
         status: 'scheduled',
-        raw: { business_category_filter: businessCategoryFilter, template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])), delay_ms: delayMs, dry_run: dryRun }
+        raw: { business_category_filter: businessCategoryFilter, template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])), delay_ms: delayMs, dry_run: dryRun, allow_high_risk_send: allowHighRiskSend }
       });
       if (insertError) throw insertError;
       setStatus('Schedule saved with the current template and sender options.');
@@ -638,7 +638,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         target_count: dueFollowUps.length,
         scheduled_for: new Date(followUpFor).toISOString(),
         status: 'scheduled',
-        raw: { due_mode: true, followup_after_hours: 72, due_business_ids: dueFollowUps.map((d) => d.business_id), template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])) }
+        raw: { due_mode: true, followup_after_hours: 72, due_business_ids: dueFollowUps.map((d) => d.business_id), template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])), dry_run: dryRun, allow_high_risk_send: allowHighRiskSend }
       });
       if (insertError) throw insertError;
       setStatus(`Scheduled ${dueFollowUps.length.toLocaleString()} due follow-up(s).`);
@@ -664,18 +664,28 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   }
 
   async function sendDueSchedulesNow() {
-    const due = schedules.filter((s) => new Date(s.scheduled_for).getTime() <= Date.now() && s.status === 'scheduled');
-    if (!due.length) return setStatus('No due schedules yet.');
-    const first = due[0];
-    const count = Number(first.target_count || sendLimit || 1000);
-    if (first.type === 'follow_up') {
-      const contacts = await getDueFollowUpBusinesses(count);
-      await sendBatch(contacts, { isFollowUp: true, limit: count });
-    } else {
-      await sendBatch(undefined, { limit: count });
+    setBusy(true);
+    setError('');
+    try {
+      setStatus('Running scheduled sender worker now...');
+      const response = await fetch('/api/message/run-schedules', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ limit: 3 })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Schedule worker failed with HTTP ${response.status}`);
+      const results = Array.isArray(json.results) ? json.results : [];
+      const sent = results.reduce((sum: number, row: any) => sum + Number(row.sent || 0), 0);
+      const failed = results.reduce((sum: number, row: any) => sum + Number(row.failed || 0), 0);
+      const skipped = results.reduce((sum: number, row: any) => sum + Number(row.skipped || 0), 0);
+      setStatus(`Scheduled worker finished. Schedules processed: ${Number(json.ran || 0)}. Sent ${sent}, failed ${failed}, skipped ${skipped}.`);
+      await Promise.all([loadSchedules(), loadReadyContacts(), loadRecentSent(), loadDueFollowUps(), loadAccounts()]);
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
     }
-    await supabase.from('message_schedules').update({ status: 'sent', updated_at: new Date().toISOString() }).eq('workspace_id', workspace.id).eq('id', first.id);
-    await loadSchedules();
   }
 
   async function syncBlockedAndBounced() {
@@ -819,8 +829,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedules</h3>
+          <p className="muted">v8.25 adds the server-side scheduled sender worker. Saved schedules can now run from this button or from the deployed worker route.</p>
           <div className="grid grid-3"><div><label className="label">Type</label><select className="select" value={scheduleType} onChange={(e) => setScheduleType(e.target.value as 'initial' | 'follow_up')}><option value="initial">Initial batch</option><option value="follow_up">Follow-up</option></select></div><div><label className="label">Date & time</label><input className="input" type="datetime-local" value={scheduleFor} onChange={(e) => setScheduleFor(e.target.value)} /></div><div><label className="label">Count</label><input className="input" type="number" value={scheduleCount} onChange={(e) => setScheduleCount(Number(e.target.value || 1000))} /></div></div>
-          <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={saveSchedule}>Save Schedule</button><button className="btn" type="button" disabled={busy} onClick={sendDueSchedulesNow}>Send Due Schedule Now</button></div>
+          <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={saveSchedule}>Save Schedule</button><button className="btn" type="button" disabled={busy} onClick={sendDueSchedulesNow}>Run Scheduled Worker Now</button></div>
           <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Type</th><th>For</th><th>Count</th><th>Status</th></tr></thead><tbody>
             {schedules.map((s) => <tr key={s.id}><td>{s.type}</td><td>{new Date(s.scheduled_for).toLocaleString()}</td><td>{Number(s.target_count || 0).toLocaleString()}</td><td>{s.status}</td></tr>)}
             {!schedules.length ? <tr><td colSpan={4} className="muted">No schedules yet.</td></tr> : null}

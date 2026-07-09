@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-24-1-seed-no-inbox-fix",
-  "version": "8.24.1",
+  "name": "scout-app-v8-25-reply-intelligence-business-hub",
+  "version": "8.25.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.24.1: seed inbox UX clarity and no-inbox false-positive cleanup for own Gmail accounts."
+  "description": "Scout App v8.25: reply intelligence classification, auto-reply tracking, delivery-failure handling, and business conversation reply hub."
 }
