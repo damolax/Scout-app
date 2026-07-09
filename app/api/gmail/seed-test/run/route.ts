@@ -80,7 +80,9 @@ async function runSeedInboxTest(workspaceId: string) {
   const senders = readyAccounts.filter((a: any) => !a.paused_until || new Date(a.paused_until).getTime() <= Date.now());
   const seeds = readyAccounts.filter((a: any) => Boolean(a.seed_inbox_enabled));
   if (!senders.length) throw new Error('No connected Gmail senders found.');
-  if (!seeds.length) throw new Error('No seed inbox is enabled in Settings. Tick “Use as seed inbox” for at least one connected Gmail.');
+  if (!seeds.length) throw new Error('No seed inbox is enabled in Settings. Tick “Use as seed inbox”, click Save limits on that row, then run the test.');
+  const possiblePairs = senders.flatMap((sender: any) => seeds.map((seed: any) => ({ sender, seed }))).filter(({ sender, seed }: any) => sender.id !== seed.id);
+  if (!possiblePairs.length) throw new Error('Seed inbox testing needs at least 2 connected Gmail accounts: one sender and one seed inbox. Scout does not count sending an account to itself as a useful spam placement test.');
 
   let sent = 0;
   let inbox = 0;

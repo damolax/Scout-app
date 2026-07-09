@@ -215,7 +215,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         updated_at: new Date().toISOString()
       }).eq('workspace_id', workspace.id).eq('id', account.id);
       if (updateError) throw updateError;
-      setStatus(`Saved sender limits for ${account.email}. Message will use this default max unless you override it in a run.`);
+      setStatus(`Saved settings for ${account.email}. If you enabled seed inbox, now click Run seed inbox test now. Seed testing needs at least 2 connected Gmail accounts for cross-account testing.`);
       await loadAccounts();
     } catch (err) {
       setError(formatError(err));
@@ -334,17 +334,17 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
               <td><strong>{account.email}</strong><br /><span className="muted">{account.last_error || (account.paused_until ? `Paused until ${new Date(account.paused_until).toLocaleString()}` : 'Ready')}</span></td>
               <td><span className={`status ${isPaused(account) ? 'paused' : account.status}`}>{isPaused(account) ? 'paused' : account.status}</span><br /><select className="select" value={draft.account_type} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, account_type: e.target.value } }))}><option value="gmail">Gmail</option><option value="workspace">Workspace</option><option value="custom">Custom</option></select></td>
               <td><div className="grid grid-2"><div><label className="label">Daily safe limit</label><input className="input" type="number" min={1} value={draft.daily_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, daily_limit: e.target.value } }))} /></div><div><label className="label">Default max/run</label><input className="input" type="number" min={1} value={draft.default_run_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, default_run_limit: e.target.value } }))} /></div></div></td>
-              <td><label className="checkbox-row"><input type="checkbox" checked={draft.seed_inbox_enabled} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_inbox_enabled: e.target.checked } }))} /> Use as seed inbox</label><input className="input" value={draft.seed_test_address} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_test_address: e.target.value } }))} placeholder="seed inbox email" /></td>
+              <td><label className="checkbox-row"><input type="checkbox" checked={draft.seed_inbox_enabled} onChange={(e) => { setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_inbox_enabled: e.target.checked } })); setStatus('Seed inbox checkbox changed. Click Save limits on that row, then click Run seed inbox test now. The checkbox alone does not run a spam test.'); }} /> Use as seed inbox</label><input className="input" value={draft.seed_test_address} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_test_address: e.target.value } }))} placeholder="seed inbox email" /></td>
               <td>{Number(account.sent_today || 0).toLocaleString()} / {Number(account.daily_limit || 0).toLocaleString()}<br /><span className="badge">{account.spam_risk_status || account.last_seed_result || 'unknown'}</span></td>
               <td><button className="btn secondary" type="button" disabled={busy} onClick={() => saveSenderSettings(account)}>Save limits</button> <button className="btn secondary" type="button" disabled={busy || !(account.access_token || account.refresh_token)} onClick={() => verifySenderProfile(account)}>Verify</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => pauseOrResume(account)}>{isPaused(account) || account.status !== 'connected' ? 'Resume' : 'Pause'}</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => removeAccount(account)}>Remove</button></td>
             </tr>;
           })}
           {!accounts.length ? <tr><td colSpan={6} className="muted">No senders connected yet. Click Connect Gmail, approve permissions, and this table should update after Google redirects back.</td></tr> : null}
         </tbody></table></div>
-        <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={runSeedTestNow}>Run seed inbox test now</button></div>
+        <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={runSeedTestNow}>Run seed inbox test now</button><span className="muted">Save the seed inbox row first. For real testing, connect at least 2 Gmail accounts so they can test each other.</span></div>
         <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Sender</th><th>Seed inbox</th><th>Placement</th><th>Checked</th></tr></thead><tbody>
           {seedTests.map((row) => <tr key={row.id}><td>{row.sender_email}</td><td>{row.seed_email}</td><td><span className={`status ${row.placement || 'pending'}`}>{row.placement || 'pending'}</span></td><td>{row.checked_at || row.created_at ? new Date(row.checked_at || row.created_at || '').toLocaleString() : '-'}</td></tr>)}
-          {!seedTests.length ? <tr><td colSpan={4} className="muted">No seed inbox tests yet. Enable one or more seed inboxes above, then run a test.</td></tr> : null}
+          {!seedTests.length ? <tr><td colSpan={4} className="muted">No seed inbox tests yet. Checking the seed box only enables the account as a receiver. Click Save limits on that row, then Run seed inbox test now. You need at least 2 connected Gmail accounts for cross-account testing.</td></tr> : null}
         </tbody></table></div>
       </div>
 

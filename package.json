@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-24-reply-sync-no-inbox",
-  "version": "8.24.0",
+  "name": "scout-app-v8-24-1-seed-no-inbox-fix",
+  "version": "8.24.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.24: native Gmail reply sync, no-inbox/bounce/message-blocked tracking, matched response counting, and improved No Inbox reporting."
+  "description": "Scout App v8.24.1: seed inbox UX clarity and no-inbox false-positive cleanup for own Gmail accounts."
 }

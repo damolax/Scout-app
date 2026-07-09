@@ -276,8 +276,36 @@ async function saveNoInboxRecord(supabase: SupabaseClient<any, any, any>, payloa
   return 'inserted';
 }
 
-async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any>, workspaceId: string, message: NormalizedInbound, sentMatch: AnyRecord | null, classification: Classification, accountId: string) {
-  const targetEmail = sentMatch?.to_email || message.candidateEmails.find((email) => email !== message.fromEmail) || message.fromEmail || null;
+
+function isUsableFailureTarget(email: string | null | undefined, accountEmail: string, message: NormalizedInbound, sentMatch: AnyRecord | null) {
+  const value = normalizeEmail(email || '');
+  if (!value) return false;
+  const selfEmails = new Set([
+    normalizeEmail(accountEmail),
+    normalizeEmail(message.toEmail),
+    normalizeEmail(sentMatch?.from_email),
+    normalizeEmail(sentMatch?.sender_email),
+    normalizeEmail(sentMatch?.reply_to_email)
+  ].filter(Boolean));
+  if (selfEmails.has(value)) return false;
+  if (value.includes('mailer-daemon') || value.includes('postmaster')) return false;
+  if (value.endsWith('@googlemail.com') || value.endsWith('@gmail.com') && value === normalizeEmail(accountEmail)) return false;
+  return true;
+}
+
+function findFailureTargetEmail(message: NormalizedInbound, sentMatch: AnyRecord | null, accountEmail: string) {
+  const sentTo = normalizeEmail(sentMatch?.to_email || '');
+  if (isUsableFailureTarget(sentTo, accountEmail, message, sentMatch)) return sentTo;
+  for (const email of message.candidateEmails) {
+    if (isUsableFailureTarget(email, accountEmail, message, sentMatch)) return email;
+  }
+  return null;
+}
+
+async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any>, workspaceId: string, message: NormalizedInbound, sentMatch: AnyRecord | null, classification: Classification, accountId: string, accountEmail: string) {
+  const targetEmail = classification.noInbox || classification.blocked || classification.classification === 'bounce_notice'
+    ? findFailureTargetEmail(message, sentMatch, accountEmail)
+    : (sentMatch?.to_email || message.fromEmail || null);
   await saveReplyHistory(supabase, {
     workspace_id: workspaceId,
     business_id: sentMatch?.business_id || null,
@@ -315,7 +343,7 @@ async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any
     }).eq('workspace_id', workspaceId).eq('id', sentMatch.business_id);
   }
 
-  if (classification.noInbox || classification.blocked || classification.classification === 'bounce_notice') {
+  if ((classification.noInbox || classification.blocked || classification.classification === 'bounce_notice') && targetEmail) {
     await saveNoInboxRecord(supabase, {
       workspace_id: workspaceId,
       business_id: sentMatch?.business_id || null,
@@ -365,7 +393,7 @@ export async function syncGmailInbound({ supabase, workspaceId, accountId, maxRe
       continue;
     }
 
-    await applyClassificationUpdates(supabase, workspaceId, normalized, sentMatch, classification, accountId);
+    await applyClassificationUpdates(supabase, workspaceId, normalized, sentMatch, classification, accountId, String((account as AnyRecord).email || ''));
     stats.saved += 1;
     if (classification.isRealReply) stats.realReplies += 1;
     else if (classification.noInbox) stats.noInbox += 1;
