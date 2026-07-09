@@ -138,6 +138,13 @@ export type GmailAccount = {
   client_id?: string | null;
   expires_at?: string | null;
   daily_limit?: number | null;
+  default_run_limit?: number | null;
+  account_type?: string | null;
+  seed_inbox_enabled?: boolean | null;
+  seed_test_address?: string | null;
+  spam_risk_status?: string | null;
+  last_seed_result?: string | null;
+  last_seed_checked_at?: string | null;
   sent_today?: number | null;
   paused_until?: string | null;
   last_error?: string | null;
@@ -170,4 +177,19 @@ export type MessageSchedule = {
   raw?: Record<string, unknown> | null;
   created_at: string;
   updated_at?: string | null;
+};
+
+
+export type SeedInboxTest = {
+  id: string;
+  workspace_id: string;
+  sender_gmail_account_id?: string | null;
+  seed_gmail_account_id?: string | null;
+  sender_email?: string | null;
+  seed_email?: string | null;
+  subject?: string | null;
+  placement?: 'inbox' | 'spam' | 'promotions' | 'blocked' | 'bounced' | 'not_found' | 'sent_pending_check' | string | null;
+  checked_at?: string | null;
+  created_at?: string | null;
+  raw?: Record<string, unknown> | null;
 };

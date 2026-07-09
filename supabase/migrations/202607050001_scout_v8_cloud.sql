@@ -922,3 +922,120 @@ from public.gmail_accounts g
 left join public.sent_messages s on s.gmail_account_id = g.id and s.workspace_id = g.workspace_id
 left join public.reply_history r on r.gmail_account_id = g.id and r.workspace_id = g.workspace_id
 group by g.workspace_id, g.id, g.email;
+
+-- v8.22 Sender settings limits, seed inbox tests, spam guard support.
+alter table public.gmail_accounts add column if not exists account_type text not null default 'gmail';
+alter table public.gmail_accounts add column if not exists default_run_limit int not null default 100;
+alter table public.gmail_accounts add column if not exists seed_inbox_enabled boolean not null default false;
+alter table public.gmail_accounts add column if not exists seed_test_address text;
+alter table public.gmail_accounts add column if not exists spam_risk_status text;
+alter table public.gmail_accounts add column if not exists last_seed_result text;
+alter table public.gmail_accounts add column if not exists last_seed_checked_at timestamptz;
+
+create table if not exists public.seed_inbox_tests (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  sender_gmail_account_id uuid references public.gmail_accounts(id) on delete set null,
+  seed_gmail_account_id uuid references public.gmail_accounts(id) on delete set null,
+  sender_email text,
+  seed_email text,
+  subject text,
+  placement text not null default 'sent_pending_check',
+  checked_at timestamptz,
+  gmail_message_id text,
+  gmail_thread_id text,
+  raw jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists seed_inbox_tests_workspace_created_idx on public.seed_inbox_tests(workspace_id, created_at desc);
+create index if not exists seed_inbox_tests_sender_idx on public.seed_inbox_tests(workspace_id, sender_gmail_account_id, created_at desc);
+create index if not exists gmail_accounts_workspace_seed_idx on public.gmail_accounts(workspace_id, seed_inbox_enabled, spam_risk_status);
+
+alter table public.seed_inbox_tests enable row level security;
+drop policy if exists "seed_inbox_tests select member" on public.seed_inbox_tests;
+create policy "seed_inbox_tests select member" on public.seed_inbox_tests for select using (public.is_workspace_member(workspace_id));
+drop policy if exists "seed_inbox_tests insert member" on public.seed_inbox_tests;
+create policy "seed_inbox_tests insert member" on public.seed_inbox_tests for insert with check (public.is_workspace_member(workspace_id));
+drop policy if exists "seed_inbox_tests update member" on public.seed_inbox_tests;
+create policy "seed_inbox_tests update member" on public.seed_inbox_tests for update using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id));
+drop policy if exists "seed_inbox_tests delete member" on public.seed_inbox_tests;
+create policy "seed_inbox_tests delete member" on public.seed_inbox_tests for delete using (public.is_workspace_member(workspace_id));
+
+
+-- Ensure due follow-ups RPC exists for Message page.
+create or replace function public.get_due_followups(
+  target_workspace uuid,
+  limit_rows int default 100
+)
+returns table(
+  business_id uuid,
+  business_name text,
+  to_email text,
+  last_sent_at timestamptz,
+  last_subject text,
+  template_id uuid,
+  gmail_account_id uuid
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not public.is_workspace_member(target_workspace) then
+    raise exception 'User is not approved for this workspace';
+  end if;
+
+  return query
+  with latest_sent as (
+    select distinct on (s.business_id)
+      s.business_id,
+      s.to_email,
+      s.sent_at,
+      s.subject,
+      s.template_id,
+      s.gmail_account_id
+    from public.sent_messages s
+    where s.workspace_id = target_workspace
+      and s.status = 'sent'
+      and s.sent_at <= now() - interval '72 hours'
+      and s.business_id is not null
+    order by s.business_id, s.sent_at desc
+  )
+  select
+    b.id as business_id,
+    b.name as business_name,
+    l.to_email,
+    l.sent_at as last_sent_at,
+    l.subject as last_subject,
+    l.template_id,
+    l.gmail_account_id
+  from latest_sent l
+  join public.businesses b on b.id = l.business_id and b.workspace_id = target_workspace
+  where b.status = 'contacted'
+    and coalesce(nullif(l.to_email, ''), '') <> ''
+    and not exists (
+      select 1 from public.reply_history r
+      where r.workspace_id = target_workspace
+        and r.business_id = b.id
+        and r.is_real_reply = true
+        and r.received_at >= l.sent_at
+    )
+    and not exists (
+      select 1 from public.no_inbox_records n
+      where n.workspace_id = target_workspace
+        and (n.business_id = b.id or lower(coalesce(n.email, '')) = lower(l.to_email))
+        and n.created_at >= l.sent_at
+    )
+  order by l.sent_at asc
+  limit greatest(1, least(coalesce(limit_rows, 100), 5000));
+end;
+$$;
+
+grant execute on function public.get_due_followups(uuid, int) to authenticated;
+
+select pg_notify('pgrst', 'reload schema');

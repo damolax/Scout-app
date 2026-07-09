@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
+import { analyzeSpamRisk } from '@/lib/spam-guard';
 import { Business, GmailAccount, MessageCategory, MessageSchedule, MessageTemplate, Workspace } from '@/lib/types';
 
 type SendLogRow = {
@@ -178,6 +179,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [sendLimit, setSendLimit] = useState(1000);
   const [delayMs, setDelayMs] = useState(0);
   const [dryRun, setDryRun] = useState(false);
+  const [allowHighRiskSend, setAllowHighRiskSend] = useState(false);
   const [scheduleType, setScheduleType] = useState<'initial' | 'follow_up'>('initial');
   const [scheduleFor, setScheduleFor] = useState(inHours(1));
   const [scheduleCount, setScheduleCount] = useState(1000);
@@ -199,6 +201,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const previewBusiness = readyContacts.find((b) => selectedContacts[b.id]) || readyContacts[0];
   const previewSubject = previewBusiness && currentTemplate ? renderTemplate(splitSubjects(currentTemplate.subject, currentTemplate.subject_variants)[0] || currentTemplate.subject, previewBusiness) : '';
   const previewBody = previewBusiness && currentTemplate ? renderTemplate(currentTemplate.message, previewBusiness) : '';
+  const spamReport = analyzeSpamRisk(previewSubject, previewBody);
 
   async function loadCategories() {
     const { data, error: loadError } = await supabase.from('message_categories').select('*').eq('workspace_id', workspace.id).eq('active', true).order('name', { ascending: true });
@@ -318,7 +321,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
   function senderCap(account: GmailAccount) {
     const raw = senderRunLimits[account.id];
-    if (raw === undefined || raw === null || String(raw).trim() === '') return Number.POSITIVE_INFINITY;
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+      const defaultLimit = Number(account.default_run_limit || account.daily_limit || 0);
+      return Number.isFinite(defaultLimit) && defaultLimit > 0 ? Math.floor(defaultLimit) : Number.POSITIVE_INFINITY;
+    }
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed <= 0) return Number.POSITIVE_INFINITY;
     return Math.floor(parsed);
@@ -449,6 +455,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       if (!templatePool.length) throw new Error('Create/select at least one template in Templates first.');
       let activeAccounts = accountsForSend();
       if (!activeAccounts.length) throw new Error('Connect Gmail in Settings, then select at least one connected sender here.');
+      const guardBusiness = previewBusiness || readyContacts[0] || ({ name: 'there', email: 'test@example.com', website: '', domain: '', category: '', location: '', source: 'Scout' } as Business);
+      const guardTemplate = templatePool[0];
+      const guardSubject = renderTemplate(splitSubjects(guardTemplate.subject, guardTemplate.subject_variants)[0] || guardTemplate.subject, guardBusiness);
+      const guardBody = renderTemplate(guardTemplate.message, guardBusiness);
+      const guard = analyzeSpamRisk(guardSubject, guardBody);
+      if (guard.level === 'High' && !allowHighRiskSend && !dryRun) {
+        throw new Error(`Spam Guard blocked this send because the template risk is HIGH (${guard.score}/100). Fix the template or tick the override checkbox.`);
+      }
       const totalRequested = Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(options?.limit || sendLimit || 1000)));
       const finiteCapSum = activeAccounts.reduce((sum, account) => sum + (Number.isFinite(senderCap(account)) ? senderCap(account) : 0), 0);
       const everySenderCapped = activeAccounts.every((account) => Number.isFinite(senderCap(account)));
@@ -744,8 +758,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             <h3>Sender Choice</h3>
             <label className="checkbox-row"><input type="radio" checked={senderMode === 'specific'} onChange={() => setSenderMode('specific')} /> Use one selected Gmail</label>
             <label className="checkbox-row"><input type="radio" checked={senderMode === 'rotate'} onChange={() => setSenderMode('rotate')} /> Rotate selected Gmail senders</label>
-            {senderMode === 'specific' ? <select className="select" value={specificSenderId} onChange={(e) => setSpecificSenderId(e.target.value)}><option value="">Select sender</option>{connectedAccounts.map((a) => <option key={a.id} value={a.id}>{a.email}</option>)}</select> : <div className="stack" style={{ gap: 8 }}>{connectedAccounts.map((a) => <div key={a.id} className="card" style={{ padding: 10 }}><label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={!!selectedAccounts[a.id]} onChange={(e) => setSelectedAccounts((cur) => ({ ...cur, [a.id]: e.target.checked }))} /> {a.email}</label><div className="grid grid-2" style={{ marginTop: 8 }}><div><label className="label">Max this run</label><input className="input" type="number" min={1} placeholder="Auto" value={senderRunLimits[a.id] || ''} onChange={(e) => setSenderRunLimits((cur) => ({ ...cur, [a.id]: e.target.value }))} /></div><div><label className="label">Sent today</label><div className="notice">{Number(a.sent_today || 0).toLocaleString()} / {Number(a.daily_limit || 0).toLocaleString()}</div></div></div></div>)}</div>}
-            {senderMode === 'specific' && specificSenderId ? <div style={{ marginTop: 10 }}><label className="label">Max this selected sender should send in this run</label><input className="input" type="number" min={1} placeholder="Use total count" value={senderRunLimits[specificSenderId] || ''} onChange={(e) => setSenderRunLimits((cur) => ({ ...cur, [specificSenderId]: e.target.value }))} /></div> : null}
+            {senderMode === 'specific' ? <select className="select" value={specificSenderId} onChange={(e) => setSpecificSenderId(e.target.value)}><option value="">Select sender</option>{connectedAccounts.map((a) => <option key={a.id} value={a.id}>{a.email} · default {Number(a.default_run_limit || a.daily_limit || 0).toLocaleString()}</option>)}</select> : <div className="stack" style={{ gap: 8 }}>{connectedAccounts.map((a) => <div key={a.id} className="card" style={{ padding: 10 }}><label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={!!selectedAccounts[a.id]} onChange={(e) => setSelectedAccounts((cur) => ({ ...cur, [a.id]: e.target.checked }))} /> {a.email}</label><div className="grid grid-2" style={{ marginTop: 8 }}><div><label className="label">Max this run override</label><input className="input" type="number" min={1} placeholder={`Settings default: ${Number(a.default_run_limit || a.daily_limit || 0).toLocaleString()}`} value={senderRunLimits[a.id] || ''} onChange={(e) => setSenderRunLimits((cur) => ({ ...cur, [a.id]: e.target.value }))} /></div><div><label className="label">Sent today / limit</label><div className="notice">{Number(a.sent_today || 0).toLocaleString()} / {Number(a.daily_limit || 0).toLocaleString()} · run default {Number(a.default_run_limit || 0).toLocaleString()}</div></div></div></div>)}</div>}
+            {senderMode === 'specific' && specificSenderId ? <div style={{ marginTop: 10 }}><label className="label">Max this selected sender should send in this run</label><input className="input" type="number" min={1} placeholder={`Settings default: ${Number(connectedAccounts.find((a) => a.id === specificSenderId)?.default_run_limit || connectedAccounts.find((a) => a.id === specificSenderId)?.daily_limit || 0).toLocaleString()}`} value={senderRunLimits[specificSenderId] || ''} onChange={(e) => setSenderRunLimits((cur) => ({ ...cur, [specificSenderId]: e.target.value }))} /></div> : null}
             {!connectedAccounts.length ? <div className="notice" style={{ marginTop: 10 }}>No connected senders. <Link href="/settings">Connect Gmail in Settings</Link>.</div> : null}
             <p className="muted" style={{ marginTop: 10 }}>Total count controls the whole run. Per-sender caps control how much each selected Gmail contributes. Blank means auto-fill the remaining rotation.</p>
           </div>
@@ -753,6 +767,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="actions" style={{ marginTop: 14 }}>
           <label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> Dry run</label>
+          <label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={allowHighRiskSend} onChange={(e) => setAllowHighRiskSend(e.target.checked)} /> Override high spam-risk block</label>
           <button className="btn" type="button" disabled={busy || loading} onClick={() => sendBatch()}>Start Batch</button>
           <button className="btn secondary" type="button" disabled={busy || loading} onClick={refreshAll}>Refresh</button>
           <button className="btn secondary" type="button" disabled={busy || loading} onClick={repairReadyContacts}>Repair Ready</button>
@@ -781,7 +796,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         <div className="card" style={{ padding: 18 }}>
           <h3>Preview</h3>
           <div className="notice">Shortcodes: {SHORTCODES.map((s) => <code key={s}>{s}</code>)}</div>
-          {previewBusiness && currentTemplate ? <><p className="muted">{previewBusiness.name || previewBusiness.email}</p><label className="label">Subject</label><div className="notice">{previewSubject}</div><label className="label" style={{ marginTop: 12 }}>Body</label><div className="card" style={{ padding: 14, whiteSpace: 'pre-wrap' }}>{previewBody}</div></> : <p className="muted">Select a template and load contacts.</p>}
+          {previewBusiness && currentTemplate ? <><p className="muted">{previewBusiness.name || previewBusiness.email}</p><label className="label">Subject</label><div className="notice">{previewSubject}</div><label className="label" style={{ marginTop: 12 }}>Body</label><div className="card" style={{ padding: 14, whiteSpace: 'pre-wrap' }}>{previewBody}</div><div className="notice" style={{ marginTop: 12 }}><strong>Spam Guard:</strong> {spamReport.level} risk · score {spamReport.score}/100. {spamReport.level === 'High' ? 'Scout will block this send unless you override.' : 'You can send, but review findings before a large run.'}</div><div className="stack" style={{ gap: 6, marginTop: 8 }}>{spamReport.findings.slice(0, 6).map((f, idx) => <div className="badge" key={`${f.label}-${idx}`}>{f.severity}: {f.label}</div>)}{!spamReport.findings.length ? <span className="badge">No obvious spam-word issue found.</span> : null}</div></> : <p className="muted">Select a template and load contacts.</p>}
           <h3 style={{ marginTop: 18 }}>Recent Sent</h3>
           <div className="table-wrap"><table><thead><tr><th>To</th><th>From</th><th>Status</th><th>When</th></tr></thead><tbody>
             {recentSent.slice(0, 8).map((row) => <tr key={row.id}><td>{row.to_email}</td><td>{row.from_email}</td><td>{row.status}</td><td>{row.sent_at ? new Date(row.sent_at).toLocaleString() : '-'}</td></tr>)}

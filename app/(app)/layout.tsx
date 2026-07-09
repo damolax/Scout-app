@@ -15,7 +15,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="logo" />
           <div>
             <h1>Scout App</h1>
-            <p>v8.19 Gmail OAuth · {workspace?.name || 'No workspace'}</p>
+            <p>v8.23 Source Scout · {workspace?.name || 'No workspace'}</p>
           </div>
         </div>
         <AppNav />
