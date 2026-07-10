@@ -28,8 +28,7 @@
     "typescript": "6.0.3"
   },
   "engines": {
-    "node": "20.x",
-    "npm": "10.x"
+    "node": "22.x"
   },
   "description": "Scout App v8.39: Supabase follow-up RPC fix, simplified Airtable/Shopify audience targeting, 24-hour sender counts, compact send-time strip, and clearer message scheduling."
 }

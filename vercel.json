@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "installCommand": "npm install --no-audit --no-fund --legacy-peer-deps",
-  "buildCommand": "npm run build",
+  "installCommand": "corepack enable && corepack prepare yarn@1.22.22 --activate && yarn install --ignore-engines --network-timeout 600000",
+  "buildCommand": "corepack enable && corepack prepare yarn@1.22.22 --activate && yarn build",
   "outputDirectory": ".next"
 }
