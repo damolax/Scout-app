@@ -27,10 +27,8 @@
     "eslint-config-next": "16.2.10",
     "typescript": "6.0.3"
   },
-  "packageManager": "npm@10.9.2",
   "engines": {
-    "node": "24.x",
-    "npm": "10.x"
+    "node": "22.x"
   },
   "description": "Scout App v8.38: simplified navigation, top-right notification popover, external-cron/Vercel-Hobby-safe deployment, and stability diagnostics."
 }
