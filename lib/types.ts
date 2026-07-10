@@ -16,6 +16,12 @@ export type Workspace = {
   id: string;
   name: string;
   api_key?: string | null;
+  app_url?: string | null;
+  render_backend_url?: string | null;
+  default_audience_category_id?: string | null;
+  default_audience_category_name?: string | null;
+  dork_settings?: Record<string, unknown> | null;
+  extension_settings?: Record<string, unknown> | null;
 };
 
 export type Business = {
@@ -27,6 +33,8 @@ export type Business = {
   website: string | null;
   domain: string | null;
   category: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
   location: string | null;
   source: string | null;
   status: BusinessStatus;
@@ -50,6 +58,8 @@ export type CsvBusinessInput = {
   website: string;
   domain: string;
   category: string;
+  category_id?: string | null;
+  category_name?: string | null;
   location: string;
   source: string;
   normalized_key: string;
@@ -103,6 +113,10 @@ export type MessageTemplate = {
   name: string;
   subject: string;
   subject_variants?: string[] | null;
+  template_type?: 'initial' | 'follow_up' | 'reply' | string | null;
+  purpose?: string | null;
+  reply_context?: string | null;
+  tags?: string[] | null;
   category_id?: string | null;
   category_name?: string | null;
   message: string;
@@ -161,6 +175,13 @@ export type GmailAccount = {
   paused_until?: string | null;
   last_error?: string | null;
   raw?: Record<string, unknown> | null;
+  signature_enabled?: boolean | null;
+  signature_text?: string | null;
+  signature_html?: string | null;
+  profile_picture_url?: string | null;
+  sync_signature_to_gmail?: boolean | null;
+  gmail_signature_synced_at?: string | null;
+  gmail_signature_sync_error?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -181,12 +202,22 @@ export type MessageSchedule = {
   id: string;
   workspace_id: string;
   type: 'initial' | 'follow_up';
+  followup_segment?: 'all_unanswered' | 'no_reply' | 'auto_reply' | string | null;
   category_id?: string | null;
+  audience_category_id?: string | null;
+  audience_category_name?: string | null;
   template_id?: string | null;
   target_count?: number | null;
   scheduled_for: string;
   status: 'scheduled' | 'due' | 'running' | 'sent' | 'cancelled' | 'failed';
   raw?: Record<string, unknown> | null;
+  signature_enabled?: boolean | null;
+  signature_text?: string | null;
+  signature_html?: string | null;
+  profile_picture_url?: string | null;
+  sync_signature_to_gmail?: boolean | null;
+  gmail_signature_synced_at?: string | null;
+  gmail_signature_sync_error?: string | null;
   created_at: string;
   updated_at?: string | null;
 };

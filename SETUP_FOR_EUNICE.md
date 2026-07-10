@@ -1,30 +1,64 @@
-# Setup for Eunice — v8.26
+# Setup for Scout App v8.31
 
-After pushing v8.26 and deploying on Vercel, run this migration in Supabase:
+This version is designed so you do not need many more small versions. The next production loop is now in one place: `/operations`.
+
+## 1. Deploy
 
 ```bash
-cd ~/Downloads/scout-app-v8-cloud-push
-cat supabase/migrations/202607090826_scheduled_worker_seed_solid.sql | clip.exe
+npm install
+npm run typecheck
+npm run build
+vercel --prod
 ```
 
-Then paste in Supabase SQL Editor and run.
+## 2. Add/confirm Vercel env variables
 
-Expected result: `pg_notify`.
+Keep all existing Supabase and Gmail variables, then add:
 
-## How to test seed inbox now
+```bash
+RUN_ALL_WORKER_SECRET=use-a-long-random-secret
+CRON_SECRET=use-the-same-long-random-secret
+SCOUT_DEFAULT_WORKSPACE_ID=00000000-0000-4000-8000-000000000001
+```
 
-1. Go to Settings.
-2. Connect at least 2 Gmail accounts.
-3. Tick **Use as seed receiver** on one account.
-4. The checkbox auto-saves.
-5. Click **Run seed inbox test now**.
+## 3. Use the new Operations page
 
-## How to test scheduled sending
+Go to:
 
-1. Go to Message.
-2. Select template/category/senders and counts.
-3. Create a schedule with a time that is due soon.
-4. Click **Run Scheduled Worker Now**.
-5. Confirm it sends and updates the schedule status.
+```text
+/operations
+```
 
-The Vercel cron also calls `/api/message/run-schedules` automatically when deployed.
+Use this order the first time:
+
+1. Click **Inbox Sync Only**.
+2. Check Replies / No Inbox / Deliverability.
+3. Click **Due Sends Only** if you have scheduled messages.
+4. Click **Auto Scout Only** if you want to keep researching missing emails.
+5. Click **Full Autopilot** once everything looks correct.
+
+## 4. What Full Autopilot does
+
+It runs this order:
+
+1. Bounces, no-inbox, and blocked notices.
+2. Real replies and auto-replies.
+3. Ready/Pending repair.
+4. Due schedules and due follow-ups.
+5. Auto Scout research worker.
+6. Optional seed inbox test if you tick it.
+
+Seed testing is off by default because it sends real test emails between your connected Gmail accounts.
+
+## 5. Cron
+
+`vercel.json` now includes:
+
+```json
+{
+  "path": "/api/workers/run-all?workspaceId=00000000-0000-4000-8000-000000000001&includeSeedTest=false",
+  "schedule": "0 * * * *"
+}
+```
+
+That means the production app can run the safe loop every hour.

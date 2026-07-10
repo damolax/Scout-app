@@ -4,6 +4,8 @@ export const maxDuration = 300;
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { analyzeSpamRisk } from '@/lib/spam-guard';
+import { createAppNotification } from '@/lib/notifications';
+import { buildMimeMessage, appendSignatureToText } from '@/lib/email-signature';
 
 type AnyRow = Record<string, any>;
 
@@ -120,21 +122,12 @@ async function refreshAccessToken(account: AnyRow) {
   return { access_token: String(json.access_token || ''), expires_in: Number(json.expires_in || 3600) };
 }
 
-async function sendWithGmail(accessToken: string, from: string, to: string, subject: string, body: string) {
-  const lines = [
-    `From: ${from}`,
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    body
-  ];
+async function sendWithGmail(accessToken: string, from: string, to: string, subject: string, body: string, identity?: Record<string, unknown>) {
+  const message = buildMimeMessage({ from, to, subject, body, identity });
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ raw: b64url(lines.join('\r\n')) })
+    body: JSON.stringify({ raw: b64url(message.raw) })
   });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -167,12 +160,13 @@ async function ensureAccessToken(supabase: ReturnType<typeof createAdminClient>,
 }
 
 async function loadTemplates(supabase: ReturnType<typeof createAdminClient>, schedule: AnyRow) {
+  const desiredTypes = schedule.type === 'follow_up' ? ['follow_up'] : ['initial'];
   if (schedule.template_id) {
     const { data, error } = await supabase.from('templates').select('*').eq('workspace_id', schedule.workspace_id).eq('id', schedule.template_id).eq('active', true).limit(1);
     if (error) throw error;
-    return data || [];
+    return (data || []).filter((t: AnyRow) => desiredTypes.includes(String(t.template_type || 'initial')));
   }
-  let query = supabase.from('templates').select('*').eq('workspace_id', schedule.workspace_id).eq('active', true).order('created_at', { ascending: false }).limit(50);
+  let query = supabase.from('templates').select('*').eq('workspace_id', schedule.workspace_id).eq('active', true).in('template_type', desiredTypes).order('created_at', { ascending: false }).limit(50);
   if (schedule.category_id) query = query.eq('category_id', schedule.category_id);
   const { data, error } = await query;
   if (error) throw error;
@@ -191,7 +185,11 @@ async function loadAccounts(supabase: ReturnType<typeof createAdminClient>, sche
 
 async function loadReadyBusinesses(supabase: ReturnType<typeof createAdminClient>, schedule: AnyRow, limit: number) {
   const raw = schedule.raw || {};
+  const selectedIds = Array.isArray(raw.selected_business_ids) ? raw.selected_business_ids.map(String).filter(Boolean).slice(0, limit) : [];
   const cleanCategory = String(raw.business_category_filter || '').trim().replace(/[%_]/g, '');
+  const cleanSearch = String(raw.ready_search || '').trim().replace(/[%_]/g, '');
+  const audienceCategoryId = String(schedule.audience_category_id || raw.audience_category_id || '').trim();
+
   let query = supabase
     .from('businesses')
     .select('*')
@@ -201,7 +199,12 @@ async function loadReadyBusinesses(supabase: ReturnType<typeof createAdminClient
     .neq('email', '')
     .order('updated_at', { ascending: true })
     .limit(limit);
-  if (cleanCategory) query = query.ilike('category', `%${cleanCategory}%`);
+
+  if (selectedIds.length) query = query.in('id', selectedIds);
+  if (audienceCategoryId) query = query.eq('category_id', audienceCategoryId);
+  else if (cleanCategory) query = query.ilike('category', `%${cleanCategory}%`);
+  if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
+
   const { data, error } = await query;
   if (error) throw error;
   const unique = new Map<string, AnyRow>();
@@ -215,24 +218,21 @@ async function loadReadyBusinesses(supabase: ReturnType<typeof createAdminClient
 async function loadFollowUpBusinesses(supabase: ReturnType<typeof createAdminClient>, schedule: AnyRow, limit: number) {
   const raw = schedule.raw || {};
   const dueIds = Array.isArray(raw.due_business_ids) ? raw.due_business_ids.map(String).filter(Boolean) : [];
-  if (dueIds.length) {
-    const { data, error } = await supabase
-      .from('businesses')
-      .select('*')
-      .eq('workspace_id', schedule.workspace_id)
-      .in('id', dueIds.slice(0, limit))
-      .not('email', 'is', null)
-      .neq('email', '');
-    if (error) throw error;
-    return data || [];
-  }
-  const { data: dueRows, error: dueError } = await supabase.rpc('get_due_followups', { target_workspace: schedule.workspace_id, limit_rows: limit });
+  const segment = String(raw.followup_segment || schedule.followup_segment || 'all_unanswered');
+  const rpcLimit = Math.max(limit, dueIds.length || 0, 1);
+  const { data: dueRows, error: dueError } = await supabase.rpc('get_due_followups', { target_workspace: schedule.workspace_id, limit_rows: rpcLimit, followup_segment: segment });
   if (dueError) throw dueError;
-  const ids = Array.from(new Set((dueRows || []).map((row: AnyRow) => String(row.business_id || '')).filter(Boolean)));
+
+  const dueSet = new Set((dueRows || []).map((row: AnyRow) => String(row.business_id || '')).filter(Boolean));
+  const ids = dueIds.length
+    ? dueIds.filter((id: string) => dueSet.has(id)).slice(0, limit)
+    : Array.from(dueSet).slice(0, limit);
   if (!ids.length) return [];
+
   const { data, error } = await supabase.from('businesses').select('*').eq('workspace_id', schedule.workspace_id).in('id', ids).not('email', 'is', null).neq('email', '');
   if (error) throw error;
-  return data || [];
+  const byId = new Map((data || []).map((row: AnyRow) => [String(row.id), row]));
+  return ids.map((id: string) => byId.get(id)).filter(Boolean);
 }
 
 async function runOneSchedule(supabase: ReturnType<typeof createAdminClient>, schedule: AnyRow): Promise<WorkerSummary> {
@@ -307,6 +307,7 @@ async function runOneSchedule(supabase: ReturnType<typeof createAdminClient>, sc
       const subjects = splitSubjects(String(template.subject || ''), template.subject_variants);
       const subject = renderTemplate(subjects[i % Math.max(1, subjects.length)] || String(template.subject || ''), business);
       const body = renderTemplate(String(template.message || ''), business);
+      const finalBody = appendSignatureToText(body, account);
       const toEmail = normalizeEmail(business.email);
       const nowIso = new Date().toISOString();
 
@@ -315,7 +316,7 @@ async function runOneSchedule(supabase: ReturnType<typeof createAdminClient>, sc
         let gmailThreadId = '';
         if (!dryRun) {
           const accessToken = await ensureAccessToken(supabase, account);
-          const result = await sendWithGmail(accessToken, String(account.email), toEmail, subject, body);
+          const result = await sendWithGmail(accessToken, String(account.email), toEmail, subject, body, account);
           gmailMessageId = result.id || '';
           gmailThreadId = result.threadId || '';
         }
@@ -329,14 +330,14 @@ async function runOneSchedule(supabase: ReturnType<typeof createAdminClient>, sc
           to_email: toEmail,
           from_email: normalizeEmail(account.email),
           subject,
-          body,
+          body: finalBody,
           provider_message_id: gmailMessageId || null,
           gmail_thread_id: gmailThreadId || null,
           status: statusText,
           delivery_status: statusText,
           is_follow_up: schedule.type === 'follow_up',
           sent_at: nowIso,
-          raw: { schedule_id: scheduleId, dry_run: dryRun }
+          raw: { schedule_id: scheduleId, dry_run: dryRun, followup_segment: raw.followup_segment || schedule.followup_segment || null, signature_applied: account.signature_enabled !== false && Boolean(account.signature_text || account.signature_html) }
         });
         if (!dryRun) {
           await supabase.from('businesses').update({ status: schedule.type === 'follow_up' ? 'contacted' : 'contacted', updated_at: nowIso }).eq('workspace_id', workspaceId).eq('id', business.id);
@@ -362,13 +363,13 @@ async function runOneSchedule(supabase: ReturnType<typeof createAdminClient>, sc
           to_email: toEmail,
           from_email: normalizeEmail(account.email),
           subject,
-          body,
+          body: finalBody,
           status: failedStatus,
           delivery_status: failedStatus,
           error_code: failedStatus,
           is_follow_up: schedule.type === 'follow_up',
           sent_at: nowIso,
-          raw: { schedule_id: scheduleId, error: reason }
+          raw: { schedule_id: scheduleId, error: reason, followup_segment: raw.followup_segment || schedule.followup_segment || null, signature_applied: account.signature_enabled !== false && Boolean(account.signature_text || account.signature_html) }
         });
         await supabase.from('outreach_events').insert({ workspace_id: workspaceId, batch_id: batchId, business_id: business.id, template_id: template.id, gmail_account_id: account.id, type: failedStatus, message: reason, raw: { schedule_id: scheduleId } });
         if (err.limitHit) {
@@ -379,29 +380,69 @@ async function runOneSchedule(supabase: ReturnType<typeof createAdminClient>, sc
           await supabase.from('gmail_accounts').update({ spam_risk_status: 'blocked_warning', last_error: reason, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', account.id);
         }
       }
+      await supabase.from('message_schedules').update({
+        processed_count: attempted,
+        sent_count: sent,
+        failed_count: failed,
+        skipped_count: skipped,
+        last_heartbeat_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq('workspace_id', workspaceId).eq('id', scheduleId);
     }
 
     const finalStatus = dryRun ? 'sent' : 'sent';
     await supabase.from('outreach_batches').update({ status: dryRun ? 'scheduled_dry_run_complete' : 'scheduled_complete', attempted_count: attempted, sent_count: sent, failed_count: failed, skipped_count: skipped, finished_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', batchId);
     await supabase.from('message_schedules').update({ status: finalStatus, batch_id: batchId, processed_count: attempted, sent_count: sent, failed_count: failed, skipped_count: skipped, finished_at: new Date().toISOString(), updated_at: new Date().toISOString(), last_error: null }).eq('workspace_id', workspaceId).eq('id', scheduleId);
+    await createAppNotification(supabase as any, {
+      workspaceId,
+      type: 'job_completed',
+      title: `${schedule.type === 'follow_up' ? 'Follow-up' : 'Message'} job completed`,
+      message: `Sent ${sent.toLocaleString()}, failed ${failed.toLocaleString()}, skipped ${skipped.toLocaleString()}.`,
+      entityType: 'message_schedule',
+      entityId: scheduleId,
+      raw: { schedule_id: scheduleId, batch_id: batchId, attempted, sent, failed, skipped }
+    });
     return { scheduleId, status: 'sent', type: schedule.type, requested: contacts.length, attempted, sent, failed, skipped, batchId };
   } catch (error) {
     const reason = formatError(error);
     await supabase.from('message_schedules').update({ status: 'failed', last_error: reason, batch_id: batchId, processed_count: attempted, sent_count: sent, failed_count: failed, skipped_count: skipped, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', scheduleId);
-    if (batchId) await supabase.from('outreach_batches').update({ status: 'scheduled_failed', attempted_count: attempted, sent_count: sent, failed_count: failed, skipped_count: skipped, finished_at: new Date().toISOString(), raw: { schedule_id: scheduleId, error: reason } }).eq('workspace_id', workspaceId).eq('id', batchId);
+    if (batchId) await supabase.from('outreach_batches').update({ status: 'scheduled_failed', attempted_count: attempted, sent_count: sent, failed_count: failed, skipped_count: skipped, finished_at: new Date().toISOString(), raw: { schedule_id: scheduleId, error: reason, followup_segment: raw.followup_segment || schedule.followup_segment || null } }).eq('workspace_id', workspaceId).eq('id', batchId);
+    await createAppNotification(supabase as any, {
+      workspaceId,
+      type: 'job_failed',
+      title: `${schedule.type === 'follow_up' ? 'Follow-up' : 'Message'} job failed`,
+      message: reason,
+      entityType: 'message_schedule',
+      entityId: scheduleId,
+      raw: { schedule_id: scheduleId, batch_id: batchId, attempted, sent, failed, skipped, error: reason }
+    });
     return { scheduleId, status: 'failed', type: schedule.type, requested: targetCount, attempted, sent, failed, skipped, reason, batchId };
   }
 }
 
-async function runSchedules(limit = MAX_SCHEDULES_PER_RUN) {
+async function resetStaleRunningSchedules(supabase: ReturnType<typeof createAdminClient>) {
+  const staleSince = new Date(Date.now() - 12 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from('message_schedules')
+    .update({ status: 'scheduled', last_error: 'Resuming stale running job after worker timeout or page close.', resume_count: 1, updated_at: new Date().toISOString() })
+    .eq('status', 'running')
+    .is('finished_at', null)
+    .lt('updated_at', staleSince);
+  if (error) throw error;
+}
+
+async function runSchedules(limit = MAX_SCHEDULES_PER_RUN, scheduleId?: string) {
   const supabase = createAdminClient();
-  const { data: schedules, error } = await supabase
+  await resetStaleRunningSchedules(supabase);
+  let query = supabase
     .from('message_schedules')
     .select('*')
     .eq('status', 'scheduled')
     .lte('scheduled_for', new Date().toISOString())
     .order('scheduled_for', { ascending: true })
     .limit(Math.max(1, Math.min(MAX_SCHEDULES_PER_RUN, limit)));
+  if (scheduleId) query = query.eq('id', scheduleId);
+  const { data: schedules, error } = await query;
   if (error) throw error;
   const results: WorkerSummary[] = [];
   for (const schedule of schedules || []) {
@@ -418,7 +459,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid schedule worker token.' }, { status: 401 });
     }
     const limit = Number(request.nextUrl.searchParams.get('limit') || MAX_SCHEDULES_PER_RUN);
-    const results = await runSchedules(limit);
+    const scheduleId = String(request.nextUrl.searchParams.get('scheduleId') || '');
+    const results = await runSchedules(limit, scheduleId || undefined);
     return NextResponse.json({ success: true, ran: results.length, results });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 500 });
@@ -433,7 +475,7 @@ export async function POST(request: NextRequest) {
     if (secret && provided !== secret) {
       return NextResponse.json({ success: false, error: 'Invalid schedule worker token.' }, { status: 401 });
     }
-    const results = await runSchedules(Number(input.limit || MAX_SCHEDULES_PER_RUN));
+    const results = await runSchedules(Number(input.limit || MAX_SCHEDULES_PER_RUN), input.scheduleId ? String(input.scheduleId) : undefined);
     return NextResponse.json({ success: true, ran: results.length, results });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 500 });

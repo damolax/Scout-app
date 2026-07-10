@@ -2,6 +2,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { buildMimeMessage } from '@/lib/email-signature';
 
 function b64url(input: string) {
   return Buffer.from(input, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -37,21 +38,12 @@ async function refreshAccessToken(refreshToken: string) {
   return { access_token: String(json.access_token || ''), expires_in: Number(json.expires_in || 3600) };
 }
 
-async function sendWithGmail(accessToken: string, from: string, to: string, subject: string, body: string) {
-  const lines = [
-    `From: ${from}`,
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    body
-  ];
+async function sendWithGmail(accessToken: string, from: string, to: string, subject: string, body: string, identity?: Record<string, unknown>) {
+  const message = buildMimeMessage({ from, to, subject, body, identity });
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ raw: b64url(lines.join('\r\n')) })
+    body: JSON.stringify({ raw: b64url(message.raw) })
   });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -98,7 +90,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const result = await sendWithGmail(accessToken, String(account.email), to, subject, body);
+      const result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account);
       return NextResponse.json({ success: true, access_token: accessToken, results: [{ status: 'sent', gmailMessageId: result.id || '', gmailThreadId: result.threadId || '', raw: result }] });
     } catch (sendErr) {
       const err = sendErr as Error & { status?: number; payload?: unknown; limitHit?: boolean; blocked?: boolean };
@@ -106,7 +98,7 @@ export async function POST(request: NextRequest) {
         const refreshed = await refreshAccessToken(String(account.refresh_token));
         accessToken = refreshed.access_token;
         await supabase.from('gmail_accounts').update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), last_error: null }).eq('workspace_id', workspaceId).eq('id', accountId);
-        const result = await sendWithGmail(accessToken, String(account.email), to, subject, body);
+        const result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account);
         return NextResponse.json({ success: true, access_token: accessToken, results: [{ status: 'sent', gmailMessageId: result.id || '', gmailThreadId: result.threadId || '', raw: result }] });
       }
       if (err.limitHit) {

@@ -1,9 +1,9 @@
 'use client';
 
-import { ChangeEvent, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { csvColumnsLookDifferent, parseCsvText } from '@/lib/csv';
-import { Business, CsvBusinessInput, CsvInvalidRow, ImportResult, Workspace } from '@/lib/types';
+import { Business, CsvBusinessInput, CsvInvalidRow, ImportResult, MessageCategory, Workspace } from '@/lib/types';
 
 const MAX_IMPORT_ROWS = 100000;
 const SERVER_IMPORT_CHUNK = 5000;
@@ -125,6 +125,9 @@ function toRpcRows(rows: CsvBusinessInput[]) {
 
 export default function UploadClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
+  const [categories, setCategories] = useState<MessageCategory[]>([]);
+  const [audienceCategoryId, setAudienceCategoryId] = useState(workspace.default_audience_category_id || '');
+  const [newAudienceCategory, setNewAudienceCategory] = useState(workspace.default_audience_category_name || '');
   const [rows, setRows] = useState<CsvBusinessInput[]>([]);
   const [invalidRows, setInvalidRows] = useState<CsvInvalidRow[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -138,6 +141,41 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [targetWarning, setTargetWarning] = useState<TargetWarning>(null);
   const [allowDifferentTarget, setAllowDifferentTarget] = useState(false);
+
+  const selectedAudienceCategory = categories.find((c) => c.id === audienceCategoryId) || null;
+
+  async function loadCategories() {
+    const { data, error } = await supabase
+      .from('message_categories')
+      .select('*')
+      .eq('workspace_id', workspace.id)
+      .eq('active', true)
+      .order('name', { ascending: true });
+    if (error) throw error;
+    setCategories((data || []) as MessageCategory[]);
+  }
+
+  useEffect(() => {
+    loadCategories().catch((error) => setErrors([formatImportError(error)]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.id]);
+
+  async function ensureAudienceCategory() {
+    if (audienceCategoryId) return { id: audienceCategoryId, name: selectedAudienceCategory?.name || newAudienceCategory.trim() || '' };
+    const name = newAudienceCategory.trim();
+    if (!name) return { id: '', name: '' };
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from('message_categories')
+      .upsert({ workspace_id: workspace.id, name, description: 'Audience category created during CSV upload.', active: true, created_by: user?.id || null }, { onConflict: 'workspace_id,name' })
+      .select('*')
+      .single();
+    if (error) throw error;
+    setAudienceCategoryId(data.id);
+    setNewAudienceCategory(data.name || name);
+    await loadCategories();
+    return { id: data.id as string, name: String(data.name || name) };
+  }
 
   async function checkTargetMismatch(nextHeaders: string[]) {
     setTargetWarning(null);
@@ -240,6 +278,8 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData.user) throw userError || new Error('Not signed in.');
 
+      const category = await ensureAudienceCategory();
+
       const { data: batch, error: batchError } = await supabase
         .from('import_batches')
         .insert({
@@ -249,6 +289,9 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
           inserted_count: 0,
           skipped_count: duplicateRows.length + invalidRows.length,
           headers,
+          category_id: category.id || null,
+          category_name: category.name || null,
+          source_mode: 'csv_upload',
           created_by: userData.user.id
         })
         .select('id')
@@ -266,10 +309,12 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         processed += part.length;
         setPercent(Math.min(95, Math.round((processed / Math.max(deduped.length, 1)) * 95)));
         setProgress(`Fast cloud import: ${processed.toLocaleString()} / ${deduped.length.toLocaleString()} row(s). Server is deduping and inserting in one step...`);
-        const { data, error } = await supabase.rpc('import_businesses_chunk', {
+        const { data, error } = await supabase.rpc('import_businesses_chunk_with_category', {
           target_workspace: workspace.id,
           target_batch_id: batch.id,
-          input_rows: toRpcRows(part)
+          input_rows: toRpcRows(part),
+          target_category_id: category.id || null,
+          target_category_name: category.name || null
         });
         if (error) throw error;
         const item = ((data || []) as ImportChunkResult[])[0];
@@ -382,6 +427,18 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       <div className="card" style={{ padding: 18 }}>
         <label className="label">Upload CSV</label>
         <input className="input" type="file" accept=".csv,text/csv" onChange={onFile} />
+        <div className="grid grid-2" style={{ marginTop: 12 }}>
+          <div>
+            <label className="label">Audience category for this upload</label>
+            <select className="select" value={audienceCategoryId} onChange={(event) => { setAudienceCategoryId(event.target.value); const cat = categories.find((c) => c.id === event.target.value); if (cat) setNewAudienceCategory(cat.name); }}>
+              <option value="">New / uncategorized</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">New category name</label>
+            <input className="input" value={newAudienceCategory} onChange={(event) => { setNewAudienceCategory(event.target.value); if (audienceCategoryId) setAudienceCategoryId(''); }} placeholder="Airtable service, Marketing, Shopify audit" />
+          </div>
+        </div>
         <p className="muted">Limit: 100,000 usable rows. Import divides rows clearly: emails → Ready for Message; no email → Pending for Auto Scout; duplicates are skipped/exportable; invalid rows are downloadable. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
         <div className={phase === 'failed' ? 'error' : phase === 'done' ? 'success' : 'notice'}>{progress}</div>
         <div className="progress-track" aria-label="Import progress"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>

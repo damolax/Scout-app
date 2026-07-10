@@ -2,6 +2,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { buildMimeMessage, appendSignatureToText } from '@/lib/email-signature';
 
 function b64url(input: string) {
   return Buffer.from(input, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -43,22 +44,13 @@ async function refreshAccessToken(refreshToken: string) {
   return { access_token: String(json.access_token || ''), expires_in: Number(json.expires_in || 3600) };
 }
 
-async function sendReplyWithGmail(accessToken: string, from: string, to: string, subject: string, body: string, threadId?: string | null) {
+async function sendReplyWithGmail(accessToken: string, from: string, to: string, subject: string, body: string, threadId?: string | null, identity?: Record<string, unknown>) {
   const normalizedSubject = subject.toLowerCase().startsWith('re:') ? subject : `Re: ${subject}`;
-  const lines = [
-    `From: ${from}`,
-    `To: ${to}`,
-    `Subject: ${normalizedSubject}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    body
-  ];
+  const message = buildMimeMessage({ from, to, subject: normalizedSubject, body, identity });
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ raw: b64url(lines.join('\r\n')), ...(threadId ? { threadId } : {}) })
+    body: JSON.stringify({ raw: b64url(message.raw), ...(threadId ? { threadId } : {}) })
   });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -79,6 +71,7 @@ export async function POST(request: NextRequest) {
     const workspaceId = String(input.workspace_id || '');
     const businessId = String(input.business_id || '');
     const accountId = String(input.gmail_account_id || '');
+    const templateId = String(input.template_id || input.templateId || '').trim() || null;
     const to = normalizeEmail(input.to || input.email || '');
     const subject = String(input.subject || '').trim();
     const body = String(input.body || input.message || '').trim();
@@ -105,23 +98,24 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const result = await sendReplyWithGmail(accessToken, String(account.email), to, subject, body, threadId);
+      const result = await sendReplyWithGmail(accessToken, String(account.email), to, subject, body, threadId, account);
       const sentAt = new Date().toISOString();
       await supabase.from('sent_messages').insert({
         workspace_id: workspaceId,
         business_id: businessId,
         gmail_account_id: accountId,
+        template_id: templateId,
         to_email: to,
         from_email: String(account.email),
         subject: subject.toLowerCase().startsWith('re:') ? subject : `Re: ${subject}`,
-        body,
+        body: appendSignatureToText(body, account),
         provider_message_id: result.id || null,
         gmail_thread_id: result.threadId || threadId,
         status: 'sent',
         delivery_status: 'manual_reply_sent',
         is_follow_up: true,
         sent_at: sentAt,
-        raw: { source: 'business_manual_reply', gmail: result }
+        raw: { source: 'business_manual_reply', reply_template_id: templateId, gmail: result }
       });
       await supabase.from('businesses').update({ last_manual_reply_at: sentAt, updated_at: sentAt }).eq('workspace_id', workspaceId).eq('id', businessId);
       return NextResponse.json({ success: true, gmailMessageId: result.id || '', gmailThreadId: result.threadId || threadId || '' });

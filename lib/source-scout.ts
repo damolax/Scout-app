@@ -65,6 +65,8 @@ function stripHtml(input: string) {
     .replace(/&period;|&dot;/gi, '.')
     .replace(/&amp;/gi, '&')
     .replace(/&nbsp;/gi, ' ')
+    .replace(/\s*(?:\[at\]|\(at\)|\{at\}|\sat\s)\s*/gi, '@')
+    .replace(/\s*(?:\[dot\]|\(dot\)|\{dot\}|\sdot\s)\s*/gi, '.')
     .replace(/\s+/g, ' ');
 }
 

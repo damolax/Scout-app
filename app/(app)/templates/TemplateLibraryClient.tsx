@@ -4,8 +4,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { MessageCategory, MessageTemplate, Workspace } from '@/lib/types';
 
-const SHORTCODES = ['{name}', '{business}', '{company}', '{email}', '{website}', '{domain}', '{phone}', '{category}', '{industry}', '{location}', '{source}'];
-const DEFAULT_MESSAGE = `Hi {name},\n\nI found {business} while reviewing {category} businesses.\n\nWould you like me to send a short, practical idea for improving {business}?\n\nBest regards,\nOlalekan`;
+const SHORTCODES = ['{name}', '{business}', '{company}', '{email}', '{website}', '{domain}', '{phone}', '{category}', '{industry}', '{location}', '{source}', '{last_subject}', '{last_message}', '{reply_snippet}', '{reply_type}'];
+const DEFAULT_INITIAL = `Hi {name},\n\nI found {business} while reviewing {category} businesses.\n\nWould you like me to send a short, practical idea for improving {business}?\n\nBest regards,\nOlalekan`;
+const DEFAULT_FOLLOW_UP = `Hi {name},\n\nJust following up on my earlier message about {business}.\n\nWould it be useful if I sent the 2-3 practical improvements I noticed?\n\nBest regards,\nOlalekan`;
+const DEFAULT_REPLY = `Hi {name},\n\nThanks for getting back to me.\n\nThat makes sense. Based on what you said, I can send a short practical breakdown for {business}.\n\nBest regards,\nOlalekan`;
+
+type TemplateType = 'initial' | 'follow_up' | 'reply';
 
 function formatError(error: unknown) {
   if (!error) return 'Unknown error.';
@@ -19,6 +23,24 @@ function formatError(error: unknown) {
   }
 }
 
+function typeLabel(type: string | null | undefined) {
+  if (type === 'reply') return 'Reply template';
+  if (type === 'follow_up') return 'Follow-up template';
+  return 'Initial message template';
+}
+
+function defaultBody(type: TemplateType) {
+  if (type === 'reply') return DEFAULT_REPLY;
+  if (type === 'follow_up') return DEFAULT_FOLLOW_UP;
+  return DEFAULT_INITIAL;
+}
+
+function defaultSubject(type: TemplateType) {
+  if (type === 'reply') return 'Re: {last_subject}';
+  if (type === 'follow_up') return 'Re: quick idea for {business}';
+  return '{name}, quick question';
+}
+
 export default function TemplateLibraryClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const [categories, setCategories] = useState<MessageCategory[]>([]);
@@ -28,14 +50,21 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
   const [categoryDescription, setCategoryDescription] = useState('Messages for this scouting angle.');
   const [templateId, setTemplateId] = useState('');
   const [templateName, setTemplateName] = useState('First message');
-  const [subject, setSubject] = useState('{name}, quick question');
+  const [templateType, setTemplateType] = useState<TemplateType>('initial');
+  const [purpose, setPurpose] = useState('');
+  const [replyContext, setReplyContext] = useState('');
+  const [subject, setSubject] = useState(defaultSubject('initial'));
   const [subjectVariants, setSubjectVariants] = useState('{business}, quick idea\nQuick idea for {name}');
-  const [message, setMessage] = useState(DEFAULT_MESSAGE);
-  const [status, setStatus] = useState('Create categories, then save multiple templates inside each category.');
+  const [message, setMessage] = useState(DEFAULT_INITIAL);
+  const [typeFilter, setTypeFilter] = useState<'all' | TemplateType>('all');
+  const [status, setStatus] = useState('Create initial, follow-up, and reply-only templates. Reply templates cannot be used for first-message batches.');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const categoryTemplates = templates.filter((t) => !categoryId || t.category_id === categoryId);
+  const categoryTemplates = templates.filter((t) => (!categoryId || t.category_id === categoryId) && (typeFilter === 'all' || (t.template_type || 'initial') === typeFilter));
+  const initialCount = templates.filter((t) => (t.template_type || 'initial') === 'initial').length;
+  const followCount = templates.filter((t) => t.template_type === 'follow_up').length;
+  const replyCount = templates.filter((t) => t.template_type === 'reply').length;
 
   async function loadAll() {
     setError('');
@@ -57,13 +86,33 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id]);
 
+  function setNewTemplate(type: TemplateType = templateType) {
+    setTemplateId('');
+    setTemplateType(type);
+    setTemplateName(type === 'reply' ? 'Reply template' : type === 'follow_up' ? 'Follow-up message' : 'First message');
+    setSubject(defaultSubject(type));
+    setSubjectVariants(type === 'reply' ? 'Re: {business}\nRe: {last_subject}' : type === 'follow_up' ? 'Following up on {business}\nRe: quick idea for {business}' : '{business}, quick idea\nQuick idea for {name}');
+    setMessage(defaultBody(type));
+    setPurpose(type === 'reply' ? 'Use only when replying from a business conversation.' : type === 'follow_up' ? 'Use for businesses with inbox but no real reply yet.' : 'Use only for first outreach messages.');
+    setReplyContext(type === 'reply' ? 'Useful after a real buyer reply or an auto-responder follow-up.' : '');
+  }
+
   function loadTemplate(template: MessageTemplate) {
+    const type = (template.template_type || 'initial') as TemplateType;
     setTemplateId(template.id);
     setTemplateName(template.name);
-    setSubject(template.subject);
+    setTemplateType(type);
+    setPurpose(template.purpose || '');
+    setReplyContext(template.reply_context || '');
+    setSubject(template.subject || defaultSubject(type));
     setSubjectVariants((template.subject_variants || []).join('\n'));
-    setMessage(template.message);
+    setMessage(template.message || defaultBody(type));
     if (template.category_id) setCategoryId(template.category_id);
+  }
+
+  function onTemplateTypeChange(type: TemplateType) {
+    setTemplateType(type);
+    if (!templateId) setNewTemplate(type);
   }
 
   function onCategoryChange(id: string) {
@@ -73,7 +122,7 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       setCategoryName(cat.name);
       setCategoryDescription(cat.description || '');
     }
-    const first = templates.find((t) => t.category_id === id);
+    const first = templates.find((t) => t.category_id === id && (typeFilter === 'all' || (t.template_type || 'initial') === typeFilter));
     if (first) loadTemplate(first);
   }
 
@@ -116,6 +165,26 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     }
   }
 
+  function templatePayload(category: MessageCategory | null, userId?: string | null) {
+    const cleanSubject = subject.trim();
+    const cleanMessage = message.trim();
+    if (!cleanSubject || !cleanMessage) throw new Error('Subject and message are required.');
+    return {
+      workspace_id: workspace.id,
+      category_id: category?.id || null,
+      category_name: category?.name || categoryName.trim() || null,
+      name: templateName.trim() || 'Untitled template',
+      subject: cleanSubject,
+      subject_variants: subjectVariants.split('\n').map((s) => s.trim()).filter(Boolean),
+      message: cleanMessage,
+      template_type: templateType,
+      purpose: purpose.trim() || null,
+      reply_context: templateType === 'reply' ? (replyContext.trim() || null) : null,
+      active: true,
+      created_by: userId || null
+    };
+  }
+
   async function saveNewTemplate() {
     setBusy(true);
     setError('');
@@ -123,22 +192,10 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not signed in.');
       const category = await ensureCategory();
-      const payload = {
-        workspace_id: workspace.id,
-        category_id: category?.id || null,
-        category_name: category?.name || categoryName.trim() || null,
-        name: templateName.trim() || 'Untitled template',
-        subject: subject.trim(),
-        subject_variants: subjectVariants.split('\n').map((s) => s.trim()).filter(Boolean),
-        message: message.trim(),
-        active: true,
-        created_by: user.id
-      };
-      if (!payload.subject || !payload.message) throw new Error('Subject and message are required.');
-      const { data, error: insertError } = await supabase.from('templates').insert(payload).select('*').single();
+      const { data, error: insertError } = await supabase.from('templates').insert(templatePayload(category, user.id)).select('*').single();
       if (insertError) throw insertError;
       setTemplateId(data.id);
-      setStatus('Template saved.');
+      setStatus(`${typeLabel(templateType)} saved.`);
       await loadAll();
     } catch (err) {
       setError(formatError(err));
@@ -153,17 +210,10 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setError('');
     try {
       const category = await ensureCategory();
-      const { error: updateError } = await supabase.from('templates').update({
-        category_id: category?.id || null,
-        category_name: category?.name || null,
-        name: templateName.trim() || 'Untitled template',
-        subject: subject.trim(),
-        subject_variants: subjectVariants.split('\n').map((s) => s.trim()).filter(Boolean),
-        message: message.trim(),
-        updated_at: new Date().toISOString()
-      }).eq('workspace_id', workspace.id).eq('id', templateId);
+      const { workspace_id: _workspaceId, created_by: _createdBy, ...payload } = templatePayload(category);
+      const { error: updateError } = await supabase.from('templates').update({ ...payload, updated_at: new Date().toISOString() }).eq('workspace_id', workspace.id).eq('id', templateId);
       if (updateError) throw updateError;
-      setStatus('Template updated.');
+      setStatus(`${typeLabel(templateType)} updated.`);
       await loadAll();
     } catch (err) {
       setError(formatError(err));
@@ -193,10 +243,11 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       {error ? <div className="error">{error}</div> : null}
       <div className="success">{status}</div>
 
-      <div className="grid grid-3">
+      <div className="grid grid-4">
+        <div className="card kpi"><div className="title">Initial</div><div className="num">{initialCount}</div></div>
+        <div className="card kpi"><div className="title">Follow-up</div><div className="num">{followCount}</div></div>
+        <div className="card kpi"><div className="title">Reply Only</div><div className="num">{replyCount}</div></div>
         <div className="card kpi"><div className="title">Categories</div><div className="num">{categories.length}</div></div>
-        <div className="card kpi"><div className="title">Templates</div><div className="num">{templates.length}</div></div>
-        <div className="card kpi"><div className="title">In Selected Category</div><div className="num">{categoryTemplates.length}</div></div>
       </div>
 
       <div className="grid grid-2">
@@ -224,9 +275,14 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
         </div>
 
         <div className="card" style={{ padding: 18 }}>
-          <h3>Available Shortcodes</h3>
-          <p className="muted">Use these inside subjects and messages. Scout replaces them for each business before sending.</p>
+          <h3>Template Rules</h3>
+          <p className="muted">Reply-only templates are intentionally hidden from first-message sending. They appear only inside a business conversation when you are replying to a prospect.</p>
           <div className="notice">{SHORTCODES.map((s) => <code key={s}>{s}</code>)}</div>
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button className="btn secondary" type="button" onClick={() => setNewTemplate('initial')}>New Initial</button>
+            <button className="btn secondary" type="button" onClick={() => setNewTemplate('follow_up')}>New Follow-up</button>
+            <button className="btn secondary" type="button" onClick={() => setNewTemplate('reply')}>New Reply Template</button>
+          </div>
         </div>
       </div>
 
@@ -235,10 +291,29 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
           <h3>Template Editor</h3>
           <div className="grid grid-2">
             <div>
-              <label className="label">Template</label>
+              <label className="label">Template filter</label>
+              <select className="select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as 'all' | TemplateType)}>
+                <option value="all">All types</option>
+                <option value="initial">Initial only</option>
+                <option value="follow_up">Follow-up only</option>
+                <option value="reply">Reply-only</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Open template</label>
               <select className="select" value={templateId} onChange={(e) => { const t = templates.find((row) => row.id === e.target.value); if (t) loadTemplate(t); else setTemplateId(''); }}>
                 <option value="">New template</option>
-                {categoryTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                {categoryTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} · {typeLabel(t.template_type)}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-2" style={{ marginTop: 12 }}>
+            <div>
+              <label className="label">Template type</label>
+              <select className="select" value={templateType} onChange={(e) => onTemplateTypeChange(e.target.value as TemplateType)}>
+                <option value="initial">Initial message</option>
+                <option value="follow_up">Follow-up automation</option>
+                <option value="reply">Reply-only response</option>
               </select>
             </div>
             <div>
@@ -246,12 +321,16 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
               <input className="input" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
             </div>
           </div>
+          <label className="label" style={{ marginTop: 12 }}>Purpose / when to use</label>
+          <input className="input" value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="Example: after an auto-responder or after a positive reply" />
+          {templateType === 'reply' ? <><label className="label" style={{ marginTop: 12 }}>Reply context note</label><input className="input" value={replyContext} onChange={(e) => setReplyContext(e.target.value)} placeholder="Example: use when buyer asks for examples/pricing" /></> : null}
           <label className="label" style={{ marginTop: 12 }}>Primary subject</label>
           <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
           <label className="label" style={{ marginTop: 12 }}>Extra subject variants, one per line</label>
           <textarea className="textarea" style={{ minHeight: 70 }} value={subjectVariants} onChange={(e) => setSubjectVariants(e.target.value)} />
           <label className="label" style={{ marginTop: 12 }}>Message</label>
           <textarea className="textarea" value={message} onChange={(e) => setMessage(e.target.value)} />
+          {templateType === 'reply' ? <div className="notice" style={{ marginTop: 12 }}>This is reply-only. It will not appear in first-message batch sending. It appears inside Business → Conversation → Reply template.</div> : null}
           <div className="actions" style={{ marginTop: 12 }}>
             <button className="btn" type="button" disabled={busy} onClick={saveNewTemplate}>Save New Template</button>
             <button className="btn secondary" type="button" disabled={busy || !templateId} onClick={updateTemplate}>Update Selected</button>
@@ -260,9 +339,9 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Templates in this Category</h3>
-          <div className="table-wrap"><table><thead><tr><th>Name</th><th>Subject</th><th>Action</th></tr></thead><tbody>
-            {categoryTemplates.map((t) => <tr key={t.id}><td><strong>{t.name}</strong><br /><span className="muted">{t.category_name || 'No category'}</span></td><td>{t.subject}</td><td><button className="btn secondary" type="button" onClick={() => loadTemplate(t)}>Open</button> <button className="btn secondary" type="button" onClick={() => archiveTemplate(t.id)}>Archive</button></td></tr>)}
-            {!categoryTemplates.length ? <tr><td colSpan={3} className="muted">No templates in this category yet.</td></tr> : null}
+          <div className="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Subject</th><th>Action</th></tr></thead><tbody>
+            {categoryTemplates.map((t) => <tr key={t.id}><td><strong>{t.name}</strong><br /><span className="muted">{t.category_name || 'No category'}</span></td><td><span className="badge">{typeLabel(t.template_type)}</span></td><td>{t.subject}</td><td><button className="btn secondary" type="button" onClick={() => loadTemplate(t)}>Open</button> <button className="btn secondary" type="button" onClick={() => archiveTemplate(t.id)}>Archive</button></td></tr>)}
+            {!categoryTemplates.length ? <tr><td colSpan={4} className="muted">No templates matching this category/type yet.</td></tr> : null}
           </tbody></table></div>
         </div>
       </div>

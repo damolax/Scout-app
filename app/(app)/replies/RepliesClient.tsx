@@ -71,6 +71,13 @@ type NormalizedMessage = {
   raw: Record<string, unknown>;
 };
 
+type TrackingCounts = {
+  sentTracked: number;
+  realReplies: number;
+  autoReplies: number;
+  noInboxBlocked: number;
+};
+
 type SyncStats = {
   scanned: number;
   realReplies: number;
@@ -177,8 +184,9 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   const [sentRows, setSentRows] = useState<SentRow[]>([]);
   const [replyRows, setReplyRows] = useState<ReplyRow[]>([]);
   const [noInboxRows, setNoInboxRows] = useState<NoInboxRow[]>([]);
+  const [trackingCounts, setTrackingCounts] = useState<TrackingCounts>({ sentTracked: 0, realReplies: 0, autoReplies: 0, noInboxBlocked: 0 });
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, boolean>>({});
-  const [syncLimit, setSyncLimit] = useState(100);
+  const [syncLimit, setSyncLimit] = useState(500);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Native Gmail reply sync is ready. It separates real replies, auto replies, no-inbox failures, message-blocked notices, and Gmail limit notices so response analytics stay clean.');
   const [error, setError] = useState('');
@@ -186,14 +194,18 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
 
   async function loadAll() {
     setError('');
-    const [acct, tmpl, sent, replies, noInbox] = await Promise.all([
+    const [acct, tmpl, sent, replies, noInbox, sentCount, realReplyCount, autoReplyCount, noInboxCount] = await Promise.all([
       supabase.from('gmail_accounts').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }),
       supabase.from('templates').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }),
-      supabase.from('sent_messages').select('id,business_id,to_email,from_email,subject,template_id,gmail_account_id,batch_id,provider_message_id,gmail_thread_id,delivery_status,sent_at').eq('workspace_id', workspace.id).order('sent_at', { ascending: false }).limit(1000),
-      supabase.from('reply_history').select('*').eq('workspace_id', workspace.id).order('received_at', { ascending: false }).limit(300),
-      supabase.from('no_inbox_records').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }).limit(300)
+      supabase.from('sent_messages').select('id,business_id,to_email,from_email,subject,template_id,gmail_account_id,batch_id,provider_message_id,gmail_thread_id,delivery_status,sent_at').eq('workspace_id', workspace.id).eq('status', 'sent').order('sent_at', { ascending: false }).limit(1000),
+      supabase.from('reply_history').select('*').eq('workspace_id', workspace.id).order('received_at', { ascending: false }).limit(500),
+      supabase.from('no_inbox_records').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }).limit(500),
+      supabase.from('sent_messages').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id).eq('status', 'sent'),
+      supabase.from('reply_history').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id).eq('is_real_reply', true),
+      supabase.from('reply_history').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id).or('is_auto_reply.eq.true,reply_bucket.eq.auto_reply,classification.eq.auto_reply'),
+      supabase.from('no_inbox_records').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id)
     ]);
-    const firstError = acct.error || tmpl.error || sent.error || replies.error || noInbox.error;
+    const firstError = acct.error || tmpl.error || sent.error || replies.error || noInbox.error || sentCount.error || realReplyCount.error || autoReplyCount.error || noInboxCount.error;
     if (firstError) throw firstError;
     const nextAccounts = (acct.data || []) as GmailAccount[];
     setAccounts(nextAccounts);
@@ -201,6 +213,12 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     setSentRows((sent.data || []) as SentRow[]);
     setReplyRows((replies.data || []) as ReplyRow[]);
     setNoInboxRows((noInbox.data || []) as NoInboxRow[]);
+    setTrackingCounts({
+      sentTracked: sentCount.count || 0,
+      realReplies: realReplyCount.count || 0,
+      autoReplies: autoReplyCount.count || 0,
+      noInboxBlocked: noInboxCount.count || 0
+    });
     setSelectedAccounts((current) => {
       const next: Record<string, boolean> = {};
       for (const account of nextAccounts) next[account.id] = current[account.id] ?? account.status === 'connected';
@@ -372,22 +390,22 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   const deliverySignals = replyRows.filter((row) => row.is_delivery_failure === true || ['no_inbox', 'message_blocked', 'bounce_notice'].includes(String(row.classification || row.reply_bucket || '')));
   const limitSignals = replyRows.filter((row) => row.is_limit_notice === true || row.classification === 'gmail_limit_notice');
   const ignoredReplies = replyRows.filter((row) => row.is_real_reply !== true && row.is_auto_reply !== true && row.is_delivery_failure !== true && row.is_limit_notice !== true && !['real_reply','auto_reply','no_inbox','message_blocked','bounce_notice','gmail_limit_notice'].includes(String(row.classification || row.reply_bucket || '')));
-  const sentCount = sentRows.length;
+  const sentCount = trackingCounts.sentTracked || sentRows.length;
 
   return (
     <div className="stack">
       <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Sent Tracked</div><div className="num">{sentCount.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{realReplies.length.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Auto Replies</div><div className="num">{autoReplies.length.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">No Inbox / Blocked</div><div className="num">{noInboxRows.length.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Sent Tracked</div><div className="num">{sentCount.toLocaleString()}</div><p className="muted">All Gmail-accepted sent rows in the database. The table below only shows recent rows.</p></div>
+        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{trackingCounts.realReplies.toLocaleString()}</div><p className="muted">Human replies classified from Gmail inbox sync.</p></div>
+        <div className="card kpi"><div className="title">Auto Replies</div><div className="num">{trackingCounts.autoReplies.toLocaleString()}</div><p className="muted">Vacation/out-of-office/automated responses.</p></div>
+        <div className="card kpi"><div className="title">No Inbox / Blocked</div><div className="num">{trackingCounts.noInboxBlocked.toLocaleString()}</div><p className="muted">Bounced, address-not-found, and blocked notices.</p></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <div className="actions" style={{ justifyContent: 'space-between' }}>
           <div>
             <h3 style={{ margin: 0 }}>Reply Sync</h3>
-            <p className="muted" style={{ marginBottom: 0 }}>Native Gmail sync. Real human replies move businesses to Responded. Auto replies are tracked separately. Address-not-found, bounces, message-blocked, and Gmail limit notices are not counted as real replies.</p>
+            <p className="muted" style={{ marginBottom: 0 }}>Native Gmail sync runs from the Operations worker and can also be triggered here. Real human replies move businesses to Responded. Auto replies, bounces, blocked messages, and Gmail limit notices are tracked separately and do not count as real replies.</p>
           </div>
           <button className="btn secondary" onClick={() => loadAll().catch((err) => setError(formatError(err)))} disabled={busy}>Refresh</button>
         </div>
@@ -405,7 +423,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
             </div>
           </div>
           <div>
-            <label className="label">Max Gmail messages to scan per account</label>
+            <label className="label">Max Gmail messages to scan per account now</label>
             <input className="input" type="number" min={1} max={500} value={syncLimit} onChange={(event) => setSyncLimit(Number(event.target.value || 100))} />
             <div className="actions" style={{ marginTop: 12 }}>
               <button className="btn" disabled={busy} onClick={syncReplies}>{busy ? 'Syncing...' : 'Sync replies + bounces'}</button>

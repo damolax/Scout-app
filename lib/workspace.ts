@@ -8,7 +8,7 @@ export async function getCurrentWorkspace(): Promise<{ workspace: Workspace | nu
 
   const { data, error } = await supabase
     .from('workspace_members')
-    .select('role, approved, workspaces(id, name, api_key)')
+    .select('role, approved, workspaces(id, name, api_key, app_url, render_backend_url, default_audience_category_id, default_audience_category_name, dork_settings, extension_settings)')
     .eq('user_id', user.id)
     .eq('approved', true)
     .limit(1)

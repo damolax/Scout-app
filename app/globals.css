@@ -100,3 +100,8 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spa
 .checkbox-row input { margin-top: 3px; }
 .detail-link { color: var(--accent); font-weight: 800; }
 code { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-radius: 6px; padding: 2px 5px; }
+.notification-pill { display:flex; align-items:center; gap:9px; padding:11px 12px; border-radius:14px; color: var(--text); background: rgba(51,214,159,.10); border: 1px solid rgba(51,214,159,.24); font-weight:900; margin-bottom: 12px; }
+.notification-pill strong { margin-left:auto; min-width: 24px; height: 22px; padding: 0 7px; border-radius: 999px; display:inline-flex; align-items:center; justify-content:center; background: var(--accent); color:#05111d; font-size: 12px; }
+.card.good { border-color: rgba(51,214,159,.34); background: linear-gradient(180deg, rgba(51,214,159,.09), rgba(255,255,255,.025)); }
+.card.warn { border-color: rgba(255,204,102,.36); background: linear-gradient(180deg, rgba(255,204,102,.10), rgba(255,255,255,.025)); }
+.card.bad { border-color: rgba(255,107,122,.36); background: linear-gradient(180deg, rgba(255,107,122,.10), rgba(255,255,255,.025)); }

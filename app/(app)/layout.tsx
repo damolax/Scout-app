@@ -1,7 +1,10 @@
 import { AppNav } from '@/components/AppNav';
 import { SignOutButton } from '@/components/SignOutButton';
+import { NotificationBell } from '@/components/NotificationBell';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
+
+export const dynamic = 'force-dynamic';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -15,9 +18,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="logo" />
           <div>
             <h1>Scout App</h1>
-            <p>v8.23 Source Scout · {workspace?.name || 'No workspace'}</p>
+            <p>v8.36 Final · Categories + Admin Setup · {workspace?.name || 'No workspace'}</p>
           </div>
         </div>
+        <NotificationBell workspaceId={workspace?.id} />
         <AppNav />
         <div style={{ marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
           <p className="muted" style={{ fontSize: 12, wordBreak: 'break-word' }}>{user?.email}</p>

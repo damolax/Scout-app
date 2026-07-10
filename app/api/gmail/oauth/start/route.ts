@@ -2,7 +2,12 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-const SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  // Needed only for optional "Sync signature to Gmail". Existing accounts can still use Scout-local signatures without reconnecting.
+  'https://www.googleapis.com/auth/gmail.settings.basic'
+];
 
 function encodeState(payload: Record<string, unknown>) {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');

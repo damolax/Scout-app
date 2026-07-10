@@ -27,6 +27,8 @@ export async function POST(request: NextRequest) {
     const location = String(body.location || '');
     const country = String(body.country || '');
     const sourceMode = String(body.sourceMode || 'mixed') as SourceScoutMode;
+    const audienceCategoryId = String(body.audienceCategoryId || body.categoryId || '').trim() || null;
+    const audienceCategoryName = String(body.audienceCategoryName || body.categoryName || body.category || '').trim() || null;
     const enqueueWebsiteAutoScout = body.enqueueWebsiteAutoScout !== false;
     const directEmailsReady = body.directEmailsReady !== false;
     const previewOnly = Boolean(body.previewOnly);
@@ -56,6 +58,9 @@ export async function POST(request: NextRequest) {
         inserted_count: 0,
         skipped_count: 0,
         headers: ['name', 'email', 'website', 'phone', 'category', 'location', 'source'],
+        category_id: audienceCategoryId,
+        category_name: audienceCategoryName,
+        source_mode: sourceMode,
         created_by: user.id
       })
       .select('id')
@@ -70,7 +75,9 @@ export async function POST(request: NextRequest) {
       phone: lead.phone || null,
       website: lead.website || null,
       domain: lead.domain || null,
-      category: lead.category || null,
+      category: audienceCategoryName || lead.category || null,
+      category_id: audienceCategoryId,
+      category_name: audienceCategoryName || lead.category || null,
       location: lead.location || null,
       source: lead.source,
       status: lead.email && directEmailsReady ? 'ready' : 'pending',
@@ -99,7 +106,7 @@ export async function POST(request: NextRequest) {
         source: `source_scout_${sourceMode}`,
         score: 78,
         status: 'direct_source_candidate',
-        raw: { sourceMode, importBatchId: batch.id, sourceScout: true }
+        raw: { sourceMode, audienceCategoryId, audienceCategoryName, importBatchId: batch.id, sourceScout: true }
       }));
       const { error } = await supabase
         .from('email_candidates')

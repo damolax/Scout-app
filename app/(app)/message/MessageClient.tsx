@@ -23,6 +23,10 @@ type DueFollowUp = {
   last_subject: string | null;
   template_id: string | null;
   gmail_account_id: string | null;
+  followup_segment?: string | null;
+  segment?: string | null;
+  reply_state?: string | null;
+  last_auto_reply_at?: string | null;
 };
 
 type SendResult = {
@@ -42,6 +46,7 @@ type SendResult = {
 type Summary = { requested: number; attempted: number; sent: number; failed: number; skipped: number; stopped: boolean };
 type TemplateMode = 'specific' | 'rotate';
 type SenderMode = 'specific' | 'rotate';
+type MessageKind = 'initial' | 'follow_up';
 
 const READY_PAGE_SIZE = 100;
 const MAX_MESSAGE_BATCH_SIZE = 50000;
@@ -175,6 +180,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [templateMode, setTemplateMode] = useState<TemplateMode>('specific');
   const [senderMode, setSenderMode] = useState<SenderMode>('rotate');
   const [businessCategoryFilter, setBusinessCategoryFilter] = useState('');
+  const [audienceCategoryId, setAudienceCategoryId] = useState(workspace.default_audience_category_id || '');
   const [readySearch, setReadySearch] = useState('');
   const [sendLimit, setSendLimit] = useState(1000);
   const [delayMs, setDelayMs] = useState(0);
@@ -184,6 +190,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [scheduleFor, setScheduleFor] = useState(inHours(1));
   const [scheduleCount, setScheduleCount] = useState(1000);
   const [followUpFor, setFollowUpFor] = useState(inHours(2));
+  const [followUpSegment, setFollowUpSegment] = useState<'all_unanswered' | 'no_reply' | 'auto_reply'>('all_unanswered');
 
   const [status, setStatus] = useState('Select category, template option, sender option, total count, and optional per-sender caps.');
   const [error, setError] = useState('');
@@ -195,9 +202,11 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
   const selectedContactIds = Object.keys(selectedContacts).filter((id) => selectedContacts[id]);
   const selectedAccountIds = Object.keys(selectedAccounts).filter((id) => selectedAccounts[id]);
-  const categoryTemplates = templates.filter((t) => !categoryId || t.category_id === categoryId);
+  const sendableTemplates = templates.filter((t) => (t.template_type || 'initial') !== 'reply');
+  const categoryTemplates = sendableTemplates.filter((t) => !categoryId || t.category_id === categoryId);
   const currentTemplate = templates.find((t) => t.id === templateId) || categoryTemplates[0] || templates[0];
-  const connectedAccounts = accounts.filter((a) => a.status === 'connected' && !isPaused(a) && (a.access_token || a.refresh_token));
+  const selectedAudienceCategory = categories.find((c) => c.id === audienceCategoryId) || null;
+  const connectedAccounts = accounts.filter((a) => ['connected', 'ready'].includes(String(a.status || '')) && !isPaused(a) && (a.access_token || a.refresh_token));
   const previewBusiness = readyContacts.find((b) => selectedContacts[b.id]) || readyContacts[0];
   const previewSubject = previewBusiness && currentTemplate ? renderTemplate(splitSubjects(currentTemplate.subject, currentTemplate.subject_variants)[0] || currentTemplate.subject, previewBusiness) : '';
   const previewBody = previewBusiness && currentTemplate ? renderTemplate(currentTemplate.message, previewBusiness) : '';
@@ -214,7 +223,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   async function loadTemplates() {
     const { data, error: loadError } = await supabase.from('templates').select('*').eq('workspace_id', workspace.id).eq('active', true).order('created_at', { ascending: false });
     if (loadError) throw loadError;
-    const rows = (data || []) as MessageTemplate[];
+    const rows = ((data || []) as MessageTemplate[]).filter((t) => (t.template_type || 'initial') !== 'reply');
     setTemplates(rows);
     if (!templateId && rows[0]?.id) setTemplateId(rows[0].id);
   }
@@ -246,7 +255,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       .order('updated_at', { ascending: true })
       .limit(READY_PAGE_SIZE);
     if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
-    if (cleanCategory) query = query.ilike('category', `%${cleanCategory}%`);
+    if (audienceCategoryId) query = query.eq('category_id', audienceCategoryId);
+    else if (cleanCategory) query = query.ilike('category', `%${cleanCategory}%`);
     const { data, error: loadError, count } = await query;
     if (loadError) throw loadError;
     let rows = (data || []) as Business[];
@@ -270,10 +280,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     setRecentSent((data || []) as SendLogRow[]);
   }
 
-  async function loadDueFollowUps() {
-    const { data, error: dueError } = await supabase.rpc('get_due_followups', { target_workspace: workspace.id, limit_rows: 100 });
+  async function fetchDueFollowUps(limitRows = 100) {
+    const { data, error: dueError } = await supabase.rpc('get_due_followups', { target_workspace: workspace.id, limit_rows: limitRows, followup_segment: followUpSegment });
     if (dueError) throw dueError;
-    setDueFollowUps((data || []) as DueFollowUp[]);
+    return (data || []) as DueFollowUp[];
+  }
+
+  async function loadDueFollowUps() {
+    setDueFollowUps(await fetchDueFollowUps(100));
   }
 
   async function loadSchedules() {
@@ -306,12 +320,22 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryId, templates.length]);
 
-  function templatesForSend() {
-    if (templateMode === 'rotate') {
-      const pool = categoryTemplates.filter((t) => t.active !== false);
-      return pool.length ? pool : templates.filter((t) => t.active !== false);
-    }
-    return currentTemplate ? [currentTemplate] : [];
+  useEffect(() => {
+    if (!workspace.id) return;
+    loadDueFollowUps().catch((err) => setError(formatError(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followUpSegment]);
+
+  function templatesForSend(kind: MessageKind = 'initial') {
+    const requiredType = kind === 'follow_up' ? 'follow_up' : 'initial';
+    const hasRequiredType = (template: MessageTemplate) => String(template.template_type || 'initial') === requiredType;
+    const allowed = (items: MessageTemplate[]) => items.filter((t) => t.active !== false && hasRequiredType(t));
+    const scoped = allowed(categoryTemplates);
+    const allAllowed = allowed(sendableTemplates);
+
+    if (templateMode === 'rotate') return scoped.length ? scoped : allAllowed;
+    if (currentTemplate && hasRequiredType(currentTemplate) && currentTemplate.active !== false) return [currentTemplate];
+    return scoped.length ? scoped.slice(0, 1) : allAllowed.slice(0, 1);
   }
 
   function accountsForSend() {
@@ -357,7 +381,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       .order('updated_at', { ascending: true })
       .limit(limit);
     if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
-    if (cleanCategory) query = query.ilike('category', `%${cleanCategory}%`);
+    if (audienceCategoryId) query = query.eq('category_id', audienceCategoryId);
+    else if (cleanCategory) query = query.ilike('category', `%${cleanCategory}%`);
     const { data, error: loadError } = await query;
     if (loadError) throw loadError;
     for (const business of (data || []) as Business[]) {
@@ -433,6 +458,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       delivery_status: isSent ? 'sent' : statusText || 'failed',
       error_code: result.code || null,
       sent_at: sentAt,
+      is_follow_up: !!isFollowUp,
       raw: { ...result, dry_run: isDryRun, follow_up: !!isFollowUp }
     };
     const { error: insertError } = await supabase.from('sent_messages').insert(row);
@@ -444,15 +470,76 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     }
   }
 
-  async function sendBatch(contactsOverride?: Business[], options?: { isFollowUp?: boolean; limit?: number }) {
+  async function startDurableSendJob(contactsOverride?: Business[], options?: { isFollowUp?: boolean; limit?: number; messageKind?: MessageKind; followupSegment?: string }) {
+    const messageKind: MessageKind = options?.messageKind || (options?.isFollowUp ? 'follow_up' : 'initial');
+    const templatePool = templatesForSend(messageKind);
+    const senders = accountsForSend();
+    if (!templatePool.length) throw new Error(messageKind === 'follow_up' ? 'Create/select at least one follow-up template first. Initial-message templates are no longer used for follow-ups.' : 'Create/select at least one initial-message template in Templates first.');
+    if (!senders.length) throw new Error('Select at least one connected sender first.');
+    const guardBusiness = previewBusiness || readyContacts[0] || ({ name: 'there', email: 'test@example.com', website: '', domain: '', category: '', location: '', source: 'Scout' } as Business);
+    const guardTemplate = templatePool[0];
+    const guardSubject = renderTemplate(splitSubjects(guardTemplate.subject, guardTemplate.subject_variants)[0] || guardTemplate.subject, guardBusiness);
+    const guardBody = renderTemplate(guardTemplate.message, guardBusiness);
+    const guard = analyzeSpamRisk(guardSubject, guardBody);
+    if (guard.level === 'High' && !allowHighRiskSend && !dryRun) throw new Error(`Spam Guard blocked this send because the template risk is HIGH (${guard.score}/100). Fix the template or tick the override checkbox.`);
+
+    const selectedBusinessIds = contactsOverride?.length
+      ? contactsOverride.map((b) => b.id).filter(Boolean)
+      : selectedContactIds;
+    const targetCount = selectedBusinessIds.length || Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(options?.limit || sendLimit || 1000)));
+    const senderLimitsById = Object.fromEntries(senders.map((s) => [s.id, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto']));
+    const senderLimitsByEmail = Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto']));
+
+    const response = await fetch('/api/message/start-job', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: workspace.id,
+        type: messageKind,
+        categoryId,
+        templateId: templateMode === 'specific' ? (templatePool[0]?.id || null) : null,
+        targetCount,
+        scheduledFor: new Date().toISOString(),
+        runNow: true,
+        runKind: 'manual_now',
+        selectedBusinessIds,
+        selectedSenderIds: senders.map((s) => s.id),
+        selectedSenderEmails: senders.map((s) => s.email),
+        templateMode,
+        senderMode,
+        senderRunLimits: { ...senderLimitsById, ...senderLimitsByEmail },
+        businessCategoryFilter,
+        audienceCategoryId,
+        audienceCategoryName: selectedAudienceCategory?.name || '',
+        readySearch,
+        dryRun,
+        allowHighRiskSend,
+        followupSegment: options?.followupSegment || followUpSegment,
+        raw: { source: 'message_page_durable_send', previous_client_loop_disabled: true, audience_category_id: audienceCategoryId || null, audience_category_name: selectedAudienceCategory?.name || null }
+      })
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || json?.success === false) throw new Error(json?.error || `Start job failed with HTTP ${response.status}`);
+    const scheduleId = json?.schedule?.id || '';
+    setProgress(0);
+    setSummary({ requested: targetCount, attempted: 0, sent: 0, failed: 0, skipped: 0, stopped: false });
+    setSelectedContacts({});
+    setStatus(`Durable ${messageKind === 'follow_up' ? 'follow-up' : 'message'} job started for ${targetCount.toLocaleString()} contact(s). You can leave this page; the server worker/cron will continue it. Job: ${scheduleId}`);
+    await Promise.all([loadSchedules(), loadReadyContacts(), loadRecentSent(), loadDueFollowUps(), loadAccounts()]);
+  }
+
+  async function sendBatch(contactsOverride?: Business[], options?: { isFollowUp?: boolean; limit?: number; messageKind?: MessageKind; followupSegment?: string }) {
     setBusy(true);
     setError('');
     setProgress(0);
     setLastResults([]);
     setSummary({ requested: 0, attempted: 0, sent: 0, failed: 0, skipped: 0, stopped: false });
     try {
-      const templatePool = templatesForSend();
-      if (!templatePool.length) throw new Error('Create/select at least one template in Templates first.');
+      await startDurableSendJob(contactsOverride, options);
+      return;
+      const messageKind: MessageKind = options?.messageKind || (options?.isFollowUp ? 'follow_up' : 'initial');
+      const templatePool = templatesForSend(messageKind);
+      if (!templatePool.length) throw new Error(messageKind === 'follow_up' ? 'Create/select at least one follow-up template first. Initial-message templates are no longer used for follow-ups.' : 'Create/select at least one initial-message template in Templates first.');
       let activeAccounts = accountsForSend();
       if (!activeAccounts.length) throw new Error('Connect Gmail in Settings, then select at least one connected sender here.');
       const guardBusiness = previewBusiness || readyContacts[0] || ({ name: 'there', email: 'test@example.com', website: '', domain: '', category: '', location: '', source: 'Scout' } as Business);
@@ -468,9 +555,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       const everySenderCapped = activeAccounts.every((account) => Number.isFinite(senderCap(account)));
       const effectiveLimit = everySenderCapped ? Math.min(totalRequested, finiteCapSum || totalRequested) : totalRequested;
       const contacts = await getContactsForSend(effectiveLimit, contactsOverride);
-      if (!contacts.length) throw new Error('No Ready contacts with email found.');
+      if (!contacts.length) throw new Error(messageKind === 'follow_up' ? 'No still-due follow-up contacts with email found. Scout re-checked the segment before sending.' : 'No Ready contacts with email found.');
 
-      const batchId = `scout_v821_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const batchId = `scout_v830_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const { error: batchError } = await supabase.from('outreach_batches').insert({
         id: batchId,
         workspace_id: workspace.id,
@@ -478,7 +565,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         requested_count: contacts.length,
         selected_sender_count: activeAccounts.length,
         status: dryRun ? 'dry_run' : 'running',
-        raw: { selected_accounts: activeAccounts.map((a) => a.email), sender_run_limits: Object.fromEntries(activeAccounts.map((a) => [a.email, Number.isFinite(senderCap(a)) ? senderCap(a) : 'auto'])), dryRun, delayMs, templateMode, senderMode, categoryId, businessCategoryFilter, isFollowUp: !!options?.isFollowUp }
+        raw: { selected_accounts: activeAccounts.map((a) => a.email), sender_run_limits: Object.fromEntries(activeAccounts.map((a) => [a.email, Number.isFinite(senderCap(a)) ? senderCap(a) : 'auto'])), dryRun, delayMs, templateMode, senderMode, categoryId, businessCategoryFilter, messageKind, isFollowUp: !!options?.isFollowUp, followupSegment: options?.followupSegment || null }
       });
       if (batchError) throw batchError;
 
@@ -597,7 +684,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     setBusy(true);
     setError('');
     try {
-      const templatePool = templatesForSend();
+      const templatePool = templatesForSend(scheduleType);
       const senders = accountsForSend();
       if (!templatePool.length) throw new Error('Create/select at least one template first.');
       if (!senders.length) throw new Error('Select at least one connected sender first.');
@@ -605,11 +692,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         workspace_id: workspace.id,
         type: scheduleType,
         category_id: categoryId || null,
+        audience_category_id: audienceCategoryId || null,
+        audience_category_name: selectedAudienceCategory?.name || null,
         template_id: templateMode === 'specific' ? (templatePool[0]?.id || null) : null,
         target_count: Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(scheduleCount || sendLimit || 1000))),
         scheduled_for: new Date(scheduleFor).toISOString(),
         status: 'scheduled',
-        raw: { business_category_filter: businessCategoryFilter, template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])), delay_ms: delayMs, dry_run: dryRun, allow_high_risk_send: allowHighRiskSend }
+        followup_segment: scheduleType === 'follow_up' ? followUpSegment : null,
+        raw: { audience_category_id: audienceCategoryId || null, audience_category_name: selectedAudienceCategory?.name || null, business_category_filter: businessCategoryFilter, followup_segment: scheduleType === 'follow_up' ? followUpSegment : null, template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])), delay_ms: delayMs, dry_run: dryRun, allow_high_risk_send: allowHighRiskSend }
       });
       if (insertError) throw insertError;
       setStatus('Schedule saved with the current template and sender options.');
@@ -626,7 +716,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     setError('');
     try {
       if (!dueFollowUps.length) throw new Error('No due follow-ups found.');
-      const templatePool = templatesForSend();
+      const templatePool = templatesForSend('follow_up');
       const senders = accountsForSend();
       if (!templatePool.length) throw new Error('Create/select at least one follow-up template first.');
       if (!senders.length) throw new Error('Select at least one connected sender first.');
@@ -634,11 +724,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         workspace_id: workspace.id,
         type: 'follow_up',
         category_id: categoryId || null,
+        audience_category_id: audienceCategoryId || null,
+        audience_category_name: selectedAudienceCategory?.name || null,
         template_id: templateMode === 'specific' ? (templatePool[0]?.id || null) : null,
         target_count: dueFollowUps.length,
         scheduled_for: new Date(followUpFor).toISOString(),
         status: 'scheduled',
-        raw: { due_mode: true, followup_after_hours: 72, due_business_ids: dueFollowUps.map((d) => d.business_id), template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])), dry_run: dryRun, allow_high_risk_send: allowHighRiskSend }
+        followup_segment: followUpSegment,
+        raw: { due_mode: true, audience_category_id: audienceCategoryId || null, audience_category_name: selectedAudienceCategory?.name || null, followup_segment: followUpSegment, followup_after_hours: 72, due_business_ids: dueFollowUps.map((d) => d.business_id), template_mode: templateMode, sender_mode: senderMode, selected_sender_ids: senders.map((s) => s.id), selected_sender_emails: senders.map((s) => s.email), sender_run_limits: Object.fromEntries(senders.map((s) => [s.email, Number.isFinite(senderCap(s)) ? senderCap(s) : 'auto'])), dry_run: dryRun, allow_high_risk_send: allowHighRiskSend }
       });
       if (insertError) throw insertError;
       setStatus(`Scheduled ${dueFollowUps.length.toLocaleString()} due follow-up(s).`);
@@ -650,17 +743,21 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     }
   }
 
-  async function getDueFollowUpBusinesses(limit = 1000) {
-    const rows = dueFollowUps.slice(0, limit);
+  async function getDueFollowUpBusinesses(limit = 1000, rowsOverride?: DueFollowUp[]) {
+    const rows = (rowsOverride || dueFollowUps).slice(0, limit);
     if (!rows.length) return [] as Business[];
-    const { data, error: loadError } = await supabase.from('businesses').select('*').eq('workspace_id', workspace.id).in('id', rows.map((r) => r.business_id));
+    const ids = rows.map((r) => r.business_id);
+    const { data, error: loadError } = await supabase.from('businesses').select('*').eq('workspace_id', workspace.id).in('id', ids);
     if (loadError) throw loadError;
-    return (data || []) as Business[];
+    const byId = new Map(((data || []) as Business[]).map((business) => [business.id, business]));
+    return ids.map((id) => byId.get(id)).filter(Boolean) as Business[];
   }
 
   async function sendDueFollowUpsNow() {
-    const contacts = await getDueFollowUpBusinesses(Math.min(Number(sendLimit || 1000), dueFollowUps.length || 1000));
-    await sendBatch(contacts, { isFollowUp: true, limit: contacts.length });
+    const freshDue = await fetchDueFollowUps(Math.min(Number(sendLimit || 1000), 1000));
+    setDueFollowUps(freshDue);
+    const contacts = await getDueFollowUpBusinesses(Math.min(Number(sendLimit || 1000), freshDue.length || 1000), freshDue);
+    await sendBatch(contacts, { isFollowUp: true, limit: contacts.length, messageKind: 'follow_up', followupSegment: followUpSegment });
   }
 
   async function sendDueSchedulesNow() {
@@ -747,7 +844,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         <h3>Batch Setup</h3>
         <div className="grid grid-4">
           <div><label className="label">Template category</label><select className="select" value={categoryId} onChange={(e) => onCategoryChange(e.target.value)}><option value="">All categories</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-          <div><label className="label">Business category filter</label><input className="input" value={businessCategoryFilter} onChange={(e) => setBusinessCategoryFilter(e.target.value)} placeholder="Shopify, Airtable..." /></div>
+          <div><label className="label">Audience category</label><select className="select" value={audienceCategoryId} onChange={(e) => setAudienceCategoryId(e.target.value)}><option value="">All audience categories</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div><label className="label">Text category filter</label><input className="input" value={businessCategoryFilter} onChange={(e) => setBusinessCategoryFilter(e.target.value)} placeholder="Only if no audience category selected" /></div>
           <div><label className="label">Fixed number to send</label><input className="input" type="number" min={1} max={MAX_MESSAGE_BATCH_SIZE} value={sendLimit} onChange={(e) => setSendLimit(Number(e.target.value || 1000))} /></div>
           <div><label className="label">Delay per email/ms</label><input className="input" type="number" min={0} max={60000} value={delayMs} onChange={(e) => setDelayMs(Number(e.target.value || 0))} /></div>
         </div>
@@ -778,7 +875,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         <div className="actions" style={{ marginTop: 14 }}>
           <label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> Dry run</label>
           <label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={allowHighRiskSend} onChange={(e) => setAllowHighRiskSend(e.target.checked)} /> Override high spam-risk block</label>
-          <button className="btn" type="button" disabled={busy || loading} onClick={() => sendBatch()}>Start Batch</button>
+          <button className="btn" type="button" disabled={busy || loading} onClick={() => sendBatch(undefined, { messageKind: 'initial' })}>Start Initial Batch</button>
           <button className="btn secondary" type="button" disabled={busy || loading} onClick={refreshAll}>Refresh</button>
           <button className="btn secondary" type="button" disabled={busy || loading} onClick={repairReadyContacts}>Repair Ready</button>
           <button className="btn secondary" type="button" disabled={busy || loading} onClick={syncBlockedAndBounced}>Sync Bounces/Blocked</button>
@@ -798,7 +895,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           <div className="actions" style={{ justifyContent: 'space-between', marginBottom: 12 }}><h3 style={{ margin: 0 }}>Ready Contacts</h3><div className="actions"><input className="input" style={{ width: 260 }} value={readySearch} onChange={(e) => setReadySearch(e.target.value)} placeholder="Search contacts" onKeyDown={(e) => { if (e.key === 'Enter') loadReadyContacts(); }} /><button className="btn secondary" type="button" onClick={loadReadyContacts}>Search</button></div></div>
           <div className="actions" style={{ marginBottom: 12 }}><label className="checkbox-row" style={{ margin: 0 }}><input type="checkbox" checked={readyContacts.length > 0 && selectedContactIds.length === readyContacts.length} onChange={(e) => toggleAllContacts(e.target.checked)} /> Select preview page</label><span className="badge">Showing {readyContacts.length.toLocaleString()} of {readyTotal.toLocaleString()}</span></div>
           <div className="table-wrap"><table><thead><tr><th>Use</th><th>Business</th><th>Email</th><th>Category</th></tr></thead><tbody>
-            {readyContacts.map((b) => <tr key={b.id}><td><input type="checkbox" checked={!!selectedContacts[b.id]} onChange={(e) => setSelectedContacts((cur) => ({ ...cur, [b.id]: e.target.checked }))} /></td><td><strong>{b.name || '-'}</strong><br /><span className="muted">{b.website || b.domain || ''}</span></td><td>{b.email}</td><td>{b.category || '-'}</td></tr>)}
+            {readyContacts.map((b) => <tr key={b.id}><td><input type="checkbox" checked={!!selectedContacts[b.id]} onChange={(e) => setSelectedContacts((cur) => ({ ...cur, [b.id]: e.target.checked }))} /></td><td><strong>{b.name || '-'}</strong><br /><span className="muted">{b.website || b.domain || ''}</span></td><td>{b.email}</td><td>{b.category_name || b.category || '-'}</td></tr>)}
             {!readyContacts.length ? <tr><td colSpan={4} className="muted">No Ready contacts found.</td></tr> : null}
           </tbody></table></div>
         </div>
@@ -818,18 +915,23 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
           <h3>Follow-ups</h3>
-          <p className="muted">Due after 72 hours when there is no real reply and no bounce/no-inbox record.</p>
-          <div className="grid grid-2"><div><label className="label">Schedule due follow-ups for</label><input className="input" type="datetime-local" value={followUpFor} onChange={(e) => setFollowUpFor(e.target.value)} /></div><div style={{ display: 'flex', alignItems: 'end' }}><button className="btn secondary" type="button" disabled={busy || !dueFollowUps.length} onClick={scheduleFollowUpsForDue}>Schedule Due Follow-ups</button></div></div>
-          <div className="actions" style={{ marginTop: 12 }}><button className="btn" type="button" disabled={busy || !dueFollowUps.length} onClick={sendDueFollowUpsNow}>Send Due Follow-ups Now</button><button className="btn secondary" type="button" onClick={loadDueFollowUps}>Refresh Due</button></div>
-          <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Business</th><th>Email</th><th>Last Sent</th><th>Subject</th></tr></thead><tbody>
-            {dueFollowUps.map((row) => <tr key={`${row.business_id}-${row.last_sent_at}`}><td>{row.business_name || '-'}</td><td>{row.to_email}</td><td>{new Date(row.last_sent_at).toLocaleString()}</td><td>{row.last_subject || '-'}</td></tr>)}
-            {!dueFollowUps.length ? <tr><td colSpan={4} className="muted">No follow-ups due.</td></tr> : null}
+          <p className="muted">Due after 72 hours when the inbox exists, there is no real human reply, and there is no no-inbox/bounce record. Follow-up sends now use follow-up templates only and re-check the segment before sending.</p>
+          <div className="grid grid-3">
+            <div><label className="label">Segment</label><select className="select" value={followUpSegment} onChange={(e) => setFollowUpSegment(e.target.value as 'all_unanswered' | 'no_reply' | 'auto_reply')}><option value="all_unanswered">All unanswered with inbox</option><option value="no_reply">No reply at all</option><option value="auto_reply">Auto-responder only</option></select></div>
+            <div><label className="label">Schedule due follow-ups for</label><input className="input" type="datetime-local" value={followUpFor} onChange={(e) => setFollowUpFor(e.target.value)} /></div>
+            <div style={{ display: 'flex', alignItems: 'end' }}><button className="btn secondary" type="button" disabled={busy || !dueFollowUps.length} onClick={scheduleFollowUpsForDue}>Schedule Segment</button></div>
+          </div>
+          <div className="actions" style={{ marginTop: 12 }}><button className="btn" type="button" disabled={busy || !dueFollowUps.length} onClick={sendDueFollowUpsNow}>Send Segment Now</button><button className="btn secondary" type="button" onClick={loadDueFollowUps}>Refresh Segment</button></div>
+          <div className="notice" style={{ marginTop: 12 }}>Selected segment: <strong>{followUpSegment.replace(/_/g, ' ')}</strong>. Auto replies are tracked separately; if that business later sends a human reply, Scout moves it to real reply/responded.</div>
+          <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Business</th><th>Email</th><th>Segment</th><th>Last Sent</th><th>Subject</th></tr></thead><tbody>
+            {dueFollowUps.map((row) => <tr key={`${row.business_id}-${row.last_sent_at}`}><td>{row.business_name || '-'}</td><td>{row.to_email}</td><td>{row.followup_segment || row.segment || row.reply_state || followUpSegment}</td><td>{new Date(row.last_sent_at).toLocaleString()}</td><td>{row.last_subject || '-'}</td></tr>)}
+            {!dueFollowUps.length ? <tr><td colSpan={5} className="muted">No follow-ups due for this segment.</td></tr> : null}
           </tbody></table></div>
         </div>
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedules</h3>
-          <p className="muted">v8.26 solidifies scheduled sending. Saved schedules run automatically from the deployed worker route when due, and you can also run the due-schedule worker manually here.</p>
+          <p className="muted">Saved schedules run from the deployed worker route when due. v8.30 re-validates follow-up schedules before send, so a new real reply or no-inbox event suppresses that business automatically.</p>
           <div className="grid grid-3"><div><label className="label">Type</label><select className="select" value={scheduleType} onChange={(e) => setScheduleType(e.target.value as 'initial' | 'follow_up')}><option value="initial">Initial batch</option><option value="follow_up">Follow-up</option></select></div><div><label className="label">Date & time</label><input className="input" type="datetime-local" value={scheduleFor} onChange={(e) => setScheduleFor(e.target.value)} /></div><div><label className="label">Count</label><input className="input" type="number" value={scheduleCount} onChange={(e) => setScheduleCount(Number(e.target.value || 1000))} /></div></div>
           <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={busy} onClick={saveSchedule}>Save Schedule</button><button className="btn" type="button" disabled={busy} onClick={sendDueSchedulesNow}>Run Scheduled Worker Now</button></div>
           <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Type</th><th>For</th><th>Count</th><th>Status</th></tr></thead><tbody>

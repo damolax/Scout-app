@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
-import { GmailAccount, SeedInboxTest, Workspace } from '@/lib/types';
+import { GmailAccount, MessageCategory, SeedInboxTest, Workspace } from '@/lib/types';
 
 function formatError(error: unknown) {
   if (!error) return 'Unknown error.';
@@ -25,13 +25,31 @@ function isPaused(account: GmailAccount) {
   return new Date(account.paused_until).getTime() > Date.now();
 }
 
+type IdentityDraft = {
+  signature_enabled: boolean;
+  signature_text: string;
+  signature_html: string;
+};
+
+function shortenSignature(account: GmailAccount) {
+  const text = String(account.signature_text || account.signature_html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!text) return 'No signature';
+  return text.length > 64 ? `${text.slice(0, 64)}…` : text;
+}
+
 
 export default function SettingsClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
-  const [backendUrl, setBackendUrl] = useState(process.env.NEXT_PUBLIC_BACKEND_URL || '');
+  const identityLoadedRef = useRef(false);
+  const [appUrl, setAppUrl] = useState(workspace.app_url || '');
+  const [backendUrl, setBackendUrl] = useState(workspace.render_backend_url || process.env.NEXT_PUBLIC_BACKEND_URL || '');
+  const [categories, setCategories] = useState<MessageCategory[]>([]);
+  const [defaultAudienceCategoryId, setDefaultAudienceCategoryId] = useState(workspace.default_audience_category_id || '');
+  const [defaultAudienceCategoryName, setDefaultAudienceCategoryName] = useState(workspace.default_audience_category_name || '');
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
   const [seedTests, setSeedTests] = useState<SeedInboxTest[]>([]);
   const [limitDrafts, setLimitDrafts] = useState<Record<string, { daily_limit: string; default_run_limit: string; account_type: string; seed_inbox_enabled: boolean; seed_test_address: string }>>({});
+  const [identityDraft, setIdentityDraft] = useState<IdentityDraft>({ signature_enabled: true, signature_text: '', signature_html: '' });
   const [manualEmail, setManualEmail] = useState('');
   const [manualAccessToken, setManualAccessToken] = useState('');
   const [manualRefreshToken, setManualRefreshToken] = useState('');
@@ -50,6 +68,15 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     if (loadError) throw loadError;
     const rows = (data || []) as GmailAccount[];
     setAccounts(rows);
+    if (!identityLoadedRef.current && rows.length) {
+      const source = rows.find((account) => account.signature_text || account.signature_html) || rows[0];
+      setIdentityDraft({
+        signature_enabled: source.signature_enabled !== false,
+        signature_text: String(source.signature_text || ''),
+        signature_html: String(source.signature_html || '')
+      });
+      identityLoadedRef.current = true;
+    }
     setLimitDrafts((current) => {
       const next: Record<string, { daily_limit: string; default_run_limit: string; account_type: string; seed_inbox_enabled: boolean; seed_test_address: string }> = {};
       for (const account of rows) {
@@ -238,6 +265,38 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     for (const account of rows) await saveSenderSettings(account, true);
   }
 
+  async function applyEmailIdentity(syncToGmail = false) {
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch('/api/gmail/signature', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: workspace.id,
+          apply_all: true,
+          sync_to_gmail: syncToGmail,
+          signature_enabled: identityDraft.signature_enabled,
+          signature_text: identityDraft.signature_text,
+          signature_html: identityDraft.signature_html
+        })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Signature save failed with HTTP ${response.status}`);
+      const failed = (json?.results || []).filter((row: Record<string, unknown>) => row.sync_status === 'failed');
+      setStatus(syncToGmail
+        ? failed.length
+          ? `Saved signature in Scout for all senders. Gmail sync failed for ${failed.length} sender(s); reconnect after this version if Google asks for the Gmail settings permission.`
+          : `Saved in Scout and synced to Gmail for ${Number(json.updated || 0).toLocaleString()} sender(s).`
+        : `Saved Scout signature for ${Number(json.updated || 0).toLocaleString()} sender(s).`);
+      await loadAccounts();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleSeedInbox(account: GmailAccount, enabled: boolean) {
     const draft = limitDrafts[account.id] || {
       daily_limit: String(account.daily_limit || 150),
@@ -317,6 +376,58 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     }
   }
 
+  async function loadCategories() {
+    const { data, error: categoryError } = await supabase
+      .from('message_categories')
+      .select('*')
+      .eq('workspace_id', workspace.id)
+      .eq('active', true)
+      .order('name', { ascending: true });
+    if (categoryError) throw categoryError;
+    setCategories((data || []) as MessageCategory[]);
+  }
+
+  async function loadWorkspaceSettings() {
+    try {
+      const response = await fetch(`/api/workspace/settings?workspaceId=${encodeURIComponent(workspace.id)}`);
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || 'Could not load workspace settings.');
+      const row = json.workspace || {};
+      setAppUrl(row.app_url || (typeof window !== 'undefined' ? window.location.origin : ''));
+      setBackendUrl(row.render_backend_url || process.env.NEXT_PUBLIC_BACKEND_URL || '');
+      setDefaultAudienceCategoryId(row.default_audience_category_id || '');
+      setDefaultAudienceCategoryName(row.default_audience_category_name || '');
+    } catch (err) {
+      setStatus(`Workspace setup load note: ${formatError(err)}`);
+    }
+  }
+
+  async function saveWorkspaceSettings() {
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch('/api/workspace/settings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: workspace.id,
+          appUrl: appUrl || (typeof window !== 'undefined' ? window.location.origin : ''),
+          renderBackendUrl: backendUrl,
+          defaultAudienceCategoryId,
+          defaultAudienceCategoryName
+        })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || 'Could not save workspace settings.');
+      setStatus('Workspace setup saved. Your team can now use Settings → Connect Gmail and the extension can read the saved app/backend URLs.');
+      await Promise.all([loadWorkspaceSettings(), loadCategories()]);
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function saveLocalBackend() {
     localStorage.setItem('scout_v8_backend_url', backendUrl);
     setStatus('Optional backend URL saved locally. Native Gmail OAuth/send is handled by this app.');
@@ -324,7 +435,10 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
 
   useEffect(() => {
     const savedBackend = localStorage.getItem('scout_v8_backend_url');
-    if (savedBackend) setBackendUrl(savedBackend);
+    if (savedBackend && !backendUrl) setBackendUrl(savedBackend);
+    if (!appUrl && typeof window !== 'undefined') setAppUrl(window.location.origin);
+    loadWorkspaceSettings();
+    loadCategories().catch((err) => setError(formatError(err)));
     loadAccounts().catch((err) => setError(formatError(err)));
     loadSeedTests().catch(() => undefined);
     checkGmailOauth();
@@ -373,7 +487,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
               <td><span className={`status ${isPaused(account) ? 'paused' : account.status}`}>{isPaused(account) ? 'paused' : account.status}</span><br /><select className="select" value={draft.account_type} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, account_type: e.target.value } }))}><option value="gmail">Gmail</option><option value="workspace">Workspace</option><option value="custom">Custom</option></select></td>
               <td><div className="grid grid-2"><div><label className="label">Daily safe limit</label><input className="input" type="number" min={1} value={draft.daily_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, daily_limit: e.target.value } }))} /></div><div><label className="label">Default max/run</label><input className="input" type="number" min={1} value={draft.default_run_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, default_run_limit: e.target.value } }))} /></div></div></td>
               <td><label className="checkbox-row"><input type="checkbox" checked={draft.seed_inbox_enabled} onChange={(e) => toggleSeedInbox(account, e.target.checked)} /> Use as seed receiver</label><input className="input" value={draft.seed_test_address} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_test_address: e.target.value } }))} placeholder="seed inbox email" /></td>
-              <td>{Number(account.sent_today || 0).toLocaleString()} / {Number(account.daily_limit || 0).toLocaleString()}<br /><span className="badge">{account.spam_risk_status || account.last_seed_result || 'unknown'}</span></td>
+              <td>{Number(account.sent_today || 0).toLocaleString()} / {Number(account.daily_limit || 0).toLocaleString()}<br /><span className="badge">{account.spam_risk_status || account.last_seed_result || 'unknown'}</span><br /><span className="muted">Signature: {account.signature_enabled === false ? 'off' : account.signature_text || account.signature_html ? 'on' : 'empty'}</span></td>
               <td><button className="btn secondary" type="button" disabled={busy} onClick={() => saveSenderSettings(account)}>Save sender settings</button> <button className="btn secondary" type="button" disabled={busy || !(account.access_token || account.refresh_token)} onClick={() => verifySenderProfile(account)}>Verify</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => pauseOrResume(account)}>{isPaused(account) || account.status !== 'connected' ? 'Resume' : 'Pause'}</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => removeAccount(account)}>Remove</button></td>
             </tr>;
           })}
@@ -387,19 +501,45 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Optional Backend</h3>
-        <p className="muted">This is kept for older email/reply endpoints. Native Gmail connect/send now works through this Node app.</p>
-        <label className="label">Backend URL</label>
-        <input className="input" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} />
-        <div className="actions" style={{ marginTop: 12 }}>
-          <button className="btn secondary" onClick={saveLocalBackend}>Save locally</button>
-          <button className="btn secondary" onClick={checkBackend}>Check backend</button>
+        <h3>Email Identity & Signatures</h3>
+        <p className="muted">Use one shared signature across all connected sender accounts. Scout automatically appends the signature to initial messages, follow-ups, and manual replies.</p>
+        <label className="checkbox-row" style={{ marginTop: 10 }}><input type="checkbox" checked={identityDraft.signature_enabled} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_enabled: event.target.checked }))} /> Add this signature to Scout-sent emails</label>
+        <label className="label" style={{ marginTop: 12 }}>Plain signature</label>
+        <textarea className="textarea" value={identityDraft.signature_text} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_text: event.target.value }))} placeholder={"Best regards,\nOlalekan\nWebsite: https://example.com"} style={{ minHeight: 110 }} />
+        <label className="label" style={{ marginTop: 12 }}>HTML signature, optional</label>
+        <textarea className="textarea" value={identityDraft.signature_html} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_html: event.target.value }))} placeholder={'<strong>Olalekan</strong><br />Founder, Elevate Scout<br /><a href="https://example.com">example.com</a>'} style={{ minHeight: 110 }} />
+        <div className="notice" style={{ marginTop: 10 }}>
+          Scout controls email signatures. Actual Gmail/Google profile pictures must be changed directly inside each Google account.
         </div>
+        <div className="actions" style={{ marginTop: 12 }}>
+          <button className="btn" type="button" disabled={busy || !accounts.length} onClick={() => applyEmailIdentity(false)}>Save to Scout for all senders</button>
+          <button className="btn secondary" type="button" disabled={busy || !accounts.length} onClick={() => applyEmailIdentity(true)}>Save + sync signature to Gmail</button>
+        </div>
+        <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Sender</th><th>Signature</th><th>Gmail sync</th></tr></thead><tbody>
+          {accounts.map((account) => <tr key={`identity-${account.id}`}><td>{account.email}</td><td>{account.signature_enabled === false ? 'Disabled' : shortenSignature(account)}</td><td>{account.gmail_signature_sync_error ? <span className="error">Failed: {account.gmail_signature_sync_error}</span> : account.gmail_signature_synced_at ? `Synced ${new Date(account.gmail_signature_synced_at).toLocaleString()}` : 'Not synced'}</td></tr>)}
+          {!accounts.length ? <tr><td colSpan={3} className="muted">Connect Gmail first, then save the shared signature.</td></tr> : null}
+        </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Extension API Key</h3>
+        <h3>Admin Setup for Team + Extension</h3>
+        <p className="muted">Save these once so another person can open the app, go to Settings, connect Gmail, and start scouting. The Render/backend URL is optional unless you still use a separate Render service for deep workers.</p>
+        <div className="grid grid-2">
+          <div><label className="label">Scout App URL / Vercel URL</label><input className="input" value={appUrl} onChange={(e) => setAppUrl(e.target.value)} placeholder="https://your-scout-app.vercel.app" /></div>
+          <div><label className="label">Render / backend URL, optional</label><input className="input" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} placeholder="https://your-render-backend.onrender.com" /></div>
+        </div>
+        <div className="grid grid-2" style={{ marginTop: 12 }}>
+          <div><label className="label">Default audience category</label><select className="select" value={defaultAudienceCategoryId} onChange={(e) => { setDefaultAudienceCategoryId(e.target.value); const cat = categories.find((c) => c.id === e.target.value); if (cat) setDefaultAudienceCategoryName(cat.name); }}><option value="">None / create below</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+          <div><label className="label">New default category name</label><input className="input" value={defaultAudienceCategoryName} onChange={(e) => { setDefaultAudienceCategoryName(e.target.value); if (defaultAudienceCategoryId) setDefaultAudienceCategoryId(''); }} placeholder="Airtable service, Marketing, Shopify audit" /></div>
+        </div>
+        <div className="notice" style={{ marginTop: 12 }}>Extension ingest URL: <code>{(appUrl || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')}/api/extension/ingest</code></div>
+        <label className="label" style={{ marginTop: 12 }}>Extension workspace key</label>
         <input className="input" readOnly value={workspace.api_key || 'No API key found. Re-run migration.'} />
+        <div className="actions" style={{ marginTop: 12 }}>
+          <button className="btn" type="button" disabled={busy} onClick={saveWorkspaceSettings}>Save admin setup</button>
+          <button className="btn secondary" type="button" onClick={saveLocalBackend}>Save backend locally too</button>
+          <button className="btn secondary" type="button" onClick={checkBackend}>Check backend</button>
+        </div>
       </div>
     </div>
   );

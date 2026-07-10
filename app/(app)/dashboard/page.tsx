@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
+import SendTimeStrip from '@/components/SendTimeStrip';
 
 type RangeKey = 'today' | 'yesterday' | 'last7' | 'last30' | 'last90' | 'all';
 
@@ -333,6 +334,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
         </div>
         <span className="badge">Workspace: {workspace.name}</span>
       </div>
+
+      <SendTimeStrip />
 
       <div className="card" style={{ padding: 16 }}>
         <div className="actions" style={{ justifyContent: 'space-between' }}>

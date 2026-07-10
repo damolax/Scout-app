@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createAppNotification, notificationTitleForInbound } from './notifications';
 
 type AnyRecord = Record<string, any>;
 
@@ -372,6 +373,29 @@ async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any
       businessPatch.status = classification.businessStatus;
     }
     await supabase.from('businesses').update(businessPatch).eq('workspace_id', workspaceId).eq('id', sentMatch.business_id);
+  }
+
+
+  if (classification.isRealReply || classification.isAutoReply || classification.deliveryFailure || classification.limitNotice) {
+    const title = notificationTitleForInbound(classification.classification, message.fromEmail || targetEmail || '', null);
+    const shortMessage = [message.subject, message.snippet || message.body.slice(0, 180)].filter(Boolean).join(' - ').slice(0, 320);
+    await createAppNotification(supabase, {
+      workspaceId,
+      type: classification.isRealReply ? 'real_reply' : classification.isAutoReply ? 'auto_reply' : classification.limitNotice ? 'gmail_limit_notice' : classification.classification,
+      title,
+      message: shortMessage || classification.classification,
+      entityType: 'gmail_message',
+      entityId: message.gmailMessageId,
+      businessId: sentMatch?.business_id || null,
+      raw: {
+        classification,
+        from: message.fromEmail || message.fromRaw,
+        to: targetEmail || message.toEmail,
+        subject: message.subject,
+        sent_message_id: sentMatch?.id || null,
+        gmail_thread_id: message.gmailThreadId || sentMatch?.gmail_thread_id || null
+      }
+    });
   }
 
   if (classification.limitNotice) {

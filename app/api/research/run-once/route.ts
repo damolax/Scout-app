@@ -153,11 +153,15 @@ async function runOnce(request: NextRequest) {
   const supabase = createAdminClient();
   const limit = Math.max(1, Math.min(500, Number(request.nextUrl.searchParams.get('limit') || 100)));
   const concurrency = Math.max(1, Math.min(50, Number(request.nextUrl.searchParams.get('concurrency') || 20)));
+  const workspaceId = String(request.nextUrl.searchParams.get('workspaceId') || '').trim();
 
-  const { data: jobs, error: jobError } = await supabase
+  let jobQuery = supabase
     .from('email_research_jobs')
     .select('id,workspace_id,business_id,attempts,businesses(id,name,email,website,domain,category,location,raw,status)')
-    .eq('status', 'queued')
+    .eq('status', 'queued');
+  if (workspaceId) jobQuery = jobQuery.eq('workspace_id', workspaceId);
+
+  const { data: jobs, error: jobError } = await jobQuery
     .order('priority', { ascending: false })
     .order('created_at', { ascending: true })
     .limit(limit);
@@ -173,7 +177,7 @@ async function runOnce(request: NextRequest) {
       return;
     }
 
-    await supabase.from('email_research_jobs').update({ status: 'running', started_at: new Date().toISOString(), attempts: (job.attempts || 0) + 1 }).eq('id', job.id);
+    await supabase.from('email_research_jobs').update({ status: 'running', started_at: new Date().toISOString(), updated_at: new Date().toISOString(), attempts: (job.attempts || 0) + 1 }).eq('id', job.id);
     await supabase.from('businesses').update({ status: 'scanning' }).eq('id', business.id).neq('status', 'contacted');
 
     try {

@@ -1,0 +1,127 @@
+export const runtime = 'nodejs';
+export const maxDuration = 120;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase-admin';
+import { signatureHtml, signatureText } from '@/lib/email-signature';
+
+type AnyRow = Record<string, any>;
+
+function formatError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try { return JSON.stringify(error); } catch { return String(error); }
+}
+
+async function refreshAccessToken(account: AnyRow) {
+  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+  if (!clientId || !clientSecret) throw new Error('GOOGLE_CLIENT_ID/NEXT_PUBLIC_GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in Vercel.');
+  if (!account.refresh_token) throw new Error(`No refresh token for ${account.email}. Reconnect Gmail in Settings.`);
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: String(account.refresh_token), grant_type: 'refresh_token' })
+  });
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(json?.error_description || json?.error || `Token refresh failed with HTTP ${response.status}`);
+  return { access_token: String(json.access_token || ''), expires_in: Number(json.expires_in || 3600) };
+}
+
+async function ensureAccessToken(supabase: ReturnType<typeof createAdminClient>, account: AnyRow) {
+  let accessToken = String(account.access_token || '');
+  const expiresAt = account.expires_at ? new Date(account.expires_at).getTime() : 0;
+  if (!accessToken || expiresAt < Date.now() + 60_000) {
+    const refreshed = await refreshAccessToken(account);
+    accessToken = refreshed.access_token;
+    await supabase.from('gmail_accounts').update({
+      access_token: accessToken,
+      expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
+      last_error: null
+    }).eq('workspace_id', account.workspace_id).eq('id', account.id);
+    account.access_token = accessToken;
+    account.expires_at = new Date(Date.now() + refreshed.expires_in * 1000).toISOString();
+  }
+  return accessToken;
+}
+
+async function syncSignatureToGmail(accessToken: string, email: string, html: string) {
+  const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs/${encodeURIComponent(email)}`, {
+    method: 'PATCH',
+    headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ signature: html })
+  });
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = json?.error?.message || json?.error || `Gmail signature sync failed with HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return json;
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const input = await request.json().catch(() => ({}));
+    const workspaceId = String(input.workspace_id || '').trim();
+    const accountId = String(input.gmail_account_id || '').trim();
+    const applyAll = Boolean(input.apply_all || input.applyAll);
+    const syncToGmail = Boolean(input.sync_to_gmail || input.syncToGmail);
+    const signature_enabled = input.signature_enabled !== false;
+    const signature_html = String(input.signature_html || '').trim();
+    const signature_text = String(input.signature_text || '').trim();
+    if (!workspaceId) throw new Error('workspace_id is required.');
+    if (!applyAll && !accountId) throw new Error('gmail_account_id is required unless apply_all is true.');
+
+    const supabase = createAdminClient();
+    let query = supabase.from('gmail_accounts').select('*').eq('workspace_id', workspaceId);
+    if (!applyAll) query = query.eq('id', accountId);
+    const { data: accounts, error: accountError } = await query.order('created_at', { ascending: true });
+    if (accountError) throw accountError;
+    const rows = accounts || [];
+    if (!rows.length) throw new Error('No Gmail sender accounts found.');
+
+    const identity = { signature_enabled, signature_html, signature_text };
+    const safeHtml = signatureHtml(identity);
+    const safeText = signatureText(identity);
+    const results: Array<Record<string, unknown>> = [];
+
+    for (const account of rows) {
+      const baseUpdate: Record<string, unknown> = {
+        signature_enabled,
+        signature_html: safeHtml,
+        signature_text: safeText,
+        sync_signature_to_gmail: syncToGmail,
+        gmail_signature_sync_error: null,
+        updated_at: new Date().toISOString(),
+        raw: { ...(account.raw || {}), email_identity_updated_at: new Date().toISOString() }
+      };
+
+      let syncStatus = syncToGmail ? 'pending' : 'not_requested';
+      let syncError = '';
+      if (syncToGmail) {
+        try {
+          const accessToken = await ensureAccessToken(supabase, account);
+          await syncSignatureToGmail(accessToken, String(account.email), safeHtml);
+          syncStatus = 'synced';
+          baseUpdate.gmail_signature_synced_at = new Date().toISOString();
+        } catch (err) {
+          syncStatus = 'failed';
+          syncError = formatError(err);
+          baseUpdate.gmail_signature_sync_error = syncError;
+        }
+      }
+
+      const { error: updateError } = await supabase
+        .from('gmail_accounts')
+        .update(baseUpdate)
+        .eq('workspace_id', workspaceId)
+        .eq('id', account.id);
+      if (updateError) throw updateError;
+      results.push({ account_id: account.id, email: account.email, sync_status: syncStatus, sync_error: syncError });
+    }
+
+    return NextResponse.json({ success: true, updated: results.length, results });
+  } catch (error) {
+    return NextResponse.json({ success: false, error: formatError(error) }, { status: 400 });
+  }
+}

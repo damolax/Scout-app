@@ -1,10 +1,10 @@
 {
-  "name": "scout-app-v8-26-scheduled-worker-seed-solid",
-  "version": "8.26.0",
+  "name": "scout-app-v8-36-audience-categories-admin-setup",
+  "version": "8.36.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run typecheck && next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
@@ -12,11 +12,11 @@
   "dependencies": {
     "@supabase/ssr": "0.12.0",
     "@supabase/supabase-js": "2.110.0",
+    "lucide-react": "1.23.0",
     "next": "16.2.10",
     "papaparse": "5.5.4",
     "react": "19.2.7",
-    "react-dom": "19.2.7",
-    "lucide-react": "1.23.0"
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
     "@types/node": "26.1.0",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.26: scheduled sender worker, cleaned Gmail Settings UI, auto-saving seed receivers, and more reliable seed inbox checks."
+  "description": "Scout App v8.36: audience categories for upload/dorking/directories/daily scouting, category-filtered sending, admin setup URLs, notifications, durable jobs, signatures, timezone intelligence, and extension bridge."
 }
