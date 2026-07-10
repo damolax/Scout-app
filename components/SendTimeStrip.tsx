@@ -1,56 +1,154 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import { DASHBOARD_SEND_MARKETS, recommendSendWindow } from '@/lib/send-time-intelligence';
+import { useEffect, useMemo, useState } from "react";
+import {
+  DASHBOARD_SEND_MARKETS,
+  recommendSendWindow,
+  SendMarket,
+} from "@/lib/send-time-intelligence";
+
+const EXTRA_MARKETS: SendMarket[] = [
+  { id: "us-central", label: "US Central", timezone: "America/Chicago" },
+  { id: "us-mountain", label: "US Mountain", timezone: "America/Denver" },
+  { id: "canada-west", label: "Canada West", timezone: "America/Vancouver" },
+  {
+    id: "canada-atlantic",
+    label: "Canada Atlantic",
+    timezone: "America/Halifax",
+  },
+  { id: "spain-canary", label: "Spain Canary", timezone: "Atlantic/Canary" },
+  { id: "uk", label: "UK", timezone: "Europe/London" },
+];
 
 function toneStyles(tone: string) {
-  if (tone === 'ok') return { borderColor: 'rgba(22,163,74,.28)', background: 'rgba(22,163,74,.06)' };
-  if (tone === 'good') return { borderColor: 'rgba(37,99,235,.24)', background: 'rgba(37,99,235,.05)' };
-  if (tone === 'wait') return { borderColor: 'rgba(217,119,6,.24)', background: 'rgba(217,119,6,.06)' };
-  return { borderColor: 'rgba(220,38,38,.24)', background: 'rgba(220,38,38,.05)' };
+  if (tone === "ok")
+    return {
+      borderColor: "rgba(22,163,74,.34)",
+      background: "rgba(22,163,74,.08)",
+    };
+  if (tone === "good")
+    return {
+      borderColor: "rgba(37,99,235,.28)",
+      background: "rgba(37,99,235,.07)",
+    };
+  if (tone === "wait")
+    return {
+      borderColor: "rgba(217,119,6,.30)",
+      background: "rgba(217,119,6,.07)",
+    };
+  return {
+    borderColor: "rgba(220,38,38,.30)",
+    background: "rgba(220,38,38,.07)",
+  };
+}
+
+function MarketPill({
+  market,
+  userTimezone,
+  now,
+}: {
+  market: SendMarket;
+  userTimezone: string;
+  now: Date;
+}) {
+  const recommendation = recommendSendWindow({
+    marketTimezone: market.timezone,
+    userTimezone,
+    now,
+  });
+  const action = recommendation.nextBestUserTime
+    ? `Send at ${recommendation.nextBestUserTime}`
+    : "Send now";
+  return (
+    <div
+      className="badge"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "7px 10px",
+        border: "1px solid",
+        whiteSpace: "nowrap",
+        ...toneStyles(recommendation.tone),
+      }}
+      title={`Buyer local time: ${recommendation.marketLocalTime} (${market.timezone}). Recommendation shown in your timezone: ${userTimezone}.`}
+    >
+      <strong>{market.label}</strong>
+      <span>{recommendation.label}</span>
+      <span className="muted">· {action}</span>
+    </div>
+  );
 }
 
 export default function SendTimeStrip() {
   const [now, setNow] = useState(() => new Date());
-  const [userTimezone, setUserTimezone] = useState('UTC');
+  const [userTimezone, setUserTimezone] = useState("UTC");
+  const [extraMarketId, setExtraMarketId] = useState("");
 
   useEffect(() => {
     try {
-      setUserTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+      setUserTimezone(
+        Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      );
     } catch {
-      setUserTimezone('UTC');
+      setUserTimezone("UTC");
     }
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const cards = useMemo(() => DASHBOARD_SEND_MARKETS.map((market) => ({
-    market,
-    recommendation: recommendSendWindow({ marketTimezone: market.timezone, userTimezone, now })
-  })), [now, userTimezone]);
+  const extraMarket = useMemo(
+    () => EXTRA_MARKETS.find((market) => market.id === extraMarketId) || null,
+    [extraMarketId],
+  );
 
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <div className="actions" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-        <div>
-          <h3 style={{ margin: 0 }}>Best Sending Time</h3>
-          <p className="muted" style={{ margin: '6px 0 0' }}>Scout scores the buyer's local inbox window, but every recommended schedule time below is shown in your timezone: <b>{userTimezone}</b>.</p>
+    <div className="card" style={{ padding: "10px 12px" }}>
+      <div
+        className="actions"
+        style={{
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <div className="actions" style={{ gap: 8, flexWrap: "wrap" }}>
+          <strong style={{ marginRight: 2 }}>Send time:</strong>
+          {DASHBOARD_SEND_MARKETS.map((market) => (
+            <MarketPill
+              key={market.id}
+              market={market}
+              userTimezone={userTimezone}
+              now={now}
+            />
+          ))}
+          {extraMarket ? (
+            <MarketPill
+              market={extraMarket}
+              userTimezone={userTimezone}
+              now={now}
+            />
+          ) : null}
         </div>
-        <span className="badge">compact</span>
-      </div>
-      <div className="grid grid-3" style={{ marginTop: 12 }}>
-        {cards.map(({ market, recommendation }) => (
-          <div key={market.id} className="card" style={{ padding: 12, boxShadow: 'none', ...toneStyles(recommendation.tone) }} title={`Buyer local time: ${recommendation.marketLocalTime} (${market.timezone})`}>
-            <div className="actions" style={{ justifyContent: 'space-between', gap: 8 }}>
-              <strong>{market.label}</strong>
-              <span className="badge">{recommendation.label}</span>
-            </div>
-            <div style={{ marginTop: 8, fontWeight: 900 }}>
-              {recommendation.nextBestUserTime ? `Next: ${recommendation.nextBestUserTime}` : 'Send now'}
-            </div>
-            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{market.note || 'Recommendation shown in your time'}</div>
-          </div>
-        ))}
+        <div className="actions" style={{ gap: 8 }}>
+          <span className="muted" style={{ fontSize: 12 }}>
+            shown in {userTimezone}
+          </span>
+          <select
+            className="select"
+            style={{ width: 170, height: 34, padding: "6px 9px" }}
+            value={extraMarketId}
+            onChange={(e) => setExtraMarketId(e.target.value)}
+          >
+            <option value="">More timezones</option>
+            {EXTRA_MARKETS.map((market) => (
+              <option key={market.id} value={market.id}>
+                {market.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
     </div>
   );

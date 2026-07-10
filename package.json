@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-38-simple-stable",
-  "version": "8.38.0",
+  "name": "scout-app-v8-39-simple-targeting-stability",
+  "version": "8.39.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -27,9 +27,9 @@
     "eslint-config-next": "16.2.10",
     "typescript": "6.0.3"
   },
+  "packageManager": "pnpm@9.15.9",
   "engines": {
-    "node": "22.x",
-    "npm": "10.x"
+    "node": "22.x"
   },
-  "description": "Scout App v8.38: simplified navigation, top-right notification popover, external-cron/Vercel-Hobby-safe deployment, and stability diagnostics."
+  "description": "Scout App v8.39: Supabase follow-up RPC fix, simplified Airtable/Shopify audience targeting, 24-hour sender counts, compact send-time strip, and clearer message scheduling."
 }
