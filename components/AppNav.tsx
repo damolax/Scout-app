@@ -2,34 +2,38 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Upload, Building2, ShieldCheck, Search, Mail, MessageSquareReply, Ban, Settings, Database, Globe2, Activity, Rocket, Bell, ClipboardList } from 'lucide-react';
+import { BarChart3, UploadCloud, Building2, Mail, Settings, Rocket, Inbox } from 'lucide-react';
 
 const items = [
   { href: '/dashboard', label: 'Dashboard', icon: BarChart3 },
-  { href: '/operations', label: 'Operations', icon: Rocket },
-  { href: '/notifications', label: 'Notifications', icon: Bell },
-  { href: '/upload', label: 'Upload Lists', icon: Upload },
-  { href: '/businesses', label: 'Businesses', icon: Building2 },
-  { href: '/verify', label: 'Verify Emails', icon: ShieldCheck },
-  { href: '/source-scout', label: 'Source Scout', icon: Globe2 },
-  { href: '/daily-scouting', label: 'Daily Scouting', icon: ClipboardList },
-  { href: '/auto-scout', label: 'Auto Scout', icon: Search },
-  { href: '/templates', label: 'Templates', icon: Mail },
-  { href: '/message', label: 'Message', icon: Mail },
-  { href: '/replies', label: 'Replies', icon: MessageSquareReply },
-  { href: '/deliverability', label: 'Deliverability', icon: Activity },
-  { href: '/no-inbox', label: 'No Inbox', icon: Ban },
-  { href: '/data-safety', label: 'Data Safety', icon: Database },
+  { href: '/source-scout', label: 'Scout & Import', icon: UploadCloud },
+  { href: '/businesses', label: 'Leads', icon: Building2 },
+  { href: '/message', label: 'Outreach', icon: Mail },
+  { href: '/replies', label: 'Inbox', icon: Inbox },
+  { href: '/operations', label: 'Automation', icon: Rocket },
   { href: '/settings', label: 'Settings', icon: Settings }
 ];
+
+const groupedRoutes: Record<string, string[]> = {
+  '/source-scout': ['/source-scout', '/upload', '/daily-scouting', '/auto-scout', '/email-scout', '/verify'],
+  '/businesses': ['/businesses', '/data-safety'],
+  '/message': ['/message', '/templates', '/deliverability'],
+  '/replies': ['/replies', '/no-inbox', '/notifications'],
+  '/operations': ['/operations']
+};
+
+function isActive(pathname: string, href: string) {
+  const routes = groupedRoutes[href] || [href];
+  return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+}
 
 export function AppNav() {
   const pathname = usePathname();
   return (
-    <nav className="nav">
+    <nav className="nav" aria-label="Main navigation">
       {items.map((item) => {
         const Icon = item.icon;
-        const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        const active = isActive(pathname, item.href);
         return (
           <Link key={item.href} href={item.href} className={active ? 'active' : ''}>
             <Icon size={18} />

@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-37-render-worker-final",
-  "version": "8.37.0",
+  "name": "scout-app-v8-38-simple-stable",
+  "version": "8.38.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.37: Render background worker deployment, Vercel Hobby-safe config, audience categories, notifications, durable jobs, signatures, timezone intelligence, and extension bridge."
+  "description": "Scout App v8.38: simplified navigation, top-right notification popover, external-cron/Vercel-Hobby-safe deployment, and stability diagnostics."
 }

@@ -105,3 +105,143 @@ code { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-
 .card.good { border-color: rgba(51,214,159,.34); background: linear-gradient(180deg, rgba(51,214,159,.09), rgba(255,255,255,.025)); }
 .card.warn { border-color: rgba(255,204,102,.36); background: linear-gradient(180deg, rgba(255,204,102,.10), rgba(255,255,255,.025)); }
 .card.bad { border-color: rgba(255,107,122,.36); background: linear-gradient(180deg, rgba(255,107,122,.10), rgba(255,255,255,.025)); }
+
+/* v8.38 simplification: fewer sidebar entries and a top-right notification popover */
+.main-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(4,10,20,.78);
+  backdrop-filter: blur(16px);
+}
+.notification-menu { position: relative; }
+.notification-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--text);
+  background: rgba(255,255,255,.07);
+}
+.notification-icon:hover { background: rgba(255,255,255,.12); }
+.notification-icon strong {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #06101d;
+  background: var(--accent);
+  font-size: 11px;
+  font-weight: 950;
+  border: 2px solid rgba(4,10,20,.95);
+}
+.notification-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 90px));
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  background: rgba(9,17,30,.98);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 22px 70px rgba(0,0,0,.45);
+}
+.notification-popover-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.notification-popover-head p { margin: 3px 0 0; font-size: 12px; }
+.actions.compact { gap: 6px; }
+.icon-btn {
+  width: 31px;
+  height: 31px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: rgba(255,255,255,.07);
+}
+.icon-btn:disabled { opacity: .45; cursor: not-allowed; }
+.notification-error {
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: #ffc0c7;
+  background: rgba(255,107,122,.10);
+  border: 1px solid rgba(255,107,122,.26);
+  font-size: 12px;
+}
+.notification-list { overflow: auto; padding: 10px; display: grid; gap: 8px; }
+.notification-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255,255,255,.045);
+}
+.notification-item.unread { border-left: 4px solid var(--accent); background: rgba(87,199,255,.08); }
+.notification-item strong { display: block; font-size: 13px; }
+.notification-item p { margin: 5px 0; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.notification-item span { color: var(--muted); font-size: 11px; }
+.notification-actions { display: flex; gap: 7px; align-items: flex-start; }
+.notification-actions a,
+.notification-actions button {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--text);
+  background: rgba(255,255,255,.07);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.notification-empty { padding: 18px; color: var(--muted); text-align: center; }
+.notification-pill { display: none; }
+.sidebar .brand { margin-bottom: 22px; }
+.nav { gap: 8px; }
+.nav a { padding: 12px 13px; }
+@media (max-width: 900px) {
+  .main-topbar { position: relative; padding: 12px 16px; }
+  .notification-popover { right: -8px; }
+}
+.quick-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+.quick-link-card {
+  display: grid;
+  gap: 5px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(255,255,255,.045);
+}
+.quick-link-card:hover { background: rgba(255,255,255,.075); }
+.quick-link-card strong { font-size: 13px; }
+.quick-link-card span { color: var(--muted); font-size: 12px; line-height: 1.35; }

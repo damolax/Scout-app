@@ -17,11 +17,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div className="brand">
           <div className="logo" />
           <div>
-            <h1>Scout App</h1>
-            <p>v8.36 Final · Categories + Admin Setup · {workspace?.name || 'No workspace'}</p>
+            <h1>Scout</h1>
+            <p>{workspace?.name || 'No workspace'}</p>
           </div>
         </div>
-        <NotificationBell workspaceId={workspace?.id} />
         <AppNav />
         <div style={{ marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
           <p className="muted" style={{ fontSize: 12, wordBreak: 'break-word' }}>{user?.email}</p>
@@ -29,6 +28,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
       <main className="main">
+        <div className="main-topbar">
+          <div>
+            <strong>Scout App</strong>
+            <span className="muted"> Simple outreach workspace</span>
+          </div>
+          <NotificationBell workspaceId={workspace?.id} />
+        </div>
         <div className="container">{children}</div>
       </main>
     </div>
