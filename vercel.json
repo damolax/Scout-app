@@ -7,14 +7,6 @@
   "crons": [
     {
       "path": "/api/workers/run-all?workspaceId=00000000-0000-4000-8000-000000000001&includeSeedTest=false",
-      "schedule": "0 * * * *"
-    },
-    {
-      "path": "/api/gmail/seed-test/run",
-      "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/message/run-schedules",
       "schedule": "0 8 * * *"
     }
   ]
