@@ -3,11 +3,5 @@
   "framework": "nextjs",
   "installCommand": "npm install --no-audit --no-fund",
   "buildCommand": "npm run build",
-  "outputDirectory": ".next",
-  "crons": [
-    {
-      "path": "/api/workers/run-all?workspaceId=00000000-0000-4000-8000-000000000001&includeSeedTest=false",
-      "schedule": "0 8 * * *"
-    }
-  ]
+  "outputDirectory": ".next"
 }

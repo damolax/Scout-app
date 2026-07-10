@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-36-audience-categories-admin-setup",
-  "version": "8.36.0",
+  "name": "scout-app-v8-37-render-worker-final",
+  "version": "8.37.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32,5 +32,5 @@
     "node": "24.x",
     "npm": "10.x"
   },
-  "description": "Scout App v8.36: audience categories for upload/dorking/directories/daily scouting, category-filtered sending, admin setup URLs, notifications, durable jobs, signatures, timezone intelligence, and extension bridge."
+  "description": "Scout App v8.37: Render background worker deployment, Vercel Hobby-safe config, audience categories, notifications, durable jobs, signatures, timezone intelligence, and extension bridge."
 }
