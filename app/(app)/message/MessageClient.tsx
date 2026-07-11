@@ -286,6 +286,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [templateMode, setTemplateMode] = useState<TemplateMode>("specific");
   const [senderMode, setSenderMode] = useState<SenderMode>("rotate");
   const [businessCategoryFilter, setBusinessCategoryFilter] = useState("");
+  const [countryFilter, setCountryFilter] = useState("");
   const [audienceCategoryId, setAudienceCategoryId] = useState(
     workspace.default_audience_category_id || "",
   );
@@ -436,6 +437,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   async function loadReadyContacts() {
     const cleanSearch = readySearch.trim().replace(/[%_]/g, "");
     const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
+    const cleanCountry = countryFilter.trim().replace(/[%_]/g, "");
     const targetBusinessId =
       typeof window !== "undefined"
         ? new URL(window.location.href).searchParams.get("business")
@@ -456,6 +458,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
     else if (cleanCategory)
       query = query.ilike("category", `%${cleanCategory}%`);
+    if (cleanCountry)
+      query = query.or(
+        `location.ilike.%${cleanCountry}%,source.ilike.%${cleanCountry}%,website.ilike.%${cleanCountry}%,domain.ilike.%${cleanCountry}%`,
+      );
     const { data, error: loadError, count } = await query;
     if (loadError) throw loadError;
     let rows = (data || []) as Business[];
@@ -656,6 +662,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     }
     const cleanSearch = readySearch.trim().replace(/[%_]/g, "");
     const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
+    const cleanCountry = countryFilter.trim().replace(/[%_]/g, "");
     let query = supabase
       .from("businesses")
       .select("*")
@@ -672,6 +679,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
     else if (cleanCategory)
       query = query.ilike("category", `%${cleanCategory}%`);
+    if (cleanCountry)
+      query = query.or(
+        `location.ilike.%${cleanCountry}%,source.ilike.%${cleanCountry}%,website.ilike.%${cleanCountry}%,domain.ilike.%${cleanCountry}%`,
+      );
     const { data, error: loadError } = await query;
     if (loadError) throw loadError;
     for (const business of (data || []) as Business[]) {
@@ -905,6 +916,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         senderMode,
         senderRunLimits: { ...senderLimitsById, ...senderLimitsByEmail },
         businessCategoryFilter,
+        countryFilter,
         audienceCategoryId,
         audienceCategoryName: selectedAudienceCategory?.name || "",
         readySearch,
@@ -1065,6 +1077,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             senderMode,
             categoryId,
             businessCategoryFilter,
+            countryFilter,
             messageKind,
             isFollowUp: !!options?.isFollowUp,
             followupSegment: options?.followupSegment || null,
@@ -1369,6 +1382,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             audience_category_id: audienceCategoryId || null,
             audience_category_name: selectedAudienceCategory?.name || null,
             business_category_filter: businessCategoryFilter,
+            country_filter: countryFilter,
             followup_segment:
               scheduleType === "follow_up" ? followUpSegment : null,
             template_mode: templateMode,
@@ -1707,6 +1721,18 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 </option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="label">Country / market</label>
+            <input
+              className="input"
+              value={countryFilter}
+              onChange={(e) => setCountryFilter(e.target.value)}
+              placeholder="e.g. United States, Germany, Spain"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") loadReadyContacts();
+              }}
+            />
           </div>
           <div>
             <label className="label">Template category</label>

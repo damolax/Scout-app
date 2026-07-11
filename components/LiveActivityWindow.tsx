@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, PauseCircle, RefreshCw, Send, Search } from 'lucide-react';
 
 type LiveSchedule = {
@@ -77,6 +77,9 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [stopId, setStopId] = useState('');
+  const [notificationPermission, setNotificationPermission] = useState<string>('unsupported');
+  const lastNotifiedSentId = useRef<string>('');
+  const lastNotifiedScheduleKey = useRef<string>('');
 
   const runningSchedules = useMemo(() => (payload.schedules || []).filter((row) => ['running', 'due', 'scheduled'].includes(String(row.status || ''))), [payload.schedules]);
   const runningResearch = useMemo(() => (payload.researchJobs || []).filter((row) => ['running', 'queued'].includes(String(row.status || ''))), [payload.researchJobs]);
@@ -117,6 +120,47 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
     }
   }
 
+  async function enableNotifications() {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotificationPermission('unsupported');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+  }
+
+  function notify(title: string, body: string) {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    const n = new Notification(title, { body, icon: '/icon-192.png', tag: 'scout-live-work' });
+    n.onclick = () => {
+      window.focus();
+      window.location.href = '/message';
+    };
+  }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setNotificationPermission('Notification' in window ? Notification.permission : 'unsupported');
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+    }
+  }, []);
+
+  useEffect(() => {
+    const latestSent = (payload.recentSent || [])[0];
+    if (latestSent?.id && latestSent.id !== lastNotifiedSentId.current) {
+      if (lastNotifiedSentId.current) notify('Scout sent an email', `${shortEmail(latestSent.to_email)} from ${shortEmail(latestSent.from_email)}`);
+      lastNotifiedSentId.current = latestSent.id;
+    }
+    const active = (payload.schedules || []).find((row) => row.status === 'running');
+    const key = active ? `${active.id}:${active.processed_count || 0}:${active.sent_count || 0}` : '';
+    if (key && key !== lastNotifiedScheduleKey.current) {
+      if (lastNotifiedScheduleKey.current) notify('Scout sending progress', `${Number(active?.sent_count || 0).toLocaleString()} sent · ${Number(active?.processed_count || 0).toLocaleString()} processed`);
+      lastNotifiedScheduleKey.current = key;
+    }
+  }, [payload]);
+
   useEffect(() => {
     load();
     const timer = window.setInterval(load, hasWork ? 5000 : 12000);
@@ -139,9 +183,16 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
               <strong>Live work</strong>
               <p>Sending and Auto Scout progress.</p>
             </div>
-            <button className="icon-btn" type="button" onClick={load} disabled={loading} title="Refresh">
-              <RefreshCw size={15} />
-            </button>
+            <div className="actions" style={{ gap: 6 }}>
+              {notificationPermission !== 'granted' ? (
+                <button className="btn secondary mini" type="button" onClick={enableNotifications} title="Enable desktop notifications">
+                  Notify me
+                </button>
+              ) : null}
+              <button className="icon-btn" type="button" onClick={load} disabled={loading} title="Refresh">
+                <RefreshCw size={15} />
+              </button>
+            </div>
           </div>
           {error ? <div className="notification-error">{error}</div> : null}
           <div className="live-activity-list">

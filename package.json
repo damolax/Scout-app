@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-48-restore-send-now",
-  "version": "8.48.0",
+  "name": "scout-app-v8-49-reliable-schedule-pwa",
+  "version": "8.49.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v8.48: restores immediate Send Now without cron, keeps schedules for due/background jobs, and fixes schedule worker auth."
+  "description": "Scout App v8.49: lightweight reliable schedule cron, PWA/desktop notifications, and country filter for sending."
 }

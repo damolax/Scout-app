@@ -375,6 +375,9 @@ async function loadReadyBusinesses(
   const cleanSearch = String(raw.ready_search || "")
     .trim()
     .replace(/[%_]/g, "");
+  const cleanCountry = String(raw.country_filter || "")
+    .trim()
+    .replace(/[%_]/g, "");
   const audienceCategoryId = String(
     schedule.audience_category_id || raw.audience_category_id || "",
   ).trim();
@@ -395,6 +398,10 @@ async function loadReadyBusinesses(
   if (cleanSearch)
     query = query.or(
       `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
+    );
+  if (cleanCountry)
+    query = query.or(
+      `location.ilike.%${cleanCountry}%,source.ilike.%${cleanCountry}%,website.ilike.%${cleanCountry}%,domain.ilike.%${cleanCountry}%`,
     );
 
   const { data, error } = await query;
@@ -469,7 +476,15 @@ async function runOneSchedule(
   const scheduleId = String(schedule.id);
   const workspaceId = String(schedule.workspace_id);
   const raw = schedule.raw || {};
-  const requestedTarget = targetLimitOverride && targetLimitOverride > 0 ? targetLimitOverride : Number(schedule.target_count || 100);
+  const totalTarget = Math.max(1, Number(schedule.target_count || 100));
+  const baseProcessed = Math.max(0, Number(schedule.processed_count || 0));
+  const baseSent = Math.max(0, Number(schedule.sent_count || 0));
+  const baseFailed = Math.max(0, Number(schedule.failed_count || 0));
+  const baseSkipped = Math.max(0, Number(schedule.skipped_count || 0));
+  const remainingTarget = Math.max(0, totalTarget - baseProcessed);
+  const requestedTarget = targetLimitOverride && targetLimitOverride > 0
+    ? Math.min(targetLimitOverride, remainingTarget || targetLimitOverride)
+    : (remainingTarget || totalTarget);
   const targetCount = Math.max(
     1,
     Math.min(MAX_WORKER_BATCH_SIZE, requestedTarget),
@@ -781,10 +796,10 @@ async function runOneSchedule(
       await supabase
         .from("message_schedules")
         .update({
-          processed_count: attempted,
-          sent_count: sent,
-          failed_count: failed,
-          skipped_count: skipped,
+          processed_count: baseProcessed + attempted,
+          sent_count: baseSent + sent,
+          failed_count: baseFailed + failed,
+          skipped_count: baseSkipped + skipped,
           last_heartbeat_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -792,11 +807,16 @@ async function runOneSchedule(
         .eq("id", scheduleId);
     }
 
-    const finalStatus = stopped ? "cancelled" : dryRun ? "sent" : "sent";
+    const totalProcessed = baseProcessed + attempted;
+    const totalSent = baseSent + sent;
+    const totalFailed = baseFailed + failed;
+    const totalSkipped = baseSkipped + skipped;
+    const shouldContinue = !stopped && totalProcessed < totalTarget && contacts.length > 0;
+    const finalStatus = stopped ? "cancelled" : shouldContinue ? "scheduled" : "sent";
     await supabase
       .from("outreach_batches")
       .update({
-        status: dryRun ? "scheduled_dry_run_complete" : "scheduled_complete",
+        status: dryRun ? "scheduled_dry_run_complete" : shouldContinue ? "scheduled_chunk_complete" : "scheduled_complete",
         attempted_count: attempted,
         sent_count: sent,
         failed_count: failed,
@@ -810,22 +830,25 @@ async function runOneSchedule(
       .update({
         status: finalStatus,
         batch_id: batchId,
-        processed_count: attempted,
-        sent_count: sent,
-        failed_count: failed,
-        skipped_count: skipped,
-        finished_at: new Date().toISOString(),
+        processed_count: totalProcessed,
+        sent_count: totalSent,
+        failed_count: totalFailed,
+        skipped_count: totalSkipped,
+        finished_at: shouldContinue ? null : new Date().toISOString(),
         stopped_at: stopped ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
-        last_error: stopped ? "Stopped by user." : null,
+        last_heartbeat_at: new Date().toISOString(),
+        last_error: stopped ? "Stopped by user." : shouldContinue ? `Chunk complete. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; cron will continue.` : null,
       })
       .eq("workspace_id", workspaceId)
       .eq("id", scheduleId);
     await createAppNotification(supabase as any, {
       workspaceId,
-      type: "job_completed",
-      title: `${schedule.type === "follow_up" ? "Follow-up" : "Message"} job ${stopped ? "stopped" : "completed"}`,
-      message: `Sent ${sent.toLocaleString()}, failed ${failed.toLocaleString()}, skipped ${skipped.toLocaleString()}.`,
+      type: shouldContinue ? "job_progress" : "job_completed",
+      title: `${schedule.type === "follow_up" ? "Follow-up" : "Message"} job ${stopped ? "stopped" : shouldContinue ? "progress" : "completed"}`,
+      message: shouldContinue
+        ? `Sent ${totalSent.toLocaleString()} so far. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; cron will continue.`
+        : `Sent ${totalSent.toLocaleString()}, failed ${totalFailed.toLocaleString()}, skipped ${totalSkipped.toLocaleString()}.`,
       entityType: "message_schedule",
       entityId: scheduleId,
       raw: {
@@ -835,11 +858,15 @@ async function runOneSchedule(
         sent,
         failed,
         skipped,
+        total_processed: totalProcessed,
+        total_sent: totalSent,
+        total_target: totalTarget,
+        should_continue: shouldContinue,
       },
     });
     return {
       scheduleId,
-      status: stopped ? "skipped" : "sent",
+      status: shouldContinue ? "running" : stopped ? "skipped" : "sent",
       type: schedule.type,
       requested: contacts.length,
       attempted,
@@ -856,10 +883,10 @@ async function runOneSchedule(
         status: "failed",
         last_error: reason,
         batch_id: batchId,
-        processed_count: attempted,
-        sent_count: sent,
-        failed_count: failed,
-        skipped_count: skipped,
+        processed_count: baseProcessed + attempted,
+        sent_count: baseSent + sent,
+        failed_count: baseFailed + failed,
+        skipped_count: baseSkipped + skipped,
         finished_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
