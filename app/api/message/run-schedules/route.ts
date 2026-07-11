@@ -375,9 +375,10 @@ async function loadReadyBusinesses(
   const cleanSearch = String(raw.ready_search || "")
     .trim()
     .replace(/[%_]/g, "");
-  const cleanCountry = String(raw.country_filter || "")
+  const cleanLocation = String(raw.location_filter || raw.country_filter || "")
     .trim()
     .replace(/[%_]/g, "");
+  const exactUploadedLocation = String(raw.location_filter_mode || "") === "exact_uploaded_location" || Boolean(raw.location_filter);
   const audienceCategoryId = String(
     schedule.audience_category_id || raw.audience_category_id || "",
   ).trim();
@@ -399,10 +400,13 @@ async function loadReadyBusinesses(
     query = query.or(
       `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
     );
-  if (cleanCountry)
-    query = query.or(
-      `location.ilike.%${cleanCountry}%,source.ilike.%${cleanCountry}%,website.ilike.%${cleanCountry}%,domain.ilike.%${cleanCountry}%`,
-    );
+  if (cleanLocation) {
+    query = exactUploadedLocation
+      ? query.eq("location", cleanLocation)
+      : query.or(
+          `location.ilike.%${cleanLocation}%,source.ilike.%${cleanLocation}%,website.ilike.%${cleanLocation}%,domain.ilike.%${cleanLocation}%`,
+        );
+  }
 
   const { data, error } = await query;
   if (error) throw error;

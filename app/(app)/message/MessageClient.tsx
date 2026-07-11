@@ -36,6 +36,12 @@ type DueFollowUp = {
   last_auto_reply_at?: string | null;
 };
 
+type LocationOption = {
+  value: string;
+  label: string;
+  count: number;
+};
+
 type SendResult = {
   id?: string;
   email?: string;
@@ -267,6 +273,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [recentSent, setRecentSent] = useState<SendLogRow[]>([]);
   const [dueFollowUps, setDueFollowUps] = useState<DueFollowUp[]>([]);
   const [schedules, setSchedules] = useState<MessageSchedule[]>([]);
+  const [locationOptions, setLocationOptions] = useState<LocationOption[]>([]);
 
   const [selectedContacts, setSelectedContacts] = useState<
     Record<string, boolean>
@@ -434,6 +441,45 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     setSenderLast24h(counts);
   }
 
+  async function loadAvailableLocations() {
+    let query = supabase
+      .from("businesses")
+      .select("location")
+      .eq("workspace_id", workspace.id)
+      .eq("status", "ready")
+      .not("email", "is", null)
+      .neq("email", "")
+      .not("location", "is", null)
+      .neq("location", "")
+      .order("location", { ascending: true })
+      .range(0, 9999);
+
+    if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
+    else {
+      const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
+      if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
+    }
+
+    const { data, error: locationError } = await query;
+    if (locationError) throw locationError;
+
+    const counts = new Map<string, number>();
+    for (const row of (data || []) as Array<{ location?: string | null }>) {
+      const value = String(row.location || "").trim();
+      if (!value) continue;
+      counts.set(value, (counts.get(value) || 0) + 1);
+    }
+
+    const options = Array.from(counts.entries())
+      .map(([value, count]) => ({ value, count, label: `${value} (${count.toLocaleString()})` }))
+      .sort((a, b) => a.value.localeCompare(b.value));
+
+    setLocationOptions(options);
+    setCountryFilter((current) =>
+      current && !options.some((option) => option.value === current) ? "" : current,
+    );
+  }
+
   async function loadReadyContacts() {
     const cleanSearch = readySearch.trim().replace(/[%_]/g, "");
     const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
@@ -458,10 +504,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
     else if (cleanCategory)
       query = query.ilike("category", `%${cleanCategory}%`);
-    if (cleanCountry)
-      query = query.or(
-        `location.ilike.%${cleanCountry}%,source.ilike.%${cleanCountry}%,website.ilike.%${cleanCountry}%,domain.ilike.%${cleanCountry}%`,
-      );
+    if (cleanCountry) query = query.eq("location", cleanCountry);
     const { data, error: loadError, count } = await query;
     if (loadError) throw loadError;
     let rows = (data || []) as Business[];
@@ -540,6 +583,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         loadCategories(),
         loadTemplates(),
         loadAccounts(),
+        loadAvailableLocations(),
         loadReadyContacts(),
         loadRecentSent(),
         loadDueFollowUps(),
@@ -557,6 +601,12 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id]);
+
+  useEffect(() => {
+    if (!workspace.id) return;
+    loadAvailableLocations().catch((err) => setError(formatError(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.id, audienceCategoryId, businessCategoryFilter]);
 
   useEffect(() => {
     const first =
@@ -679,10 +729,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
     else if (cleanCategory)
       query = query.ilike("category", `%${cleanCategory}%`);
-    if (cleanCountry)
-      query = query.or(
-        `location.ilike.%${cleanCountry}%,source.ilike.%${cleanCountry}%,website.ilike.%${cleanCountry}%,domain.ilike.%${cleanCountry}%`,
-      );
+    if (cleanCountry) query = query.eq("location", cleanCountry);
     const { data, error: loadError } = await query;
     if (loadError) throw loadError;
     for (const business of (data || []) as Business[]) {
@@ -917,6 +964,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         senderRunLimits: { ...senderLimitsById, ...senderLimitsByEmail },
         businessCategoryFilter,
         countryFilter,
+        locationFilter: countryFilter,
         audienceCategoryId,
         audienceCategoryName: selectedAudienceCategory?.name || "",
         readySearch,
@@ -1078,6 +1126,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             categoryId,
             businessCategoryFilter,
             countryFilter,
+            locationFilter: countryFilter,
+            locationFilterMode: "exact_uploaded_location",
             messageKind,
             isFollowUp: !!options?.isFollowUp,
             followupSegment: options?.followupSegment || null,
@@ -1383,6 +1433,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             audience_category_name: selectedAudienceCategory?.name || null,
             business_category_filter: businessCategoryFilter,
             country_filter: countryFilter,
+            location_filter: countryFilter,
+            location_filter_mode: "exact_uploaded_location",
             followup_segment:
               scheduleType === "follow_up" ? followUpSegment : null,
             template_mode: templateMode,
@@ -1723,16 +1775,22 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             </select>
           </div>
           <div>
-            <label className="label">Country / market</label>
-            <input
-              className="input"
+            <label className="label">Location from uploaded list</label>
+            <select
+              className="select"
               value={countryFilter}
               onChange={(e) => setCountryFilter(e.target.value)}
-              placeholder="e.g. United States, Germany, Spain"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") loadReadyContacts();
-              }}
-            />
+            >
+              <option value="">All available locations</option>
+              {locationOptions.map((location) => (
+                <option key={location.value} value={location.value}>
+                  {location.label}
+                </option>
+              ))}
+            </select>
+            <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+              Only locations found in your uploaded Ready leads are shown.
+            </p>
           </div>
           <div>
             <label className="label">Template category</label>
