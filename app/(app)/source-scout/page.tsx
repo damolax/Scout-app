@@ -16,7 +16,7 @@ export default async function SourceScoutPage() {
     <div className="stack">
       <div className="page-title">
         <h2>Scout & Import</h2>
-        <p>Dorking, directory scouting, uploads, daily scouting, and Auto Scout handoff in one place.</p>
+        <p>Dorking, directory scouting, uploads, verification, and Auto Scout handoff in one place.</p>
       </div>
       <div className="quick-links">
         {quickLinks.map((link) => (

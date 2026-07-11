@@ -69,6 +69,7 @@ export async function POST(request: NextRequest) {
     const signature_enabled = input.signature_enabled !== false;
     const signature_html = String(input.signature_html || '').trim();
     const signature_text = String(input.signature_text || '').trim();
+    const signature_logo_url = String(input.signature_logo_url || input.logo_url || '').trim();
     if (!workspaceId) throw new Error('workspace_id is required.');
     if (!applyAll && !accountId) throw new Error('gmail_account_id is required unless apply_all is true.');
 
@@ -80,7 +81,7 @@ export async function POST(request: NextRequest) {
     const rows = accounts || [];
     if (!rows.length) throw new Error('No Gmail sender accounts found.');
 
-    const identity = { signature_enabled, signature_html, signature_text };
+    const identity = { signature_enabled, signature_html, signature_text, signature_logo_url };
     const safeHtml = signatureHtml(identity);
     const safeText = signatureText(identity);
     const results: Array<Record<string, unknown>> = [];
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
         sync_signature_to_gmail: syncToGmail,
         gmail_signature_sync_error: null,
         updated_at: new Date().toISOString(),
-        raw: { ...(account.raw || {}), email_identity_updated_at: new Date().toISOString() }
+        raw: { ...(account.raw || {}), email_identity: { ...((account.raw || {}).email_identity || {}), signature_enabled, signature_html: safeHtml, signature_text: safeText, signature_logo_url }, email_identity_updated_at: new Date().toISOString() }
       };
 
       let syncStatus = syncToGmail ? 'pending' : 'not_requested';
@@ -116,7 +117,23 @@ export async function POST(request: NextRequest) {
         .update(baseUpdate)
         .eq('workspace_id', workspaceId)
         .eq('id', account.id);
-      if (updateError) throw updateError;
+      if (updateError) {
+        const msg = formatError(updateError).toLowerCase();
+        const missingSignatureColumn = msg.includes('signature_') || msg.includes('gmail_signature_') || msg.includes('sync_signature_to_gmail');
+        if (!missingSignatureColumn) throw updateError;
+        const fallbackRaw = {
+          ...(account.raw || {}),
+          email_identity: { signature_enabled, signature_html: safeHtml, signature_text: safeText, signature_logo_url, sync_signature_to_gmail: syncToGmail },
+          email_identity_updated_at: new Date().toISOString(),
+          email_identity_note: 'Saved in raw fallback because signature columns were missing. Run the v8.41 Supabase repair SQL.'
+        };
+        const { error: fallbackError } = await supabase
+          .from('gmail_accounts')
+          .update({ raw: fallbackRaw, updated_at: new Date().toISOString() })
+          .eq('workspace_id', workspaceId)
+          .eq('id', account.id);
+        if (fallbackError) throw fallbackError;
+      }
       results.push({ account_id: account.id, email: account.email, sync_status: syncStatus, sync_error: syncError });
     }
 

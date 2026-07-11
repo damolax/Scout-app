@@ -72,7 +72,7 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [status, setStatus] = useState('Run the full Scout loop from one place: inbox sync, bounce cleanup, due schedules, follow-ups, and Auto Scout.');
+  const [status, setStatus] = useState('Ready.');
   const [includeSeedTest, setIncludeSeedTest] = useState(false);
   const [includeAutoScout, setIncludeAutoScout] = useState(true);
   const [includeSchedules, setIncludeSchedules] = useState(true);
@@ -80,7 +80,11 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
   const [includeBounces, setIncludeBounces] = useState(true);
   const [includeRepairReady, setIncludeRepairReady] = useState(true);
   const [replyLimit, setReplyLimit] = useState(100);
+  const [scheduleLimit, setScheduleLimit] = useState(3);
+  const [scheduleBatchSize, setScheduleBatchSize] = useState(100);
+  const [senderRunLimit, setSenderRunLimit] = useState(50);
   const [autoScoutCycles, setAutoScoutCycles] = useState(5);
+  const [last24BySender, setLast24BySender] = useState<Record<string, number>>({});
 
   async function countBusiness(statuses: string[]) {
     let query = supabase.from('businesses').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id);
@@ -94,14 +98,22 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
     setLoading(true);
     setError('');
     try {
-      const [{ data: accountRows }, { data: scheduleRows }, { data: logRows }] = await Promise.all([
+      const [{ data: accountRows }, { data: scheduleRows }, { data: logRows }, { data: sentRows }] = await Promise.all([
         supabase.from('gmail_accounts').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }),
         supabase.from('message_schedules').select('*').eq('workspace_id', workspace.id).in('status', ['scheduled', 'due', 'running']).order('scheduled_for', { ascending: true }).limit(20),
-        supabase.from('activity_logs').select('*').eq('workspace_id', workspace.id).in('type', ['worker_run', 'worker_warning']).order('created_at', { ascending: false }).limit(8)
+        supabase.from('activity_logs').select('*').eq('workspace_id', workspace.id).in('type', ['worker_run', 'worker_warning']).order('created_at', { ascending: false }).limit(8),
+        supabase.from('sent_messages').select('gmail_account_id,from_email').eq('workspace_id', workspace.id).eq('status', 'sent').gte('sent_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()).limit(50000)
       ]);
 
       const accountList = (accountRows || []) as GmailAccount[];
       const scheduleList = (scheduleRows || []) as MessageSchedule[];
+      const last24: Record<string, number> = {};
+      for (const row of (sentRows || []) as Array<Record<string, any>>) {
+        const accountId = String(row.gmail_account_id || '');
+        const email = String(row.from_email || '').toLowerCase();
+        if (accountId) last24[accountId] = (last24[accountId] || 0) + 1;
+        if (email) last24[email] = (last24[email] || 0) + 1;
+      }
       const activeSenders = accountList.filter((a) => ['connected', 'ready'].includes(String(a.status || '')) && (a.access_token || a.refresh_token) && (!a.paused_until || new Date(a.paused_until).getTime() <= Date.now())).length;
       const pausedSenders = accountList.filter((a) => a.paused_until && new Date(a.paused_until).getTime() > Date.now()).length;
       const dueScheduleCount = scheduleList.filter((s) => new Date(s.scheduled_for).getTime() <= Date.now()).length;
@@ -123,6 +135,7 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
       ]);
 
       setAccounts(accountList);
+      setLast24BySender(last24);
       setSchedules(scheduleList);
       setLogs((logRows || []) as Array<Record<string, any>>);
       setCounts({ ready, pending, contacted, responded, noInbox, bounced, dueSchedules: dueScheduleCount, dueFollowUps, activeSenders, pausedSenders });
@@ -152,6 +165,9 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
         includeAutoScout: mode === 'full' ? includeAutoScout : mode === 'autoscout',
         includeSeedTest: mode === 'full' ? includeSeedTest : false,
         replyLimit,
+        scheduleLimit,
+        scheduleBatchSize,
+        senderRunLimit,
         autoScoutCycles
       };
       setStatus(mode === 'full' ? 'Running the complete Scout autopilot loop...' : `Running ${mode} worker...`);
@@ -176,9 +192,8 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
     <div className="stack">
       <div className="hero">
         <div>
-          <div className="eyebrow">Scout v8.31</div>
-          <h1>Operations Autopilot</h1>
-          <p>One control room for the remaining production loop: clean the inbox signals first, suppress bad recipients, run due sends/follow-ups, then keep Auto Scout filling the queue.</p>
+          <div className="eyebrow">Scout v8.42</div>
+          <h1>Automation</h1>
         </div>
         <div className="actions">
           <button className="btn" type="button" disabled={busy || loading} onClick={() => runWorker('full')}>Run Full Autopilot</button>
@@ -205,8 +220,7 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <h3>Autopilot Run Options</h3>
-          <p className="muted">The safe order is fixed: bounce/no-inbox sync → reply sync → repair statuses → due schedules/follow-ups → Auto Scout. Seed testing is off by default because it sends test emails.</p>
+          <h3>Run Options</h3>
           <div className="grid grid-2">
             <label className="checkbox-row"><input type="checkbox" checked={includeBounces} onChange={(e) => setIncludeBounces(e.target.checked)} /> Sync bounces / no-inbox / blocked</label>
             <label className="checkbox-row"><input type="checkbox" checked={includeReplies} onChange={(e) => setIncludeReplies(e.target.checked)} /> Sync real replies + auto replies</label>
@@ -217,6 +231,9 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
           </div>
           <div className="grid grid-2" style={{ marginTop: 14 }}>
             <div><label className="label">Inbox messages per sender</label><input className="input" type="number" min={1} max={500} value={replyLimit} onChange={(e) => setReplyLimit(Number(e.target.value || 100))} /></div>
+            <div><label className="label">Due schedules at once</label><input className="input" type="number" min={1} max={25} value={scheduleLimit} onChange={(e) => setScheduleLimit(Number(e.target.value || 3))} /></div>
+            <div><label className="label">Emails to send at once</label><input className="input" type="number" min={1} max={2000} value={scheduleBatchSize} onChange={(e) => setScheduleBatchSize(Number(e.target.value || 100))} /></div>
+            <div><label className="label">Max per sender this run</label><input className="input" type="number" min={1} max={2000} value={senderRunLimit} onChange={(e) => setSenderRunLimit(Number(e.target.value || 50))} /></div>
             <div><label className="label">Auto Scout cycles</label><input className="input" type="number" min={1} max={25} value={autoScoutCycles} onChange={(e) => setAutoScoutCycles(Number(e.target.value || 5))} /></div>
           </div>
           <div className="actions" style={{ marginTop: 14 }}>
@@ -230,7 +247,12 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
         <div className="card" style={{ padding: 18 }}>
           <h3>Sender Health</h3>
           <div className="table-wrap"><table><thead><tr><th>Email</th><th>Status</th><th>Sent Today</th><th>Risk</th></tr></thead><tbody>
-            {accounts.slice(0, 10).map((account) => <tr key={account.id}><td>{account.email}</td><td>{account.paused_until && new Date(account.paused_until).getTime() > Date.now() ? `paused until ${localTime(account.paused_until)}` : account.status}</td><td>{Number(account.sent_today || 0).toLocaleString()} / {Number(account.daily_limit || 0).toLocaleString()}</td><td>{account.spam_risk_status || account.last_seed_result || '-'}</td></tr>)}
+            {accounts.slice(0, 20).map((account) => {
+              const emailKey = String(account.email || '').toLowerCase();
+              const sent24 = last24BySender[String(account.id)] ?? last24BySender[emailKey] ?? Number(account.sent_today || 0);
+              const dailyLimit = Number(account.daily_limit || 0);
+              return <tr key={account.id}><td>{account.email}</td><td>{account.paused_until && new Date(account.paused_until).getTime() > Date.now() ? `paused until ${localTime(account.paused_until)}` : account.status}</td><td><span className="badge">{Number(sent24 || 0).toLocaleString()} sent last 24h</span><br /><span className="muted">Daily cap: {dailyLimit ? dailyLimit.toLocaleString() : 'not set'}</span></td><td>{account.spam_risk_status || account.last_seed_result || '-'}</td></tr>;
+            })}
             {!accounts.length ? <tr><td colSpan={4} className="muted">No Gmail senders connected yet.</td></tr> : null}
           </tbody></table></div>
           <h3 style={{ marginTop: 18 }}>Upcoming Schedules</h3>

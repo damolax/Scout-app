@@ -344,6 +344,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
             <p className="muted" style={{ margin: '6px 0 0' }}>Showing {period.label}. Comparisons use the matching previous period.</p>
           </div>
           <div className="actions">
+            <a className="btn secondary" href="/api/reports/today">Download today report</a>
             {rangeOptions.map((option) => (
               <Link
                 key={option.key}

@@ -77,7 +77,9 @@ function readOptions(request: NextRequest, body: AnyRow) {
     includeRepairReady: boolOption(pick('includeRepairReady'), true),
     replyDays: numberOption(pick('replyDays'), 90, 1, 90),
     replyLimit: numberOption(pick('replyLimit'), 500, 1, 500),
-    scheduleLimit: numberOption(pick('scheduleLimit'), 3, 1, 3),
+    scheduleLimit: numberOption(pick('scheduleLimit'), 3, 1, 25),
+    scheduleBatchSize: numberOption(pick('scheduleBatchSize'), 100, 1, 2000),
+    senderRunLimit: numberOption(pick('senderRunLimit'), 50, 1, 2000),
     autoScoutCycles: numberOption(pick('autoScoutCycles'), 5, 1, 25),
     autoScoutBatchSize: numberOption(pick('autoScoutBatchSize'), 100, 1, 500),
     autoScoutConcurrency: numberOption(pick('autoScoutConcurrency'), 12, 1, 50),
@@ -210,7 +212,7 @@ async function runAll(request: NextRequest, body: AnyRow) {
   }
 
   if (options.includeSchedules) {
-    steps.push(await step('run_schedules', 'Run due initial and follow-up schedules', () => callInternalJson(request, '/api/message/run-schedules', { limit: options.scheduleLimit })));
+    steps.push(await step('run_schedules', 'Run due initial and follow-up schedules', () => callInternalJson(request, '/api/message/run-schedules', { limit: options.scheduleLimit, targetLimit: options.scheduleBatchSize, senderRunLimit: options.senderRunLimit })));
   } else {
     steps.push(skippedStep('run_schedules', 'Run due initial and follow-up schedules', 'Disabled for this run.'));
   }

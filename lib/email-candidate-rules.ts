@@ -14,6 +14,10 @@ const DISPOSABLE_OR_TEST_DOMAINS = new Set([
   'email.com', 'yourdomain.com', 'company.com', 'website.com', 'mysite.com', 'sample.com', 'invalid.com'
 ]);
 
+const NON_TARGET_PUBLISHER_DOMAINS = new Set([
+  'forbes.com','wikipedia.org','medium.com','reddit.com','quora.com','crunchbase.com','bloomberg.com','reuters.com','nytimes.com','bbc.com','cnn.com','cnbc.com','github.com','npmjs.com','shopify.com','themeforest.net','wordpress.org','facebook.com','instagram.com','linkedin.com','youtube.com','tiktok.com','x.com','twitter.com','pinterest.com'
+]);
+
 const BAD_LOCAL_PARTS = new Set([
   'noreply', 'no-reply', 'do-not-reply', 'donotreply', 'mailer-daemon', 'postmaster', 'abuse', 'bounce',
   'privacy', 'legal', 'unsubscribe', 'notification', 'notifications', 'automated', 'robot', 'daemon'
@@ -169,6 +173,7 @@ export function validateEmailCandidate(candidate: { email: string; sourceText?: 
   if (!hasRecognizedTld(domain)) reasons.push('TLD is not in the deliverable-email allowlist.');
   if (looksLikeBlockedInfrastructureDomain(domain)) reasons.push('Domain looks like captcha/CDN/tracking infrastructure, not a business inbox.');
   if (DISPOSABLE_OR_TEST_DOMAINS.has(domain) || DISPOSABLE_OR_TEST_DOMAINS.has(rootDomain(domain))) reasons.push('Test/disposable/placeholder domain.');
+  if (NON_TARGET_PUBLISHER_DOMAINS.has(rootDomain(domain)) || NON_TARGET_PUBLISHER_DOMAINS.has(domain)) reasons.push('Publisher/platform/domain not a target business inbox.');
   const match = domainMatches(domain, businessDomain);
   const freeMailbox = FREE_EMAIL_DOMAINS.has(domain);
   if (BAD_LOCAL_PARTS.has(local)) reasons.push('Non-contact mailbox like no-reply/postmaster/abuse.');

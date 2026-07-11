@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-39-simple-targeting-stability",
-  "version": "8.39.0",
+  "name": "scout-app-v8-42-repair-cleanup",
+  "version": "8.42.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v8.39: Supabase follow-up RPC fix, simplified Airtable/Shopify audience targeting, 24-hour sender counts, compact send-time strip, and clearer message scheduling."
+  "description": "Scout App v8.42: repairs notifications/signatures/schedules, simplifies daily reporting, strengthens lead source filtering, and adds redetect/delete controls."
 }

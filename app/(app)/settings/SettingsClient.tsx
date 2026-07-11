@@ -29,6 +29,7 @@ type IdentityDraft = {
   signature_enabled: boolean;
   signature_text: string;
   signature_html: string;
+  signature_logo_url: string;
 };
 
 function shortenSignature(account: GmailAccount) {
@@ -49,7 +50,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
   const [seedTests, setSeedTests] = useState<SeedInboxTest[]>([]);
   const [limitDrafts, setLimitDrafts] = useState<Record<string, { daily_limit: string; default_run_limit: string; account_type: string; seed_inbox_enabled: boolean; seed_test_address: string }>>({});
-  const [identityDraft, setIdentityDraft] = useState<IdentityDraft>({ signature_enabled: true, signature_text: '', signature_html: '' });
+  const [identityDraft, setIdentityDraft] = useState<IdentityDraft>({ signature_enabled: true, signature_text: '', signature_html: '', signature_logo_url: '' });
   const [manualEmail, setManualEmail] = useState('');
   const [manualAccessToken, setManualAccessToken] = useState('');
   const [manualRefreshToken, setManualRefreshToken] = useState('');
@@ -69,11 +70,13 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     const rows = (data || []) as GmailAccount[];
     setAccounts(rows);
     if (!identityLoadedRef.current && rows.length) {
-      const source = rows.find((account) => account.signature_text || account.signature_html) || rows[0];
+      const source = rows.find((account) => account.signature_text || account.signature_html || (account.raw as any)?.email_identity?.signature_logo_url) || rows[0];
+      const rawIdentity = ((source.raw as any)?.email_identity || {}) as Record<string, any>;
       setIdentityDraft({
         signature_enabled: source.signature_enabled !== false,
-        signature_text: String(source.signature_text || ''),
-        signature_html: String(source.signature_html || '')
+        signature_text: String(source.signature_text || rawIdentity.signature_text || ''),
+        signature_html: String(source.signature_html || rawIdentity.signature_html || ''),
+        signature_logo_url: String((source as any).signature_logo_url || rawIdentity.signature_logo_url || rawIdentity.logo_url || '')
       });
       identityLoadedRef.current = true;
     }
@@ -278,7 +281,8 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           sync_to_gmail: syncToGmail,
           signature_enabled: identityDraft.signature_enabled,
           signature_text: identityDraft.signature_text,
-          signature_html: identityDraft.signature_html
+          signature_html: identityDraft.signature_html,
+          signature_logo_url: identityDraft.signature_logo_url
         })
       });
       const json = await response.json().catch(() => ({}));

@@ -70,7 +70,7 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
     } catch (err) {
       setRows([]);
       setUnread(0);
-      setError(formatError(err));
+      setError(formatError(err).includes('app_notifications') ? 'Run the v8.42 Supabase repair SQL once to enable notifications.' : formatError(err));
     } finally {
       setLoading(false);
     }
@@ -111,7 +111,7 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
       if (!response.ok || json?.success === false) throw new Error(json?.error || `Mark-read failed with HTTP ${response.status}`);
       await load();
     } catch (err) {
-      setError(formatError(err));
+      setError(formatError(err).includes('app_notifications') ? 'Run the v8.42 Supabase repair SQL once to enable notifications.' : formatError(err));
     }
   }
 

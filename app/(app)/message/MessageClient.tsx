@@ -309,6 +309,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [stopBusyId, setStopBusyId] = useState("");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [lastResults, setLastResults] = useState<
@@ -570,6 +571,17 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     loadDueFollowUps().catch((err) => setError(formatError(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followUpSegment]);
+
+  useEffect(() => {
+    if (!workspace.id) return;
+    const timer = window.setInterval(() => {
+      loadSchedules().catch(() => undefined);
+      loadRecentSent().catch(() => undefined);
+      loadAccounts().catch(() => undefined);
+    }, 12000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.id]);
 
   function templatesForSend(kind: MessageKind = "initial") {
     const requiredType = kind === "follow_up" ? "follow_up" : "initial";
@@ -1581,6 +1593,40 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       : `${sent.toLocaleString()} sent in last 24h`;
   }
 
+  const activeSchedules = schedules.filter((s) => ["scheduled", "due", "running"].includes(String(s.status || "")));
+
+  function scheduleProgressText(schedule: MessageSchedule) {
+    const target = Number(schedule.target_count || 0);
+    const processed = Number(schedule.processed_count || 0);
+    const sent = Number(schedule.sent_count || 0);
+    const failed = Number(schedule.failed_count || 0);
+    const skipped = Number(schedule.skipped_count || 0);
+    const parts = [`${processed.toLocaleString()} / ${target.toLocaleString()} processed`, `${sent.toLocaleString()} sent`];
+    if (failed) parts.push(`${failed.toLocaleString()} failed`);
+    if (skipped) parts.push(`${skipped.toLocaleString()} skipped`);
+    return parts.join(" · ");
+  }
+
+  async function stopSchedule(schedule: MessageSchedule) {
+    setStopBusyId(schedule.id);
+    setError("");
+    try {
+      const response = await fetch("/api/message/stop-schedule", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId: workspace.id, scheduleId: schedule.id }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Stop failed with HTTP ${response.status}`);
+      setStatus("Stop requested. If a message is already in-flight, Scout will stop after the current recipient finishes.");
+      await loadSchedules();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setStopBusyId("");
+    }
+  }
+
   return (
     <div className="stack">
       {error ? <div className="error">{error}</div> : null}
@@ -1612,6 +1658,28 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           <div className="num">{dueFollowUps.length}</div>
         </div>
       </div>
+
+      {activeSchedules.length ? (
+        <div className="card" style={{ padding: 18 }}>
+          <h3>Active Sending Jobs</h3>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Type</th><th>Status</th><th>Progress</th><th>Scheduled</th><th>Action</th></tr></thead>
+              <tbody>
+                {activeSchedules.slice(0, 6).map((job) => (
+                  <tr key={`active-${job.id}`}>
+                    <td>{job.type === "follow_up" ? "Follow-up" : "Initial"}</td>
+                    <td>{job.status}</td>
+                    <td>{scheduleProgressText(job)}{job.last_error ? <><br /><span className="error">{job.last_error}</span></> : null}</td>
+                    <td>{new Date(job.scheduled_for).toLocaleString()}</td>
+                    <td><button className="btn secondary" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(job)}>{stopBusyId === job.id ? "Stopping…" : "Stop"}</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Send or Schedule Messages</h3>
@@ -1989,7 +2057,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 ))}
                 {!readyContacts.length ? (
                   <tr>
-                    <td colSpan={4} className="muted">
+                    <td colSpan={6} className="muted">
                       No Ready contacts found.
                     </td>
                   </tr>
@@ -2072,7 +2140,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 ))}
                 {!recentSent.length ? (
                   <tr>
-                    <td colSpan={4} className="muted">
+                    <td colSpan={6} className="muted">
                       No sent logs yet.
                     </td>
                   </tr>
@@ -2197,11 +2265,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedule a Message</h3>
-          <p className="muted">
-            To schedule instead of sending now: choose the audience + template
-            above, choose the date/time here, then click <b>Save Schedule</b>.
-            The cron worker will send it later even if you leave the app.
-          </p>
+          <p className="muted">Choose a time and count. Saved schedules run through automation/cron even if you leave the app.</p>
           <div className="grid grid-3">
             <div>
               <label className="label">Type</label>
@@ -2252,7 +2316,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               disabled={busy}
               onClick={sendDueSchedulesNow}
             >
-              Run Scheduled Worker Now
+Run Due Schedules Now
             </button>
           </div>
           <div className="table-wrap" style={{ marginTop: 12 }}>
@@ -2262,7 +2326,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                   <th>Type</th>
                   <th>For</th>
                   <th>Count</th>
+                  <th>Progress</th>
                   <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -2271,12 +2337,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                     <td>{s.type}</td>
                     <td>{new Date(s.scheduled_for).toLocaleString()}</td>
                     <td>{Number(s.target_count || 0).toLocaleString()}</td>
-                    <td>{s.status}</td>
+                    <td>{scheduleProgressText(s)}</td>
+                    <td>{s.status}{s.last_error ? <><br /><span className="error">{s.last_error}</span></> : null}</td>
+                    <td>{["scheduled", "due", "running"].includes(String(s.status || "")) ? <button className="btn secondary" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(s)}>{stopBusyId === s.id ? "Stopping…" : "Stop"}</button> : null}</td>
                   </tr>
                 ))}
                 {!schedules.length ? (
                   <tr>
-                    <td colSpan={4} className="muted">
+                    <td colSpan={6} className="muted">
                       No schedules yet.
                     </td>
                   </tr>

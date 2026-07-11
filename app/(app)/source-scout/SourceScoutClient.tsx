@@ -41,6 +41,7 @@ export default function SourceScoutClient({ workspace }: { workspace: Workspace 
   const [niche, setNiche] = useState('Shopify stores');
   const [location, setLocation] = useState('Germany');
   const [country, setCountry] = useState('');
+  const [scoutSignals, setScoutSignals] = useState('contact email\nbook a call\nget a quote\nwebsite owner');
   const [text, setText] = useState('');
   const [startUrls, setStartUrls] = useState('');
   const [maxPages, setMaxPages] = useState(20);
@@ -52,7 +53,7 @@ export default function SourceScoutClient({ workspace }: { workspace: Workspace 
   const [result, setResult] = useState<ImportResponse | null>(null);
   const [message, setMessage] = useState('Ready. Use Auto Source Scout to fetch search/directory pages, extract visible emails/websites, and queue websites for Auto Scout.');
 
-  const dorks = useMemo(() => buildSourceScoutDorks({ niche, location, country, sourceMode }), [niche, location, country, sourceMode]);
+  const dorks = useMemo(() => buildSourceScoutDorks({ niche, location, country, sourceMode, signals: scoutSignals }), [niche, location, country, sourceMode, scoutSignals]);
   const extensionEndpoint = typeof window === 'undefined' ? '' : `${window.location.origin}/api/extension/ingest`;
   const selectedAudienceCategory = categories.find((c) => c.id === audienceCategoryId) || null;
   const audienceCategoryName = selectedAudienceCategory?.name || newAudienceCategory.trim() || '';
@@ -104,7 +105,7 @@ export default function SourceScoutClient({ workspace }: { workspace: Workspace 
       const res = await fetch('/api/source-scout/import', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ workspaceId: workspace.id, sourceMode, niche, location, country, text, directEmailsReady, enqueueWebsiteAutoScout, previewOnly, audienceCategoryId: category.id, audienceCategoryName: category.name })
+        body: JSON.stringify({ workspaceId: workspace.id, sourceMode, niche, location, country, scoutSignals, text, directEmailsReady, enqueueWebsiteAutoScout, previewOnly, audienceCategoryId: category.id, audienceCategoryName: category.name })
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json.error || 'Source Scout request failed.');
@@ -140,7 +141,8 @@ export default function SourceScoutClient({ workspace }: { workspace: Workspace 
           maxPages,
           maxSearchQueries,
           directEmailsReady,
-          enqueueWebsiteAutoScout
+          enqueueWebsiteAutoScout,
+          scoutSignals
         })
       });
       const json = await res.json().catch(() => ({}));
@@ -201,6 +203,8 @@ export default function SourceScoutClient({ workspace }: { workspace: Workspace 
             <input className="input" value={country} onChange={(e) => setCountry(e.target.value)} placeholder="optional" />
           </div>
         </div>
+        <label className="label" style={{ marginTop: 12 }}>Scout signals used for dorking</label>
+        <textarea className="textarea" value={scoutSignals} onChange={(e) => setScoutSignals(e.target.value)} placeholder={"contact email\nbook a call\nget a quote\nshopify store owner"} style={{ minHeight: 90 }} />
       </div>
 
       <div className="card" style={{ padding: 18 }}>

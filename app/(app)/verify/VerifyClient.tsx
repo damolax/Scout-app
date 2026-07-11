@@ -351,6 +351,55 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
     }
   }
 
+
+  async function queueForAutoScout(ids: string[], clearEmail = false) {
+    if (!ids.length) return;
+    setBusy(true);
+    setError('');
+    try {
+      const targets = businesses.filter((b) => ids.includes(b.id));
+      const now = new Date().toISOString();
+      const updates = clearEmail
+        ? { email: null, status: 'pending' as BusinessStatus, raw: { redetect_requested_at: now, redetect_reason: 'selected_from_verify_clear_email' } }
+        : { status: 'pending' as BusinessStatus, raw: { redetect_requested_at: now, redetect_reason: 'selected_from_verify' } };
+      for (const business of targets) {
+        const raw = { ...(business.raw || {}), ...(updates.raw as Record<string, unknown>) };
+        const patch: Record<string, unknown> = { status: updates.status, raw, updated_at: now };
+        if (clearEmail) patch.email = null;
+        const { error: updateError } = await supabase.from('businesses').update(patch).eq('workspace_id', workspace.id).eq('id', business.id);
+        if (updateError) throw updateError;
+      }
+      const jobRows = ids.map((id) => ({ workspace_id: workspace.id, business_id: id, status: 'queued', attempts: 0, priority: 250, raw: { source: 'verify_redetect', clearEmail, requested_at: now } }));
+      const { error: jobError } = await supabase.from('email_research_jobs').upsert(jobRows, { onConflict: 'workspace_id,business_id', ignoreDuplicates: false });
+      if (jobError) throw jobError;
+      setSelected({});
+      setMessage(`${ids.length.toLocaleString()} contact(s) queued for Auto Scout email redetection${clearEmail ? ' and their old email was removed' : ''}.`);
+      await refresh();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteSelectedInvalid(ids: string[]) {
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected invalid/no-inbox lead(s)? This removes the lead record.`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      const { error: deleteError } = await supabase.from('businesses').delete().eq('workspace_id', workspace.id).in('id', ids);
+      if (deleteError) throw deleteError;
+      setSelected({});
+      setMessage(`Deleted ${ids.length.toLocaleString()} selected invalid/no-inbox lead(s).`);
+      await refresh();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateStatus(ids: string[], nextStatus: BusinessStatus) {
     if (!ids.length) return;
     setBusy(true);
@@ -416,6 +465,9 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'ready')}>Mark Ready</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'review')}>Mark Review</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'invalid')}>Mark Invalid</button>
+          <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => queueForAutoScout(selectedIds, false)}>Redetect via Auto Scout</button>
+          <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => queueForAutoScout(selectedIds, true)}>Remove Email + Redetect</button>
+          <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => deleteSelectedInvalid(selectedIds)}>Delete Selected</button>
           <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-ready-email-detection-results.csv', lastResults)}>Download Last Results</button>
         </div>
 
@@ -440,7 +492,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
                     <td>{b.score ?? '-'}</td>
                     <td>{verificationData ? <span className="muted">{reasonFromVerification(verificationData)}</span> : <span className="muted">Not detected</span>}</td>
                     <td>{b.website || b.domain || <span className="muted">No site</span>}</td>
-                    <td><button className="btn secondary" type="button" disabled={!b.email || alreadyDetected(b) || busy} onClick={() => { setSelected({ [b.id]: true }); setTimeout(() => verifyContacts('selected'), 0); }}>{alreadyDetected(b) ? 'Checked' : 'Detect'}</button></td>
+                    <td><div className="actions compact"><button className="btn secondary" type="button" disabled={!b.email || alreadyDetected(b) || busy} onClick={() => { setSelected({ [b.id]: true }); setTimeout(() => verifyContacts('selected'), 0); }}>{alreadyDetected(b) ? 'Checked' : 'Detect'}</button><button className="btn secondary" type="button" disabled={busy} onClick={() => queueForAutoScout([b.id], false)}>Redetect</button></div></td>
                   </tr>
                 );
               })}

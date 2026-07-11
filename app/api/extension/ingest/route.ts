@@ -7,6 +7,19 @@ function asRows(body: any) {
   return Array.isArray(rows) ? rows : [];
 }
 
+
+const BLOCKED_IMPORT_ROOTS = new Set(['forbes.com','wikipedia.org','medium.com','reddit.com','quora.com','crunchbase.com','bloomberg.com','reuters.com','nytimes.com','bbc.com','cnn.com','cnbc.com','github.com','npmjs.com','shopify.com','themeforest.net','wordpress.org','facebook.com','instagram.com','linkedin.com','youtube.com','tiktok.com','x.com','twitter.com','pinterest.com']);
+function rootHost(value: string) {
+  const host = displayDomain({ website: value, domain: value }).toLowerCase().replace(/^www\./, '');
+  const parts = host.split('.').filter(Boolean);
+  return parts.length <= 2 ? host : parts.slice(-2).join('.');
+}
+function blockedImportTarget(email: string, website: string) {
+  const emailRoot = email ? rootHost(email.split('@')[1] || '') : '';
+  const siteRoot = website ? rootHost(website) : '';
+  return Boolean((emailRoot && BLOCKED_IMPORT_ROOTS.has(emailRoot)) || (siteRoot && BLOCKED_IMPORT_ROOTS.has(siteRoot)));
+}
+
 function workspaceKeyFrom(request: NextRequest, body: any) {
   return String(request.headers.get('x-scout-workspace-key') || body?.workspaceKey || body?.workspace_key || body?.apiKey || '').trim();
 }
@@ -61,6 +74,7 @@ export async function POST(request: NextRequest) {
       const phone = normalizePhone(item.phone || item.phoneNumber);
       const normalized_key = makeNormalizedKey({ email, domain, website, name, phone });
       if (!normalized_key) return null;
+      if (blockedImportTarget(email, website)) return null;
       const rowCategoryName = String(item.audienceCategoryName || item.categoryName || item.category || item.industry || item.niche || defaultCategoryName || '').trim() || null;
       return {
         workspace_id: workspace.id,

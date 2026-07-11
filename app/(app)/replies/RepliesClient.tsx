@@ -158,6 +158,24 @@ function csvEscape(value: unknown) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+
+function compactReplyRows(rows: ReplyRow[]) {
+  const seen = new Set<string>();
+  const output: ReplyRow[] = [];
+  for (const row of rows) {
+    const thread = String(row.gmail_thread_id || '').trim();
+    const from = normalizeEmail(row.from_email);
+    const subject = String(row.subject || '').replace(/^\s*(re|fw):\s*/i, '').trim().toLowerCase();
+    const snippet = String(row.snippet || '').slice(0, 80).replace(/\s+/g, ' ').trim().toLowerCase();
+    const minuteBucket = row.received_at ? Math.floor(new Date(row.received_at).getTime() / 60000 / 10) : 0;
+    const key = thread ? `${thread}|${from}|${subject}|${minuteBucket}` : `${from}|${subject}|${snippet}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(row);
+  }
+  return output;
+}
+
 function downloadCsv(name: string, rows: Array<Record<string, unknown>>) {
   if (!rows.length) return;
   const headers = Array.from(rows.reduce((set, row) => {
@@ -385,8 +403,8 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     });
   }
 
-  const realReplies = replyRows.filter((row) => row.is_real_reply === true || row.reply_bucket === 'real_reply');
-  const autoReplies = replyRows.filter((row) => row.is_auto_reply === true || row.reply_bucket === 'auto_reply' || row.classification === 'auto_reply');
+  const realReplies = compactReplyRows(replyRows.filter((row) => row.is_real_reply === true || row.reply_bucket === 'real_reply'));
+  const autoReplies = compactReplyRows(replyRows.filter((row) => row.is_auto_reply === true || row.reply_bucket === 'auto_reply' || row.classification === 'auto_reply'));
   const deliverySignals = replyRows.filter((row) => row.is_delivery_failure === true || ['no_inbox', 'message_blocked', 'bounce_notice'].includes(String(row.classification || row.reply_bucket || '')));
   const limitSignals = replyRows.filter((row) => row.is_limit_notice === true || row.classification === 'gmail_limit_notice');
   const ignoredReplies = replyRows.filter((row) => row.is_real_reply !== true && row.is_auto_reply !== true && row.is_delivery_failure !== true && row.is_limit_notice !== true && !['real_reply','auto_reply','no_inbox','message_blocked','bounce_notice','gmail_limit_notice'].includes(String(row.classification || row.reply_bucket || '')));

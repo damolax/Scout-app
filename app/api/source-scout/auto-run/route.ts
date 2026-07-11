@@ -60,7 +60,8 @@ export async function POST(request: NextRequest) {
       sourceMode,
       startUrls,
       maxPages,
-      maxSearchQueries
+      maxSearchQueries,
+      signals: body.scoutSignals || body.signals || ''
     });
 
     const parsed = auto.parsed;

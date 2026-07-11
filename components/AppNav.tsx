@@ -15,10 +15,10 @@ const items = [
 ];
 
 const groupedRoutes: Record<string, string[]> = {
-  '/source-scout': ['/source-scout', '/upload', '/daily-scouting', '/auto-scout', '/email-scout', '/verify'],
+  '/source-scout': ['/source-scout', '/upload', '/auto-scout', '/email-scout', '/verify'],
   '/businesses': ['/businesses', '/data-safety'],
   '/message': ['/message', '/templates', '/deliverability'],
-  '/replies': ['/replies', '/no-inbox', '/notifications'],
+  '/replies': ['/replies', '/no-inbox'],
   '/operations': ['/operations']
 };
 

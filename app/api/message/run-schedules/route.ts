@@ -23,7 +23,7 @@ type WorkerSummary = {
 };
 
 const MAX_WORKER_BATCH_SIZE = 2000;
-const MAX_SCHEDULES_PER_RUN = 3;
+const MAX_SCHEDULES_PER_RUN = 25;
 
 function b64url(input: string) {
   return Buffer.from(input, "utf8")
@@ -146,11 +146,12 @@ function renderTemplate(text: string, business: AnyRow) {
   );
 }
 
-function senderCap(scheduleRaw: AnyRow, account: AnyRow) {
+function senderCap(scheduleRaw: AnyRow, account: AnyRow, senderRunLimitOverride?: number) {
   const caps = scheduleRaw?.sender_run_limits || {};
   const byEmail = caps[String(account.email || "")];
   const byId = caps[String(account.id || "")];
-  const raw = byId ?? byEmail;
+  const raw = senderRunLimitOverride && senderRunLimitOverride > 0 ? senderRunLimitOverride : byId ?? byEmail;
+  let runLimit = Number.POSITIVE_INFINITY;
   if (
     raw !== undefined &&
     raw !== null &&
@@ -158,14 +159,40 @@ function senderCap(scheduleRaw: AnyRow, account: AnyRow) {
     String(raw).toLowerCase() !== "auto"
   ) {
     const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+    if (Number.isFinite(parsed) && parsed > 0) runLimit = Math.floor(parsed);
+  } else {
+    const defaultLimit = Number(
+      account.default_run_limit || account.daily_limit || 0,
+    );
+    runLimit = Number.isFinite(defaultLimit) && defaultLimit > 0
+      ? Math.floor(defaultLimit)
+      : Number.POSITIVE_INFINITY;
   }
-  const defaultLimit = Number(
-    account.default_run_limit || account.daily_limit || 0,
-  );
-  return Number.isFinite(defaultLimit) && defaultLimit > 0
-    ? Math.floor(defaultLimit)
-    : Number.POSITIVE_INFINITY;
+  const dailyLimit = Number(account.daily_limit || 0);
+  const alreadySent = Number(account.sent_today || 0);
+  if (Number.isFinite(dailyLimit) && dailyLimit > 0) {
+    const remainingToday = Math.max(0, Math.floor(dailyLimit - alreadySent));
+    return Math.max(0, Math.min(runLimit, remainingToday));
+  }
+  return runLimit;
+}
+
+
+async function loadScheduleControl(
+  supabase: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  scheduleId: string,
+) {
+  const { data } = await supabase
+    .from("message_schedules")
+    .select("status,stop_requested")
+    .eq("workspace_id", workspaceId)
+    .eq("id", scheduleId)
+    .maybeSingle();
+  return {
+    stopRequested: Boolean((data as AnyRow | null)?.stop_requested) || String((data as AnyRow | null)?.status || "") === "cancelled",
+    status: String((data as AnyRow | null)?.status || ""),
+  };
 }
 
 async function refreshAccessToken(account: AnyRow) {
@@ -435,13 +462,16 @@ async function loadFollowUpBusinesses(
 async function runOneSchedule(
   supabase: ReturnType<typeof createAdminClient>,
   schedule: AnyRow,
+  targetLimitOverride?: number,
+  senderRunLimitOverride?: number,
 ): Promise<WorkerSummary> {
   const scheduleId = String(schedule.id);
   const workspaceId = String(schedule.workspace_id);
   const raw = schedule.raw || {};
+  const requestedTarget = targetLimitOverride && targetLimitOverride > 0 ? targetLimitOverride : Number(schedule.target_count || 100);
   const targetCount = Math.max(
     1,
-    Math.min(MAX_WORKER_BATCH_SIZE, Number(schedule.target_count || 100)),
+    Math.min(MAX_WORKER_BATCH_SIZE, requestedTarget),
   );
   const lock = await supabase
     .from("message_schedules")
@@ -450,6 +480,8 @@ async function runOneSchedule(
       started_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       last_error: null,
+      stop_requested: false,
+      stopped_at: null,
     })
     .eq("id", scheduleId)
     .eq("workspace_id", workspaceId)
@@ -474,6 +506,7 @@ async function runOneSchedule(
   let sent = 0;
   let failed = 0;
   let skipped = 0;
+  let stopped = false;
 
   try {
     const templates = await loadTemplates(supabase, schedule);
@@ -550,9 +583,15 @@ async function runOneSchedule(
     let cursor = 0;
 
     for (let i = 0; i < contacts.length; i++) {
+      const control = await loadScheduleControl(supabase, workspaceId, scheduleId);
+      if (control.stopRequested) {
+        stopped = true;
+        skipped += contacts.length - i;
+        break;
+      }
       const business = contacts[i];
       const eligibleAccounts = activeAccounts.filter(
-        (account) => (sentBySender[account.id] || 0) < senderCap(raw, account),
+        (account) => (sentBySender[account.id] || 0) < senderCap(raw, account, senderRunLimitOverride),
       );
       if (!eligibleAccounts.length) {
         skipped += contacts.length - i;
@@ -752,7 +791,7 @@ async function runOneSchedule(
         .eq("id", scheduleId);
     }
 
-    const finalStatus = dryRun ? "sent" : "sent";
+    const finalStatus = stopped ? "cancelled" : dryRun ? "sent" : "sent";
     await supabase
       .from("outreach_batches")
       .update({
@@ -775,15 +814,16 @@ async function runOneSchedule(
         failed_count: failed,
         skipped_count: skipped,
         finished_at: new Date().toISOString(),
+        stopped_at: stopped ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
-        last_error: null,
+        last_error: stopped ? "Stopped by user." : null,
       })
       .eq("workspace_id", workspaceId)
       .eq("id", scheduleId);
     await createAppNotification(supabase as any, {
       workspaceId,
       type: "job_completed",
-      title: `${schedule.type === "follow_up" ? "Follow-up" : "Message"} job completed`,
+      title: `${schedule.type === "follow_up" ? "Follow-up" : "Message"} job ${stopped ? "stopped" : "completed"}`,
       message: `Sent ${sent.toLocaleString()}, failed ${failed.toLocaleString()}, skipped ${skipped.toLocaleString()}.`,
       entityType: "message_schedule",
       entityId: scheduleId,
@@ -798,7 +838,7 @@ async function runOneSchedule(
     });
     return {
       scheduleId,
-      status: "sent",
+      status: stopped ? "skipped" : "sent",
       type: schedule.type,
       requested: contacts.length,
       attempted,
@@ -889,6 +929,7 @@ async function resetStaleRunningSchedules(
       updated_at: new Date().toISOString(),
     })
     .eq("status", "running")
+    .or("stop_requested.is.null,stop_requested.eq.false")
     .is("finished_at", null)
     .lt("updated_at", staleSince);
   if (error) throw error;
@@ -897,6 +938,8 @@ async function resetStaleRunningSchedules(
 async function runSchedules(
   limit = MAX_SCHEDULES_PER_RUN,
   scheduleId?: string,
+  targetLimitOverride?: number,
+  senderRunLimitOverride?: number,
 ) {
   const supabase = createAdminClient();
   await resetStaleRunningSchedules(supabase);
@@ -904,6 +947,7 @@ async function runSchedules(
     .from("message_schedules")
     .select("*")
     .eq("status", "scheduled")
+    .or("stop_requested.is.null,stop_requested.eq.false")
     .lte("scheduled_for", new Date().toISOString())
     .order("scheduled_for", { ascending: true })
     .limit(Math.max(1, Math.min(MAX_SCHEDULES_PER_RUN, limit)));
@@ -912,7 +956,7 @@ async function runSchedules(
   if (error) throw error;
   const results: WorkerSummary[] = [];
   for (const schedule of schedules || []) {
-    results.push(await runOneSchedule(supabase, schedule));
+    results.push(await runOneSchedule(supabase, schedule, targetLimitOverride, senderRunLimitOverride));
   }
   return results;
 }
@@ -934,7 +978,9 @@ export async function GET(request: NextRequest) {
     const scheduleId = String(
       request.nextUrl.searchParams.get("scheduleId") || "",
     );
-    const results = await runSchedules(limit, scheduleId || undefined);
+    const targetLimit = Number(request.nextUrl.searchParams.get("targetLimit") || request.nextUrl.searchParams.get("scheduleBatchSize") || 0);
+    const senderRunLimit = Number(request.nextUrl.searchParams.get("senderRunLimit") || 0);
+    const results = await runSchedules(limit, scheduleId || undefined, targetLimit || undefined, senderRunLimit || undefined);
     return NextResponse.json({ success: true, ran: results.length, results });
   } catch (error) {
     return NextResponse.json(
@@ -959,6 +1005,8 @@ export async function POST(request: NextRequest) {
     const results = await runSchedules(
       Number(input.limit || MAX_SCHEDULES_PER_RUN),
       input.scheduleId ? String(input.scheduleId) : undefined,
+      Number(input.targetLimit || input.scheduleBatchSize || 0) || undefined,
+      Number(input.senderRunLimit || 0) || undefined,
     );
     return NextResponse.json({ success: true, ran: results.length, results });
   } catch (error) {

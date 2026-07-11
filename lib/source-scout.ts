@@ -28,15 +28,51 @@ export type SourceScoutParseResult = {
 const EMAIL_GLOBAL_RE = /[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/gi;
 const URL_GLOBAL_RE = /(?:https?:\/\/|www\.)[^\s<>'"\])}]+|\b[a-z0-9][a-z0-9\-]{1,62}(?:\.[a-z0-9][a-z0-9\-]{1,62})+\b(?:\/[^\s<>'"\])}]*)?/gi;
 const PHONE_RE = /(?:\+?\d[\d\s().-]{7,}\d)/;
-const BAD_DOMAIN_RE = /\b(?:google|bing|yahoo|facebook|instagram|linkedin|youtube|twitter|x|tiktok|pinterest|schema|w3|gstatic|doubleclick|googletagmanager|googleusercontent|cloudflare|sentry|hotjar|recaptcha|hcaptcha|example)\./i;
+const BAD_DOMAIN_RE = /\b(?:google|bing|yahoo|facebook|instagram|linkedin|youtube|twitter|x|tiktok|pinterest|schema|w3|gstatic|doubleclick|googletagmanager|googleusercontent|cloudflare|sentry|hotjar|recaptcha|hcaptcha|example|forbes|wikipedia|medium|reddit|quora|crunchbase|bloomberg|reuters|nytimes|bbc|cnn|cnbc|shopify\.com|apps\.shopify|themeforest|github|npmjs|wordpress\.org)\./i;
 const FILE_OR_ASSET_RE = /\.(?:png|jpe?g|webp|gif|svg|pdf|zip|css|js|ico|woff2?|ttf|eot|mp4|mov|avi|webm)(?:[?#].*)?$/i;
+const SOURCE_AGGREGATOR_DOMAINS = new Set([
+  'forbes.com','wikipedia.org','medium.com','reddit.com','quora.com','crunchbase.com','bloomberg.com','reuters.com','nytimes.com','bbc.com','cnn.com','cnbc.com','yelp.com','trustpilot.com','yellowpages.com','clutch.co','g2.com','github.com','npmjs.com','shopify.com','apps.shopify.com','themeforest.net','wordpress.org','facebook.com','instagram.com','linkedin.com','youtube.com','tiktok.com','x.com','twitter.com','pinterest.com'
+]);
 
-export function buildSourceScoutDorks(input: { niche?: string; location?: string; country?: string; sourceMode?: SourceScoutMode }) {
+function rootDomainForFilter(value: string) {
+  const host = displayDomain({ website: value, domain: value }).toLowerCase().replace(/^www\./, '');
+  const parts = host.split('.').filter(Boolean);
+  if (parts.length <= 2) return host;
+  return parts.slice(-2).join('.');
+}
+
+function isBlockedSourceDomain(value: string) {
+  const root = rootDomainForFilter(value);
+  if (!root) return false;
+  return SOURCE_AGGREGATOR_DOMAINS.has(root) || Array.from(SOURCE_AGGREGATOR_DOMAINS).some((blocked) => root === blocked || root.endsWith(`.${blocked}`));
+}
+
+function lineLooksLikeAggregator(line: string) {
+  const lower = line.toLowerCase();
+  return /\b(forbes|wikipedia|medium|reddit|quora|crunchbase|bloomberg|reuters|nytimes|bbc|cnn|cnbc|github|npm|themeforest|shopify app store)\b/.test(lower);
+}
+
+function usableBusinessEvidence(line: string, website: string, email: string) {
+  if (website && isBlockedSourceDomain(website)) return false;
+  if (email && isBlockedSourceDomain(email.split('@')[1] || '')) return false;
+  if (lineLooksLikeAggregator(line) && !website) return false;
+  return true;
+}
+
+
+export function buildSourceScoutDorks(input: { niche?: string; location?: string; country?: string; sourceMode?: SourceScoutMode; signals?: string[] | string }) {
   const niche = cleanText(input.niche || 'business').replace(/["<>]/g, '').trim();
   const location = cleanText([input.location, input.country].filter(Boolean).join(' ')).replace(/["<>]/g, '').trim();
   const place = location || 'near me';
   const q = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const signals = Array.isArray(input.signals) ? input.signals : String(input.signals || '').split(/\n|,/);
+  const cleanSignals = signals.map((s) => cleanText(s).replace(/["<>]/g, '').trim()).filter(Boolean).slice(0, 8);
+  const signalDorks = cleanSignals.flatMap((signal) => [
+    q(`"${niche}" "${place}" "${signal}" "contact"`),
+    q(`"${niche}" "${place}" "${signal}" "@" -forbes -wikipedia -medium -reddit -quora`)
+  ]);
   return [
+    ...signalDorks,
     q(`"${niche}" "${place}" "contact" email`),
     q(`"${niche}" "${place}" "@" -facebook -instagram -linkedin`),
     q(`"${niche}" "${place}" "official website"`),
@@ -74,6 +110,7 @@ function safeWebsite(raw: string) {
   const website = normalizeWebsite(raw);
   if (!website) return '';
   if (BAD_DOMAIN_RE.test(website)) return '';
+  if (isBlockedSourceDomain(website)) return '';
   if (FILE_OR_ASSET_RE.test(website)) return '';
   return website;
 }
@@ -128,6 +165,10 @@ export function parseSourceScoutText(input: {
     const normalized_key = makeNormalizedKey({ email, domain, website, name, phone });
     if (!normalized_key) {
       rejected.push({ value: partial.rawLine.slice(0, 160), reason: 'No stable email, website, phone, or name key found.' });
+      return;
+    }
+    if (!usableBusinessEvidence(partial.rawLine, website, email)) {
+      rejected.push({ value: partial.rawLine.slice(0, 160), reason: 'Skipped aggregator/news/platform result. Scout only imports businesses or direct contact pages.' });
       return;
     }
     leads.push({

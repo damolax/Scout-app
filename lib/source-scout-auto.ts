@@ -10,6 +10,7 @@ export type AutoSourceScoutInput = {
   maxSearchQueries?: number;
   maxPages?: number;
   fetchTimeoutMs?: number;
+  signals?: string[] | string;
 };
 
 export type AutoFetchedPage = {
@@ -34,7 +35,7 @@ export type AutoSourceScoutResult = {
 const EMAIL_RE = /[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/gi;
 const HREF_RE = /href\s*=\s*["']([^"']+)["']/gi;
 const TITLE_RE = /<title[^>]*>([\s\S]*?)<\/title>/i;
-const BAD_HOST_RE = /(^|\.)(google|bing|microsoft|yahoo|facebook|instagram|linkedin|youtube|twitter|x|tiktok|pinterest|doubleclick|gstatic|googleusercontent|googletagmanager|schema|w3|cloudflare|recaptcha|hcaptcha|sentry|hotjar|aboutads|privacychoices)\./i;
+const BAD_HOST_RE = /(^|\.)(google|bing|microsoft|yahoo|facebook|instagram|linkedin|youtube|twitter|x|tiktok|pinterest|doubleclick|gstatic|googleusercontent|googletagmanager|schema|w3|cloudflare|recaptcha|hcaptcha|sentry|hotjar|aboutads|privacychoices|forbes|wikipedia|medium|reddit|quora|crunchbase|bloomberg|reuters|nytimes|bbc|cnn|cnbc|github|npmjs|themeforest)\./i;
 const ASSET_RE = /\.(?:png|jpe?g|webp|gif|svg|pdf|zip|css|js|ico|woff2?|ttf|eot|mp4|mov|avi|webm|xml)(?:[?#].*)?$/i;
 
 function uniq<T>(items: T[]) {
@@ -170,7 +171,7 @@ export async function runAutoSourceScout(input: AutoSourceScoutInput): Promise<A
   const errors: string[] = [];
   const fetchedPages: AutoFetchedPage[] = [];
 
-  const dorks = buildSourceScoutDorks({ niche: input.niche, location: input.location, country: input.country, sourceMode });
+  const dorks = buildSourceScoutDorks({ niche: input.niche, location: input.location, country: input.country, sourceMode, signals: input.signals });
   const seeds = uniq([
     ...(input.startUrls || []).map((url) => normalizeWebsite(url)).filter(Boolean),
     ...dorks.slice(0, maxSearchQueries).map((dork) => searchUrl(sourceMode === 'google_dork' ? 'google' : 'bing', dork))
