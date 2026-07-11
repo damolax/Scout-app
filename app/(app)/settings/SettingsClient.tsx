@@ -51,7 +51,8 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   const [sentLast24ByEmail, setSentLast24ByEmail] = useState<Record<string, number>>({});
   const [seedTests, setSeedTests] = useState<SeedInboxTest[]>([]);
   const [limitDrafts, setLimitDrafts] = useState<Record<string, { daily_limit: string; default_run_limit: string; account_type: string; seed_inbox_enabled: boolean; seed_test_address: string }>>({});
-  const [identityDraft, setIdentityDraft] = useState<IdentityDraft>({ signature_enabled: true, signature_text: '', signature_html: '', signature_logo_url: '' });
+  const [identityDraft, setIdentityDraft] = useState<IdentityDraft>({ signature_enabled: true, signature_text: workspace.email_signature_text || '', signature_html: workspace.email_signature_html || '', signature_logo_url: workspace.email_logo_url || '' });
+  const [logoUploadBusy, setLogoUploadBusy] = useState(false);
   const [manualEmail, setManualEmail] = useState('');
   const [manualAccessToken, setManualAccessToken] = useState('');
   const [manualRefreshToken, setManualRefreshToken] = useState('');
@@ -102,7 +103,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         signature_enabled: source.signature_enabled !== false,
         signature_text: String(source.signature_text || rawIdentity.signature_text || ''),
         signature_html: String(source.signature_html || rawIdentity.signature_html || ''),
-        signature_logo_url: String((source as any).signature_logo_url || rawIdentity.signature_logo_url || rawIdentity.logo_url || '')
+        signature_logo_url: String((source as any).signature_logo_url || rawIdentity.signature_logo_url || rawIdentity.logo_url || workspace.email_logo_url || '')
       });
       identityLoadedRef.current = true;
     }
@@ -292,6 +293,32 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   async function saveAllSenderDrafts() {
     const rows = accounts.filter((account) => limitDrafts[account.id]);
     for (const account of rows) await saveSenderSettings(account, true);
+  }
+
+
+  async function uploadSignatureLogo(file: File | null) {
+    if (!file) return;
+    setLogoUploadBusy(true);
+    setError('');
+    try {
+      const form = new FormData();
+      form.append('workspace_id', workspace.id);
+      form.append('logo', file);
+      const response = await fetch('/api/assets/logo-upload', {
+        method: 'POST',
+        body: form
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Logo upload failed with HTTP ${response.status}`);
+      const logoUrl = String(json.publicUrl || json.logoUrl || '').trim();
+      if (!logoUrl) throw new Error('Logo uploaded but no public URL was returned.');
+      setIdentityDraft((draft) => ({ ...draft, signature_logo_url: logoUrl }));
+      setStatus('Logo uploaded. Click Save to Scout for all senders, or Save + sync signature to Gmail.');
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setLogoUploadBusy(false);
+    }
   }
 
   async function applyEmailIdentity(syncToGmail = false) {
@@ -538,12 +565,26 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         <textarea className="textarea" value={identityDraft.signature_text} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_text: event.target.value }))} placeholder={"Best regards,\nOlalekan\nWebsite: https://example.com"} style={{ minHeight: 110 }} />
         <label className="label" style={{ marginTop: 12 }}>HTML signature, optional</label>
         <textarea className="textarea" value={identityDraft.signature_html} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_html: event.target.value }))} placeholder={'<strong>Olalekan</strong><br />Founder, Elevate Scout<br /><a href="https://example.com">example.com</a>'} style={{ minHeight: 110 }} />
-        <label className="label" style={{ marginTop: 12 }}>Logo URL after signature</label>
-        <input className="input" value={identityDraft.signature_logo_url} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_logo_url: event.target.value }))} placeholder="https://your-site.com/logo.png" />
-        <p className="muted" style={{ marginTop: 6 }}>Recommended: transparent PNG, around 320×120 px. Scout displays it about 160 px wide.</p>
+        <label className="label" style={{ marginTop: 12 }}>Logo after signature</label>
+        <div className="grid grid-2">
+          <div>
+            <input
+              className="input"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              disabled={logoUploadBusy || busy}
+              onChange={(event) => uploadSignatureLogo(event.target.files?.[0] || null)}
+            />
+            <p className="muted" style={{ marginTop: 6 }}>Upload PNG/JPG/WebP. Recommended 320×120 px, transparent PNG, under 2 MB.</p>
+          </div>
+          <div>
+            <input className="input" value={identityDraft.signature_logo_url} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_logo_url: event.target.value }))} placeholder="Logo URL appears here after upload" />
+            <p className="muted" style={{ marginTop: 6 }}>{logoUploadBusy ? 'Uploading logo…' : 'Scout stores uploads in Supabase Storage and uses the public image URL here.'}</p>
+          </div>
+        </div>
         {identityDraft.signature_logo_url ? <div style={{ marginTop: 10 }}><img src={identityDraft.signature_logo_url} alt="Signature logo preview" style={{ maxWidth: 160, height: 'auto', borderRadius: 8 }} /></div> : null}
         <div className="notice" style={{ marginTop: 10 }}>
-          Scout can save this signature and logo inside Scout. Gmail signature sync also uses this logo URL, but the image must be publicly reachable by Gmail.
+          A bucket is just a storage folder in Supabase. Scout uses the public <code>email-assets</code> bucket to host signature logos so Gmail and recipients can see the image.
         </div>
         <div className="actions" style={{ marginTop: 12 }}>
           <button className="btn" type="button" disabled={busy || !accounts.length} onClick={() => applyEmailIdentity(false)}>Save to Scout for all senders</button>

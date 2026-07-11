@@ -22,6 +22,9 @@ export type Workspace = {
   default_audience_category_name?: string | null;
   dork_settings?: Record<string, unknown> | null;
   extension_settings?: Record<string, unknown> | null;
+  email_signature_text?: string | null;
+  email_signature_html?: string | null;
+  email_logo_url?: string | null;
 };
 
 export type Business = {

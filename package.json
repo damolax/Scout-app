@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-45-settings-schedule-signature-fix",
-  "version": "8.45.0",
+  "name": "scout-app-v8-46-logo-upload-live-activity",
+  "version": "8.46.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v8.45: fixes schedule run_kind, settings sender usage display, and signature logo saving/sync."
+  "description": "Scout App v8.46: built-in Supabase logo upload and compact live work window for sending/Auto Scout."
 }
