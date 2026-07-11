@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-42-repair-cleanup",
-  "version": "8.42.0",
+  "name": "scout-app-v8-43-auto-reply-classifier",
+  "version": "8.43.0",
   "private": true,
   "scripts": {
     "dev": "next dev",

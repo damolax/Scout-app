@@ -204,10 +204,53 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
     'returned mail', 'delivery has failed'
   ];
   const limitTerms = ['sending limit', 'rate limit', 'quota exceeded', 'daily user sending quota exceeded', 'too many messages', 'user-rate limit', 'mail sending limit exceeded'];
+  const autoHeaders = Array.isArray((message.raw as AnyRecord)?.gmail?.payload?.headers)
+    ? ((message.raw as AnyRecord).gmail.payload.headers as AnyRecord[])
+    : [];
+  const autoHeaderText = autoHeaders
+    .map((h) => `${String(h.name || '').toLowerCase()}: ${String(h.value || '').toLowerCase()}`)
+    .join('\n');
+  const autoHeaderTerms = [
+    'auto-submitted: auto-replied',
+    'auto-submitted: auto-generated',
+    'auto-submitted: auto-notified',
+    'x-autoreply:',
+    'x-autorespond:',
+    'x-auto-response-suppress:',
+    'x-ms-exchange-inbox-rules-loop:',
+    'x-loop:',
+    'precedence: auto_reply',
+    'precedence: bulk',
+    'precedence: junk',
+    'submitted: auto-replied',
+    'submitted: auto-generated'
+  ];
   const autoTerms = [
-    'out of office', 'automatic reply', 'auto-reply', 'vacation responder', 'autoreply', 'auto reply',
-    'away from the office', 'i am currently away', 'i am out of the office', 'this is an automated response',
-    'this is an automatic response', 'automatic email reply'
+    'out of office', 'out-of-office', 'ooo', 'o.o.o', 'automatic reply', 'automatic response',
+    'auto-reply', 'auto reply', 'autoreply', 'auto responder', 'autoresponder', 'vacation responder',
+    'vacation reply', 'away message', 'absence message', 'away from the office', 'currently away',
+    'i am away', 'i’m away', 'i am currently away', 'i’m currently away', 'i am out of the office',
+    'i’m out of the office', 'out of the office until', 'away until', 'returning on', 'back on',
+    'annual leave', 'on leave', 'maternity leave', 'paternity leave', 'sick leave', 'holiday leave',
+    'limited access to email', 'limited access to my email', 'limited email access', 'not checking email',
+    'not monitoring email', 'currently unavailable', 'i am unavailable', 'i’m unavailable',
+    'thank you for your email. i am away', 'thank you for your message. i am away',
+    'this is an automated response', 'this is an automated reply', 'this is an automated message',
+    'this is an automatic response', 'this is an automatic reply', 'this is an automatic message',
+    'this response was automatically generated', 'this reply was automatically generated',
+    'this message was generated automatically', 'this email was generated automatically',
+    'system generated message', 'system-generated message', 'automated notification', 'automatic notification',
+    'this is a notification only', 'this mailbox is not monitored', 'this inbox is not monitored',
+    'please do not reply to this email', 'please do not respond to this email', 'do not reply to this email',
+    'do not respond to this message', 'do-not-reply', 'donotreply', 'no-reply', 'noreply',
+    'your request has been received', 'we have received your request', 'we have received your message',
+    'we received your email', 'support ticket has been created', 'ticket has been created',
+    'case has been created', 'your ticket number', 'your case number', 'thanks for contacting support',
+    'thank you for contacting us', 'we will get back to you shortly', 'we will respond as soon as possible',
+    'someone from our team will get back to you', 'we aim to respond within', 'we aim to reply within',
+    'this is an automated acknowledgement', 'automated acknowledgement', 'automatic acknowledgement',
+    'acknowledgement of receipt', 'receipt confirmation', 'confirmation of receipt', 'message received',
+    'email received', 'inquiry received', 'enquiry received'
   ];
   const temporaryTerms = ['temporary failure', 'try again later', 'deferred', '4.2.0', '4.4.1', '4.7.0', 'temporarily unavailable', 'greylisted'];
 
@@ -216,7 +259,7 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
   if (blockedTerms.some((term) => text.includes(term))) return { classification: 'message_blocked', replyBucket: 'blocked', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: true, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
   if (bounceTerms.some((term) => text.includes(term))) return { classification: 'bounce_notice', replyBucket: 'bounce_notice', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
   if (temporaryTerms.some((term) => text.includes(term))) return { classification: 'temporary_failure', replyBucket: 'temporary_failure', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: true, ignored: false };
-  if (autoTerms.some((term) => text.includes(term))) return { classification: 'auto_reply', replyBucket: 'auto_reply', isRealReply: false, isAutoReply: true, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false };
+  if (autoHeaderTerms.some((term) => autoHeaderText.includes(term)) || autoTerms.some((term) => text.includes(term))) return { classification: 'auto_reply', replyBucket: 'auto_reply', isRealReply: false, isAutoReply: true, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false };
   if (isSelf) return { classification: 'self_message_ignored', replyBucket: 'ignored', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
   if (!sentMatch) return { classification: 'unmatched_inbound', replyBucket: 'unmatched', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
   return { classification: 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };

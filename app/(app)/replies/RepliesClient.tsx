@@ -146,7 +146,19 @@ function classify(message: NormalizedMessage) {
     'mailbox unavailable', 'mailbox full', 'over quota', '550 ', '5.1.1', '5.2.2', 'permanent failure', 'delivery failed'
   ];
   const limitTerms = ['sending limit', 'rate limit', 'quota exceeded', 'daily user sending quota exceeded', 'too many messages', 'user-rate limit'];
-  const autoTerms = ['out of office', 'automatic reply', 'auto-reply', 'vacation responder', 'autoreply'];
+  const autoTerms = [
+    'out of office', 'out-of-office', 'ooo', 'automatic reply', 'automatic response',
+    'auto-reply', 'auto reply', 'autoreply', 'auto responder', 'autoresponder', 'vacation responder',
+    'away from the office', 'i am currently away', 'i’m currently away', 'i am out of the office',
+    'limited access to email', 'currently unavailable', 'this is an automated response',
+    'this is an automated reply', 'this is an automated message', 'this is an automatic response',
+    'this message was generated automatically', 'system generated message', 'automated notification',
+    'this mailbox is not monitored', 'this inbox is not monitored', 'please do not reply',
+    'do-not-reply', 'donotreply', 'no-reply', 'noreply', 'your request has been received',
+    'we have received your request', 'support ticket has been created', 'ticket has been created',
+    'thanks for contacting support', 'thank you for contacting us', 'we will get back to you shortly',
+    'someone from our team will get back to you', 'automated acknowledgement', 'automatic acknowledgement'
+  ];
   if (limitTerms.some((term) => text.includes(term))) return { classification: 'gmail_limit_notice', isReal: false, noInbox: false };
   if (bounceTerms.some((term) => text.includes(term))) return { classification: 'no_inbox_or_bounce', isReal: false, noInbox: true };
   if (autoTerms.some((term) => text.includes(term))) return { classification: 'auto_reply_ignored', isReal: false, noInbox: false };
