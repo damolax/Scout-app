@@ -936,7 +936,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     });
     setSelectedContacts({});
     setStatus(
-      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). You can leave this page; the server worker/cron will continue it. Job: ${scheduleId}`,
+      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). You can leave this page; the server job will continue it when the worker/cron runs. Job: ${scheduleId}`,
     );
     await Promise.all([
       loadSchedules(),
@@ -969,8 +969,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       stopped: false,
     });
     try {
-      await startDurableSendJob(contactsOverride, options);
-      return;
+      // v8.48: Send Now uses the proven immediate sender again.
+      // It does NOT depend on cron. Schedules/background resume still use message_schedules.
       const messageKind: MessageKind =
         options?.messageKind || (options?.isFollowUp ? "follow_up" : "initial");
       const templatePool = templatesForSend(messageKind);
@@ -1084,7 +1084,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       let stopped = false;
       const requested = contacts.length;
       setStatus(
-        `Sending ${requested.toLocaleString()} message(s). Sender caps: ${describeSenderCaps(activeAccounts)}.`,
+        `Sending now: 0 / ${requested.toLocaleString()} started. This send does not need cron while this page is open.`,
       );
 
       for (let i = 0; i < contacts.length; i++) {
@@ -1120,7 +1120,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         const payload = buildContactPayload(business, template, i);
         attempted += 1;
         setStatus(
-          `${attempted.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`,
+          `Sending now ${attempted.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`,
         );
 
         const response = await fetch("/api/gmail/send", {
@@ -1253,8 +1253,12 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             dryRun,
             isFollowUp: options?.isFollowUp,
           });
-          if (statusText === "sent")
+          if (statusText === "sent") {
             sentBySender[account.id] = (sentBySender[account.id] || 0) + 1;
+            setStatus(
+              `Message sent ${sent.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`,
+            );
+          }
           await logOutreachEvent({
             batch_id: batchId,
             business_id: business.id,
@@ -1358,6 +1362,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           ),
           scheduled_for: new Date(scheduleFor).toISOString(),
           status: "scheduled",
+          run_kind: "scheduled",
           followup_segment:
             scheduleType === "follow_up" ? followUpSegment : null,
           raw: {
@@ -1415,6 +1420,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           target_count: dueFollowUps.length,
           scheduled_for: new Date(followUpFor).toISOString(),
           status: "scheduled",
+          run_kind: "scheduled_follow_up",
           followup_segment: followUpSegment,
           raw: {
             due_mode: true,
@@ -1493,7 +1499,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       const response = await fetch("/api/message/run-schedules", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ limit: 3 }),
+        body: JSON.stringify({ limit: 3, workspaceId: workspace.id }),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json?.success === false)

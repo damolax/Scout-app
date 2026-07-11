@@ -3,6 +3,7 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
+import { createClient } from "@/lib/supabase-server";
 import { analyzeSpamRisk } from "@/lib/spam-guard";
 import { createAppNotification } from "@/lib/notifications";
 import { buildMimeMessage, appendSignatureToText } from "@/lib/email-signature";
@@ -940,6 +941,7 @@ async function runSchedules(
   scheduleId?: string,
   targetLimitOverride?: number,
   senderRunLimitOverride?: number,
+  workspaceId?: string,
 ) {
   const supabase = createAdminClient();
   await resetStaleRunningSchedules(supabase);
@@ -951,6 +953,7 @@ async function runSchedules(
     .lte("scheduled_for", new Date().toISOString())
     .order("scheduled_for", { ascending: true })
     .limit(Math.max(1, Math.min(MAX_SCHEDULES_PER_RUN, limit)));
+  if (workspaceId) query = query.eq("workspace_id", workspaceId);
   if (scheduleId) query = query.eq("id", scheduleId);
   const { data: schedules, error } = await query;
   if (error) throw error;
@@ -961,14 +964,33 @@ async function runSchedules(
   return results;
 }
 
+async function isAuthorizedWorkerRequest(
+  request: NextRequest,
+  input?: Record<string, unknown>,
+) {
+  const secret =
+    process.env.SCHEDULE_WORKER_SECRET ||
+    process.env.CRON_SECRET ||
+    process.env.RUN_ALL_WORKER_SECRET ||
+    "";
+  const provided = scheduleWorkerSecretFromRequest(request, input);
+  if (secret && provided === secret) return true;
+
+  // Allow the signed-in app UI to run due work without exposing the worker secret in the browser.
+  try {
+    const userClient = await createClient();
+    const { data: { user } } = await userClient.auth.getUser();
+    return Boolean(user);
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const secret =
-      process.env.SCHEDULE_WORKER_SECRET || process.env.CRON_SECRET || "";
-    const provided = scheduleWorkerSecretFromRequest(request);
-    if (secret && provided !== secret) {
+    if (!(await isAuthorizedWorkerRequest(request))) {
       return NextResponse.json(
-        { success: false, error: "Invalid schedule worker token." },
+        { success: false, error: "Invalid schedule worker token or signed-in session." },
         { status: 401 },
       );
     }
@@ -980,7 +1002,8 @@ export async function GET(request: NextRequest) {
     );
     const targetLimit = Number(request.nextUrl.searchParams.get("targetLimit") || request.nextUrl.searchParams.get("scheduleBatchSize") || 0);
     const senderRunLimit = Number(request.nextUrl.searchParams.get("senderRunLimit") || 0);
-    const results = await runSchedules(limit, scheduleId || undefined, targetLimit || undefined, senderRunLimit || undefined);
+    const workspaceId = String(request.nextUrl.searchParams.get("workspaceId") || "");
+    const results = await runSchedules(limit, scheduleId || undefined, targetLimit || undefined, senderRunLimit || undefined, workspaceId || undefined);
     return NextResponse.json({ success: true, ran: results.length, results });
   } catch (error) {
     return NextResponse.json(
@@ -993,12 +1016,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const input = await request.json().catch(() => ({}));
-    const secret =
-      process.env.SCHEDULE_WORKER_SECRET || process.env.CRON_SECRET || "";
-    const provided = scheduleWorkerSecretFromRequest(request, input);
-    if (secret && provided !== secret) {
+    if (!(await isAuthorizedWorkerRequest(request, input))) {
       return NextResponse.json(
-        { success: false, error: "Invalid schedule worker token." },
+        { success: false, error: "Invalid schedule worker token or signed-in session." },
         { status: 401 },
       );
     }
@@ -1007,6 +1027,7 @@ export async function POST(request: NextRequest) {
       input.scheduleId ? String(input.scheduleId) : undefined,
       Number(input.targetLimit || input.scheduleBatchSize || 0) || undefined,
       Number(input.senderRunLimit || 0) || undefined,
+      input.workspaceId ? String(input.workspaceId) : undefined,
     );
     return NextResponse.json({ success: true, ran: results.length, results });
   } catch (error) {

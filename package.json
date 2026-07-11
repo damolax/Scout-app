@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-47-live-toggle-cron-fix",
-  "version": "8.47.0",
+  "name": "scout-app-v8-48-restore-send-now",
+  "version": "8.48.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v8.47: closed-by-default Live Work toggle, first-run send kick, and cron/schedule repair."
+  "description": "Scout App v8.48: restores immediate Send Now without cron, keeps schedules for due/background jobs, and fixes schedule worker auth."
 }
