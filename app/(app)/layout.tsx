@@ -31,7 +31,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div className="main-topbar">
           <div>
             <strong>Scout App</strong>
-            <span className="muted"> Simple outreach workspace</span>
+            <span className="muted"> Find leads. Send emails. Track replies.</span>
           </div>
           <NotificationBell workspaceId={workspace?.id} />
         </div>

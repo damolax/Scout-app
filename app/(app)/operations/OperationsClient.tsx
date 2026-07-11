@@ -170,7 +170,7 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
         senderRunLimit,
         autoScoutCycles
       };
-      setStatus(mode === 'full' ? 'Running the complete Scout autopilot loop...' : `Running ${mode} worker...`);
+      setStatus(mode === 'full' ? 'Running due work...' : `Running ${mode} worker...`);
       const response = await fetch('/api/workers/run-all', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -192,11 +192,11 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
     <div className="stack">
       <div className="hero">
         <div>
-          <div className="eyebrow">Scout v8.42</div>
-          <h1>Automation</h1>
+          <div className="eyebrow">Automation</div>
+          <h1>Worker</h1>
         </div>
         <div className="actions">
-          <button className="btn" type="button" disabled={busy || loading} onClick={() => runWorker('full')}>Run Full Autopilot</button>
+          <button className="btn" type="button" disabled={busy || loading} onClick={() => runWorker('full')}>Run due work</button>
           <button className="btn secondary" type="button" disabled={busy || loading} onClick={refresh}>Refresh</button>
         </div>
       </div>
@@ -205,48 +205,48 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
       <div className="notice">{busy ? 'Working...' : loading ? 'Loading...' : status}</div>
 
       <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Ready to Send</div><div className="num">{counts.ready.toLocaleString()}</div><p>Initial-message queue</p></div>
-        <div className="card kpi"><div className="title">Due Follow-ups</div><div className="num">{counts.dueFollowUps.toLocaleString()}</div><p>Unanswered with inbox</p></div>
-        <div className="card kpi"><div className="title">Active Senders</div><div className="num">{counts.activeSenders.toLocaleString()}</div><p>{counts.pausedSenders.toLocaleString()} paused/limited</p></div>
-        <div className="card kpi"><div className="title">Due Schedules</div><div className="num">{counts.dueSchedules.toLocaleString()}</div><p>Ready for worker</p></div>
+        <div className="card kpi"><div className="title">Ready leads</div><div className="num">{counts.ready.toLocaleString()}</div><p>Can receive a first email</p></div>
+        <div className="card kpi"><div className="title">Follow-ups due</div><div className="num">{counts.dueFollowUps.toLocaleString()}</div><p>People to follow up</p></div>
+        <div className="card kpi"><div className="title">Senders ready</div><div className="num">{counts.activeSenders.toLocaleString()}</div><p>{counts.pausedSenders.toLocaleString()} paused/limited</p></div>
+        <div className="card kpi"><div className="title">Scheduled sends due</div><div className="num">{counts.dueSchedules.toLocaleString()}</div><p>Ready to send now</p></div>
       </div>
 
       <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Need Research</div><div className="num">{counts.pending.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Need email</div><div className="num">{counts.pending.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Contacted</div><div className="num">{counts.contacted.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Responded</div><div className="num">{counts.responded.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Bad Inbox</div><div className="num">{(counts.noInbox + counts.bounced).toLocaleString()}</div><p>No-inbox + bounced</p></div>
+        <div className="card kpi"><div className="title">Bad inboxes</div><div className="num">{(counts.noInbox + counts.bounced).toLocaleString()}</div><p>Bounced or blocked</p></div>
       </div>
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <h3>Run Options</h3>
+          <h3>Choose what to run</h3>
           <div className="grid grid-2">
-            <label className="checkbox-row"><input type="checkbox" checked={includeBounces} onChange={(e) => setIncludeBounces(e.target.checked)} /> Sync bounces / no-inbox / blocked</label>
-            <label className="checkbox-row"><input type="checkbox" checked={includeReplies} onChange={(e) => setIncludeReplies(e.target.checked)} /> Sync real replies + auto replies</label>
-            <label className="checkbox-row"><input type="checkbox" checked={includeRepairReady} onChange={(e) => setIncludeRepairReady(e.target.checked)} /> Repair Ready/Pending statuses</label>
-            <label className="checkbox-row"><input type="checkbox" checked={includeSchedules} onChange={(e) => setIncludeSchedules(e.target.checked)} /> Run due schedules/follow-ups</label>
-            <label className="checkbox-row"><input type="checkbox" checked={includeAutoScout} onChange={(e) => setIncludeAutoScout(e.target.checked)} /> Run Auto Scout worker</label>
-            <label className="checkbox-row"><input type="checkbox" checked={includeSeedTest} onChange={(e) => setIncludeSeedTest(e.target.checked)} /> Run seed inbox test</label>
+            <label className="checkbox-row"><input type="checkbox" checked={includeBounces} onChange={(e) => setIncludeBounces(e.target.checked)} /> Check bad inboxes</label>
+            <label className="checkbox-row"><input type="checkbox" checked={includeReplies} onChange={(e) => setIncludeReplies(e.target.checked)} /> Check replies</label>
+            <label className="checkbox-row"><input type="checkbox" checked={includeRepairReady} onChange={(e) => setIncludeRepairReady(e.target.checked)} /> Clean lead status</label>
+            <label className="checkbox-row"><input type="checkbox" checked={includeSchedules} onChange={(e) => setIncludeSchedules(e.target.checked)} /> Send due emails</label>
+            <label className="checkbox-row"><input type="checkbox" checked={includeAutoScout} onChange={(e) => setIncludeAutoScout(e.target.checked)} /> Find missing emails</label>
+            <label className="checkbox-row"><input type="checkbox" checked={includeSeedTest} onChange={(e) => setIncludeSeedTest(e.target.checked)} /> Send test email</label>
           </div>
           <div className="grid grid-2" style={{ marginTop: 14 }}>
-            <div><label className="label">Inbox messages per sender</label><input className="input" type="number" min={1} max={500} value={replyLimit} onChange={(e) => setReplyLimit(Number(e.target.value || 100))} /></div>
-            <div><label className="label">Due schedules at once</label><input className="input" type="number" min={1} max={25} value={scheduleLimit} onChange={(e) => setScheduleLimit(Number(e.target.value || 3))} /></div>
-            <div><label className="label">Emails to send at once</label><input className="input" type="number" min={1} max={2000} value={scheduleBatchSize} onChange={(e) => setScheduleBatchSize(Number(e.target.value || 100))} /></div>
-            <div><label className="label">Max per sender this run</label><input className="input" type="number" min={1} max={2000} value={senderRunLimit} onChange={(e) => setSenderRunLimit(Number(e.target.value || 50))} /></div>
-            <div><label className="label">Auto Scout cycles</label><input className="input" type="number" min={1} max={25} value={autoScoutCycles} onChange={(e) => setAutoScoutCycles(Number(e.target.value || 5))} /></div>
+            <div><label className="label">Inbox to check per sender</label><input className="input" type="number" min={1} max={500} value={replyLimit} onChange={(e) => setReplyLimit(Number(e.target.value || 100))} /></div>
+            <div><label className="label">Schedules to open</label><input className="input" type="number" min={1} max={25} value={scheduleLimit} onChange={(e) => setScheduleLimit(Number(e.target.value || 3))} /></div>
+            <div><label className="label">Emails this run</label><input className="input" type="number" min={1} max={2000} value={scheduleBatchSize} onChange={(e) => setScheduleBatchSize(Number(e.target.value || 100))} /></div>
+            <div><label className="label">Max from each sender</label><input className="input" type="number" min={1} max={2000} value={senderRunLimit} onChange={(e) => setSenderRunLimit(Number(e.target.value || 50))} /></div>
+            <div><label className="label">Email-finder passes</label><input className="input" type="number" min={1} max={25} value={autoScoutCycles} onChange={(e) => setAutoScoutCycles(Number(e.target.value || 5))} /></div>
           </div>
           <div className="actions" style={{ marginTop: 14 }}>
-            <button className="btn" type="button" disabled={busy} onClick={() => runWorker('full')}>Run Full Autopilot</button>
-            <button className="btn secondary" type="button" disabled={busy} onClick={() => runWorker('inbox')}>Inbox Sync Only</button>
-            <button className="btn secondary" type="button" disabled={busy} onClick={() => runWorker('schedules')}>Due Sends Only</button>
-            <button className="btn secondary" type="button" disabled={busy} onClick={() => runWorker('autoscout')}>Auto Scout Only</button>
+            <button className="btn" type="button" disabled={busy} onClick={() => runWorker('full')}>Run due work</button>
+            <button className="btn secondary" type="button" disabled={busy} onClick={() => runWorker('inbox')}>Check Replies</button>
+            <button className="btn secondary" type="button" disabled={busy} onClick={() => runWorker('schedules')}>Send Due Emails</button>
+            <button className="btn secondary" type="button" disabled={busy} onClick={() => runWorker('autoscout')}>Find Emails</button>
           </div>
         </div>
 
         <div className="card" style={{ padding: 18 }}>
-          <h3>Sender Health</h3>
-          <div className="table-wrap"><table><thead><tr><th>Email</th><th>Status</th><th>Sent Today</th><th>Risk</th></tr></thead><tbody>
+          <h3>Sender Limits</h3>
+          <div className="table-wrap"><table><thead><tr><th>Email</th><th>Status</th><th>Last 24h</th><th>Risk</th></tr></thead><tbody>
             {accounts.slice(0, 20).map((account) => {
               const emailKey = String(account.email || '').toLowerCase();
               const sent24 = last24BySender[String(account.id)] ?? last24BySender[emailKey] ?? Number(account.sent_today || 0);
@@ -255,16 +255,16 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
             })}
             {!accounts.length ? <tr><td colSpan={4} className="muted">No Gmail senders connected yet.</td></tr> : null}
           </tbody></table></div>
-          <h3 style={{ marginTop: 18 }}>Upcoming Schedules</h3>
+          <h3 style={{ marginTop: 18 }}>Saved Schedules</h3>
           <div className="table-wrap"><table><thead><tr><th>Type</th><th>For</th><th>Count</th><th>Status</th></tr></thead><tbody>
             {schedules.slice(0, 8).map((schedule) => <tr key={schedule.id}><td>{schedule.type}</td><td>{localTime(schedule.scheduled_for)}</td><td>{Number(schedule.target_count || 0).toLocaleString()}</td><td>{schedule.status}</td></tr>)}
-            {!schedules.length ? <tr><td colSpan={4} className="muted">No active schedules.</td></tr> : null}
+            {!schedules.length ? <tr><td colSpan={4} className="muted">No saved schedules yet.</td></tr> : null}
           </tbody></table></div>
         </div>
       </div>
 
       {result ? <div className="card" style={{ padding: 18 }}>
-        <h3>Last Run Result</h3>
+        <h3>Last Run</h3>
         <p className="muted">Started {localTime(result.startedAt)} · Finished {localTime(result.finishedAt)}</p>
         <div className="table-wrap"><table><thead><tr><th>Step</th><th>Status</th><th>Result</th></tr></thead><tbody>
           {(result.steps || []).map((step) => <tr key={step.key}><td><strong>{step.label}</strong></td><td>{step.status}</td><td>{step.error || valuePreview(step.metrics)}</td></tr>)}
@@ -272,10 +272,10 @@ export default function OperationsClient({ workspace }: { workspace: Workspace }
       </div> : null}
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Recent Autopilot Logs</h3>
+        <h3>Recent Worker Logs</h3>
         <div className="table-wrap"><table><thead><tr><th>When</th><th>Type</th><th>Message</th></tr></thead><tbody>
           {logs.map((log) => <tr key={log.id}><td>{localTime(log.created_at)}</td><td>{log.type}</td><td>{log.message}</td></tr>)}
-          {!logs.length ? <tr><td colSpan={3} className="muted">No worker logs yet.</td></tr> : null}
+          {!logs.length ? <tr><td colSpan={3} className="muted">No logs yet.</td></tr> : null}
         </tbody></table></div>
       </div>
     </div>

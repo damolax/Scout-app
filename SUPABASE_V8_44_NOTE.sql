@@ -1,0 +1,5 @@
+-- Scout v8.44 has no new required Supabase schema.
+-- If schedules, notifications, signatures, or follow-ups still fail,
+-- run the v8.42 safe repair SQL first because that creates/repairs:
+-- app_notifications, message_schedules columns, workspaces signature columns,
+-- and get_due_followups using sent_messages.

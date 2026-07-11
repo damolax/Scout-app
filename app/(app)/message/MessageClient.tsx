@@ -857,7 +857,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     const guard = analyzeSpamRisk(guardSubject, guardBody);
     if (guard.level === "High" && !allowHighRiskSend && !dryRun)
       throw new Error(
-        `Spam Guard blocked this send because the template risk is HIGH (${guard.score}/100). Fix the template or tick the override checkbox.`,
+        `Safety Check blocked this send because the template risk is HIGH (${guard.score}/100). Fix the template or tick the override checkbox.`,
       );
 
     const selectedBusinessIds = contactsOverride?.length
@@ -1009,7 +1009,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       const guard = analyzeSpamRisk(guardSubject, guardBody);
       if (guard.level === "High" && !allowHighRiskSend && !dryRun) {
         throw new Error(
-          `Spam Guard blocked this send because the template risk is HIGH (${guard.score}/100). Fix the template or tick the override checkbox.`,
+          `Safety Check blocked this send because the template risk is HIGH (${guard.score}/100). Fix the template or tick the override checkbox.`,
         );
       }
       const totalRequested = Math.max(
@@ -1646,15 +1646,15 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           <div className="num">{readyTotal.toLocaleString()}</div>
         </div>
         <div className="card kpi">
-          <div className="title">Connected Senders</div>
+          <div className="title">Senders</div>
           <div className="num">{connectedAccounts.length}</div>
         </div>
         <div className="card kpi">
-          <div className="title">Templates in Category</div>
+          <div className="title">Templates</div>
           <div className="num">{categoryTemplates.length}</div>
         </div>
         <div className="card kpi">
-          <div className="title">Due Follow-ups</div>
+          <div className="title">Due Follow Up</div>
           <div className="num">{dueFollowUps.length}</div>
         </div>
       </div>
@@ -1682,10 +1682,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       ) : null}
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Send or Schedule Messages</h3>
+        <h3>Choose who gets the email</h3>
         <p className="muted" style={{ marginTop: -4 }}>
-          Choose the audience first, then choose the matching template category.
-          Example: Audience = Airtable, Template category = Airtable.
+          Choose the audience and matching template category.
         </p>
         <div className="grid grid-4">
           <div>
@@ -1719,7 +1718,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             </select>
           </div>
           <div>
-            <label className="label">Number to send</label>
+            <label className="label">How many</label>
             <input
               className="input"
               type="number"
@@ -1730,7 +1729,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             />
           </div>
           <div>
-            <label className="label">Delay per email/ms</label>
+            <label className="label">Delay between emails (ms)</label>
             <input
               className="input"
               type="number"
@@ -1744,14 +1743,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="grid grid-2" style={{ marginTop: 14 }}>
           <div className="card" style={{ padding: 14 }}>
-            <h3>Template Choice</h3>
+            <h3>Template</h3>
             <label className="checkbox-row">
               <input
                 type="radio"
                 checked={templateMode === "specific"}
                 onChange={() => setTemplateMode("specific")}
               />{" "}
-              Use selected template
+              Use one template
             </label>
             <label className="checkbox-row">
               <input
@@ -1759,7 +1758,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 checked={templateMode === "rotate"}
                 onChange={() => setTemplateMode("rotate")}
               />{" "}
-              Rotate all templates in selected category
+              Rotate templates in this category
             </label>
             <select
               className="select"
@@ -1782,14 +1781,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           </div>
 
           <div className="card" style={{ padding: 14 }}>
-            <h3>Sender Choice</h3>
+            <h3>Sender</h3>
             <label className="checkbox-row">
               <input
                 type="radio"
                 checked={senderMode === "specific"}
                 onChange={() => setSenderMode("specific")}
               />{" "}
-              Use one selected Gmail
+              Use one Gmail
             </label>
             <label className="checkbox-row">
               <input
@@ -1797,7 +1796,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 checked={senderMode === "rotate"}
                 onChange={() => setSenderMode("rotate")}
               />{" "}
-              Rotate selected Gmail senders
+              Rotate Gmail senders
             </label>
             {senderMode === "specific" ? (
               <select
@@ -1833,7 +1832,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                     </label>
                     <div className="grid grid-2" style={{ marginTop: 8 }}>
                       <div>
-                        <label className="label">Max this run override</label>
+                        <label className="label">Max from this sender</label>
                         <input
                           className="input"
                           type="number"
@@ -1849,7 +1848,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                         />
                       </div>
                       <div>
-                        <label className="label">Daily usage</label>
+                        <label className="label">Used today</label>
                         <div className="notice" style={{ color: "#86efac" }}>
                           {senderCountLine(a)} · run default{" "}
                           {Number(a.default_run_limit || 0).toLocaleString()}
@@ -1863,7 +1862,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             {senderMode === "specific" && specificSenderId ? (
               <div style={{ marginTop: 10 }}>
                 <label className="label">
-                  Max this selected sender should send in this run
+                  Max from this sender
                 </label>
                 <input
                   className="input"
@@ -1887,9 +1886,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               </div>
             ) : null}
             <p className="muted" style={{ marginTop: 10 }}>
-              Total count controls the whole run. Per-sender caps control how
-              much each selected Gmail contributes. Blank means auto-fill the
-              remaining rotation.
+              Blank sender max uses the default limit in Settings.
             </p>
           </div>
         </div>
@@ -1917,7 +1914,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             disabled={busy || loading}
             onClick={() => sendBatch(undefined, { messageKind: "initial" })}
           >
-            Start Initial Batch
+            Send Now
           </button>
           <button
             className="btn secondary"
@@ -1933,7 +1930,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             disabled={busy || loading}
             onClick={repairReadyContacts}
           >
-            Repair Ready
+            Fix Lead Status
           </button>
           <button
             className="btn secondary"
@@ -1941,7 +1938,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             disabled={busy || loading}
             onClick={syncBlockedAndBounced}
           >
-            Sync Bounces/Blocked
+            Check Bad Inboxes
           </button>
           <button
             className="btn secondary"
@@ -1951,7 +1948,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               downloadCsv("scout-message-last-results.csv", lastResults)
             }
           >
-            Download Results
+            Download Result
           </button>
         </div>
       </div>
@@ -1970,7 +1967,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           <div className="num">{summary.sent}</div>
         </div>
         <div className="card kpi">
-          <div className="title">Failed / Skipped</div>
+          <div className="title">Failed</div>
           <div className="num">{summary.failed + summary.skipped}</div>
         </div>
       </div>
@@ -1981,14 +1978,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             className="actions"
             style={{ justifyContent: "space-between", marginBottom: 12 }}
           >
-            <h3 style={{ margin: 0 }}>Ready Contacts</h3>
+            <h3 style={{ margin: 0 }}>Ready Leads</h3>
             <div className="actions">
               <input
                 className="input"
                 style={{ width: 260 }}
                 value={readySearch}
                 onChange={(e) => setReadySearch(e.target.value)}
-                placeholder="Search contacts"
+                placeholder="Search leads"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") loadReadyContacts();
                 }}
@@ -2012,7 +2009,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 }
                 onChange={(e) => toggleAllContacts(e.target.checked)}
               />{" "}
-              Select preview page
+              Select shown leads
             </label>
             <span className="badge">
               Showing {readyContacts.length.toLocaleString()} of{" "}
@@ -2070,7 +2067,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         <div className="card" style={{ padding: 18 }}>
           <h3>Preview</h3>
           <div className="notice">
-            Shortcodes:{" "}
+            Available fields:{" "}
             {SHORTCODES.map((s) => (
               <code key={s}>{s}</code>
             ))}
@@ -2092,7 +2089,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 {previewBody}
               </div>
               <div className="notice" style={{ marginTop: 12 }}>
-                <strong>Spam Guard:</strong> {spamReport.level} risk · score{" "}
+                <strong>Safety Check:</strong> {spamReport.level} risk · score{" "}
                 {spamReport.score}/100.{" "}
                 {spamReport.level === "High"
                   ? "Scout will block this send unless you override."
@@ -2153,12 +2150,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <h3>Follow-ups</h3>
+          <h3>Follow Up</h3>
           <p className="muted">
-            Due after 72 hours when the inbox exists, there is no real human
-            reply, and there is no no-inbox/bounce record. Follow-up sends now
-            use follow-up templates only and re-check the segment before
-            sending.
+            Send a follow-up to people who have not sent a real reply.
           </p>
           <div className="grid grid-3">
             <div>
@@ -2183,7 +2177,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               </select>
             </div>
             <div>
-              <label className="label">Schedule due follow-ups for</label>
+              <label className="label">Follow-up time</label>
               <input
                 className="input"
                 type="datetime-local"
@@ -2198,7 +2192,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 disabled={busy || !dueFollowUps.length}
                 onClick={scheduleFollowUpsForDue}
               >
-                Schedule Segment
+                Schedule Follow-ups
               </button>
             </div>
           </div>
@@ -2209,21 +2203,19 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               disabled={busy || !dueFollowUps.length}
               onClick={sendDueFollowUpsNow}
             >
-              Send Segment Now
+              Send Follow-ups Now
             </button>
             <button
               className="btn secondary"
               type="button"
               onClick={loadDueFollowUps}
             >
-              Refresh Segment
+              Refresh
             </button>
           </div>
           <div className="notice" style={{ marginTop: 12 }}>
-            Selected segment:{" "}
-            <strong>{followUpSegment.replace(/_/g, " ")}</strong>. Auto replies
-            are tracked separately; if that business later sends a human reply,
-            Scout moves it to real reply/responded.
+            Showing:{" "}
+            <strong>{followUpSegment.replace(/_/g, " ")}</strong>. Auto replies are kept separate from human replies.
           </div>
           <div className="table-wrap" style={{ marginTop: 12 }}>
             <table>
@@ -2264,8 +2256,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         </div>
 
         <div className="card" style={{ padding: 18 }}>
-          <h3>Schedule a Message</h3>
-          <p className="muted">Choose a time and count. Saved schedules run through automation/cron even if you leave the app.</p>
+          <h3>Schedule Email</h3>
+          <p className="muted">Pick a time and count. It can run later even if you leave.</p>
           <div className="grid grid-3">
             <div>
               <label className="label">Type</label>
@@ -2276,7 +2268,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                   setScheduleType(e.target.value as "initial" | "follow_up")
                 }
               >
-                <option value="initial">Initial batch</option>
+                <option value="initial">First email</option>
                 <option value="follow_up">Follow-up</option>
               </select>
             </div>
@@ -2316,7 +2308,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               disabled={busy}
               onClick={sendDueSchedulesNow}
             >
-Run Due Schedules Now
+Run Due Sends Now
             </button>
           </div>
           <div className="table-wrap" style={{ marginTop: 12 }}>
@@ -2345,7 +2337,7 @@ Run Due Schedules Now
                 {!schedules.length ? (
                   <tr>
                     <td colSpan={6} className="muted">
-                      No schedules yet.
+                      No saved schedules yet.
                     </td>
                   </tr>
                 ) : null}

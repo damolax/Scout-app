@@ -3,10 +3,10 @@ import { getCurrentWorkspace } from '@/lib/workspace';
 import SourceScoutClient from './SourceScoutClient';
 
 const quickLinks = [
-  { href: '/upload', title: 'Upload lists', desc: 'Import CSV leads and assign audience categories.' },
-  { href: '/daily-scouting', title: 'Daily scouting', desc: 'Team members submit today\'s scouting work.' },
-  { href: '/auto-scout', title: 'Auto Scout queue', desc: 'Find missing emails from queued websites.' },
-  { href: '/verify', title: 'Verify emails', desc: 'Clean and review email candidates.' }
+  { href: '/upload', title: 'Upload CSV', desc: 'Import a list you already have.' },
+  { href: '/auto-scout', title: 'Find missing emails', desc: 'Check queued websites for real emails.' },
+  { href: '/verify', title: 'Clean emails', desc: 'Mark bad emails or send them back to Auto Scout.' },
+  { href: '/businesses', title: 'View leads', desc: 'See ready, contacted, replied and bad-inbox leads.' }
 ];
 
 export default async function SourceScoutPage() {
@@ -15,8 +15,8 @@ export default async function SourceScoutPage() {
   return (
     <div className="stack">
       <div className="page-title">
-        <h2>Scout & Import</h2>
-        <p>Dorking, directory scouting, uploads, verification, and Auto Scout handoff in one place.</p>
+        <h2>Find Leads</h2>
+        <p>Use the extension, CSV upload, or Auto Scout to find real business websites and contact emails.</p>
       </div>
       <div className="quick-links">
         {quickLinks.map((link) => (

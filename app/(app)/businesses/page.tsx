@@ -9,11 +9,11 @@ export default async function BusinessesPage() {
     <div className="stack">
       <div className="page-title">
         <h2>Leads</h2>
-        <p>CRM queue, duplicate-safe businesses, category filters, details, Auto Scout history, sent messages, and replies.</p>
+        <p>All businesses you found, contacted, cleaned, or need to research.</p>
       </div>
       <div className="quick-links">
-        <Link href="/data-safety" className="quick-link-card"><strong>Data safety</strong><span>Review duplicates, repeated emails, and false positives.</span></Link>
-        <Link href="/source-scout" className="quick-link-card"><strong>Add more leads</strong><span>Scout, import, or queue new businesses.</span></Link>
+        <Link href="/source-scout" className="quick-link-card"><strong>Find more</strong><span>Add new leads.</span></Link>
+        <Link href="/verify" className="quick-link-card"><strong>Clean emails</strong><span>Fix bad or missing emails.</span></Link>
       </div>
       <BusinessQueueClient workspace={workspace} />
     </div>

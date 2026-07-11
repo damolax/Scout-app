@@ -2,24 +2,22 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, UploadCloud, Building2, Mail, Settings, Rocket, Inbox } from 'lucide-react';
+import { BarChart3, Search, Mail, Inbox, Settings } from 'lucide-react';
 
 const items = [
-  { href: '/dashboard', label: 'Dashboard', icon: BarChart3 },
-  { href: '/source-scout', label: 'Scout & Import', icon: UploadCloud },
-  { href: '/businesses', label: 'Leads', icon: Building2 },
-  { href: '/message', label: 'Outreach', icon: Mail },
-  { href: '/replies', label: 'Inbox', icon: Inbox },
-  { href: '/operations', label: 'Automation', icon: Rocket },
+  { href: '/dashboard', label: 'Home', icon: BarChart3 },
+  { href: '/source-scout', label: 'Find Leads', icon: Search },
+  { href: '/message', label: 'Send Emails', icon: Mail },
+  { href: '/replies', label: 'Replies', icon: Inbox },
   { href: '/settings', label: 'Settings', icon: Settings }
 ];
 
 const groupedRoutes: Record<string, string[]> = {
-  '/source-scout': ['/source-scout', '/upload', '/auto-scout', '/email-scout', '/verify'],
-  '/businesses': ['/businesses', '/data-safety'],
-  '/message': ['/message', '/templates', '/deliverability'],
-  '/replies': ['/replies', '/no-inbox'],
-  '/operations': ['/operations']
+  '/dashboard': ['/dashboard'],
+  '/source-scout': ['/source-scout', '/upload', '/auto-scout', '/email-scout', '/verify', '/businesses', '/data-safety', '/no-inbox'],
+  '/message': ['/message', '/templates', '/deliverability', '/operations'],
+  '/replies': ['/replies'],
+  '/settings': ['/settings']
 };
 
 function isActive(pathname: string, href: string) {
