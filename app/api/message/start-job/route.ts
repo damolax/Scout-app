@@ -88,17 +88,24 @@ export async function POST(request: NextRequest) {
     });
 
     const shouldRunNow = body.runNow !== false && scheduleFor.getTime() <= Date.now() + 60_000;
+    let workerKick: any = null;
     if (shouldRunNow) {
       const origin = request.nextUrl.origin;
-      const secret = process.env.SCHEDULE_WORKER_SECRET || process.env.CRON_SECRET || '';
-      fetch(`${origin}/api/message/run-schedules`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...(secret ? { 'x-schedule-worker-secret': secret } : {}) },
-        body: JSON.stringify({ limit: 1, scheduleId: data.id, token: secret })
-      }).catch(() => null);
+      const secret = process.env.SCHEDULE_WORKER_SECRET || process.env.CRON_SECRET || process.env.RUN_ALL_WORKER_SECRET || '';
+      const firstRunTargetLimit = Math.max(1, Math.min(25, Number(body.firstRunTargetLimit || body.kickLimit || 10)));
+      try {
+        const workerResponse = await fetch(`${origin}/api/message/run-schedules`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(secret ? { 'x-schedule-worker-secret': secret } : {}) },
+          body: JSON.stringify({ limit: 1, scheduleId: data.id, targetLimit: firstRunTargetLimit, token: secret })
+        });
+        workerKick = await workerResponse.json().catch(() => ({ success: workerResponse.ok }));
+      } catch (kickError) {
+        workerKick = { success: false, error: kickError instanceof Error ? kickError.message : String(kickError) };
+      }
     }
 
-    return NextResponse.json({ success: true, schedule: data, startedWorker: shouldRunNow });
+    return NextResponse.json({ success: true, schedule: data, startedWorker: shouldRunNow, workerKick });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 500 });
   }

@@ -631,7 +631,7 @@ async function runOneSchedule(
             String(account.email),
             toEmail,
             subject,
-            body,
+            finalBody,
             account,
           );
           gmailMessageId = result.id || "";

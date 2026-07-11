@@ -91,10 +91,6 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
       if (!response.ok || json?.success === false) throw new Error(json?.error || `Activity check failed with HTTP ${response.status}`);
       setPayload(json);
       setError('');
-      const nextSchedules = Array.isArray(json?.schedules) ? json.schedules : [];
-      const nextResearch = Array.isArray(json?.researchJobs) ? json.researchJobs : [];
-      const nextHasWork = nextSchedules.some((row: LiveSchedule) => ['running', 'due'].includes(String(row.status || ''))) || nextResearch.some((row: LiveResearch) => row.status === 'running');
-      if (nextHasWork) setOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -134,14 +130,14 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
     <div className={`live-activity ${open ? 'open' : ''}`}>
       <button className="live-activity-tab" type="button" onClick={() => setOpen((value) => !value)}>
         {loading || hasWork ? <Loader2 size={15} className="spin" /> : <span className="live-dot" />}
-        <span>{hasWork ? 'Working now' : 'Live work'}</span>
+        <span>{open ? 'Hide work' : (hasWork ? 'Working now' : 'Live work')}</span>
       </button>
       {open ? (
         <div className="live-activity-panel">
           <div className="live-activity-head">
             <div>
               <strong>Live work</strong>
-              <p>Small status window for sending and Auto Scout.</p>
+              <p>Sending and Auto Scout progress.</p>
             </div>
             <button className="icon-btn" type="button" onClick={load} disabled={loading} title="Refresh">
               <RefreshCw size={15} />
