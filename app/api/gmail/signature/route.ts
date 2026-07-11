@@ -91,6 +91,7 @@ export async function POST(request: NextRequest) {
         signature_enabled,
         signature_html: safeHtml,
         signature_text: safeText,
+        signature_logo_url,
         sync_signature_to_gmail: syncToGmail,
         gmail_signature_sync_error: null,
         updated_at: new Date().toISOString(),

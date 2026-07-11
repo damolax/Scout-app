@@ -48,6 +48,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   const [defaultAudienceCategoryId, setDefaultAudienceCategoryId] = useState(workspace.default_audience_category_id || '');
   const [defaultAudienceCategoryName, setDefaultAudienceCategoryName] = useState(workspace.default_audience_category_name || '');
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
+  const [sentLast24ByEmail, setSentLast24ByEmail] = useState<Record<string, number>>({});
   const [seedTests, setSeedTests] = useState<SeedInboxTest[]>([]);
   const [limitDrafts, setLimitDrafts] = useState<Record<string, { daily_limit: string; default_run_limit: string; account_type: string; seed_inbox_enabled: boolean; seed_test_address: string }>>({});
   const [identityDraft, setIdentityDraft] = useState<IdentityDraft>({ signature_enabled: true, signature_text: '', signature_html: '', signature_logo_url: '' });
@@ -69,6 +70,31 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     if (loadError) throw loadError;
     const rows = (data || []) as GmailAccount[];
     setAccounts(rows);
+
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const emails = rows.map((account) => normalizeEmail(account.email)).filter(Boolean);
+      if (emails.length) {
+        const { data: sentRows, error: sentError } = await supabase
+          .from('sent_messages')
+          .select('from_email, gmail_account_id, sent_at')
+          .eq('workspace_id', workspace.id)
+          .gte('sent_at', since)
+          .in('from_email', emails);
+        if (!sentError) {
+          const counts: Record<string, number> = {};
+          for (const row of sentRows || []) {
+            const key = normalizeEmail((row as any).from_email);
+            if (key) counts[key] = (counts[key] || 0) + 1;
+          }
+          setSentLast24ByEmail(counts);
+        }
+      } else {
+        setSentLast24ByEmail({});
+      }
+    } catch {
+      setSentLast24ByEmail({});
+    }
     if (!identityLoadedRef.current && rows.length) {
       const source = rows.find((account) => account.signature_text || account.signature_html || (account.raw as any)?.email_identity?.signature_logo_url) || rows[0];
       const rawIdentity = ((source.raw as any)?.email_identity || {}) as Record<string, any>;
@@ -483,15 +509,15 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           <button className="btn secondary" type="button" style={{ marginTop: 10 }} disabled={busy} onClick={addManualAccount}>Add / Update Sender</button>
         </div> : null}
 
-        <div className="table-wrap" style={{ marginTop: 14 }}><table><thead><tr><th>Email</th><th>Status</th><th>Limits</th><th>Seed receiver</th><th>Today / Risk</th><th>Actions</th></tr></thead><tbody>
+        <div className="table-wrap" style={{ marginTop: 14 }}><table><thead><tr><th>Email</th><th>Status</th><th>Limits</th><th>Seed receiver</th><th>Used today</th><th>Actions</th></tr></thead><tbody>
           {accounts.map((account) => {
             const draft = limitDrafts[account.id] || { daily_limit: String(account.daily_limit || 150), default_run_limit: String(account.default_run_limit || 100), account_type: String(account.account_type || 'gmail'), seed_inbox_enabled: Boolean(account.seed_inbox_enabled), seed_test_address: String(account.seed_test_address || account.email || '') };
             return <tr key={account.id}>
               <td><strong>{account.email}</strong><br /><span className="muted">{account.last_error || (account.paused_until ? `Paused until ${new Date(account.paused_until).toLocaleString()}` : 'Ready')}</span></td>
-              <td><span className={`status ${isPaused(account) ? 'paused' : account.status}`}>{isPaused(account) ? 'paused' : account.status}</span><br /><select className="select" value={draft.account_type} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, account_type: e.target.value } }))}><option value="gmail">Gmail</option><option value="workspace">Workspace</option><option value="custom">Custom</option></select></td>
+              <td><span className={`status ${isPaused(account) ? 'paused' : account.status}`}>{isPaused(account) ? 'paused' : account.status}</span><br /><select className="select" value={draft.account_type} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, account_type: e.target.value } }))}><option value="gmail">Gmail</option><option value="workspace">Workspace</option><option value="other">Other</option></select></td>
               <td><div className="grid grid-2"><div><label className="label">Daily safe limit</label><input className="input" type="number" min={1} value={draft.daily_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, daily_limit: e.target.value } }))} /></div><div><label className="label">Default max/run</label><input className="input" type="number" min={1} value={draft.default_run_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, default_run_limit: e.target.value } }))} /></div></div></td>
               <td><label className="checkbox-row"><input type="checkbox" checked={draft.seed_inbox_enabled} onChange={(e) => toggleSeedInbox(account, e.target.checked)} /> Use as seed receiver</label><input className="input" value={draft.seed_test_address} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_test_address: e.target.value } }))} placeholder="seed inbox email" /></td>
-              <td>{Number(account.sent_today || 0).toLocaleString()} / {Number(account.daily_limit || 0).toLocaleString()}<br /><span className="badge">{account.spam_risk_status || account.last_seed_result || 'unknown'}</span><br /><span className="muted">Signature: {account.signature_enabled === false ? 'off' : account.signature_text || account.signature_html ? 'on' : 'empty'}</span></td>
+              <td><strong>{Number(sentLast24ByEmail[normalizeEmail(account.email)] ?? account.sent_today ?? 0).toLocaleString()}</strong><br /><span className="muted">sent in last 24h</span><br /><span className="muted">Signature: {account.signature_enabled === false ? 'off' : account.signature_text || account.signature_html || account.signature_logo_url ? 'on' : 'empty'}</span></td>
               <td><button className="btn secondary" type="button" disabled={busy} onClick={() => saveSenderSettings(account)}>Save sender settings</button> <button className="btn secondary" type="button" disabled={busy || !(account.access_token || account.refresh_token)} onClick={() => verifySenderProfile(account)}>Verify</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => pauseOrResume(account)}>{isPaused(account) || account.status !== 'connected' ? 'Resume' : 'Pause'}</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => removeAccount(account)}>Remove</button></td>
             </tr>;
           })}
@@ -512,8 +538,12 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         <textarea className="textarea" value={identityDraft.signature_text} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_text: event.target.value }))} placeholder={"Best regards,\nOlalekan\nWebsite: https://example.com"} style={{ minHeight: 110 }} />
         <label className="label" style={{ marginTop: 12 }}>HTML signature, optional</label>
         <textarea className="textarea" value={identityDraft.signature_html} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_html: event.target.value }))} placeholder={'<strong>Olalekan</strong><br />Founder, Elevate Scout<br /><a href="https://example.com">example.com</a>'} style={{ minHeight: 110 }} />
+        <label className="label" style={{ marginTop: 12 }}>Logo URL after signature</label>
+        <input className="input" value={identityDraft.signature_logo_url} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_logo_url: event.target.value }))} placeholder="https://your-site.com/logo.png" />
+        <p className="muted" style={{ marginTop: 6 }}>Recommended: transparent PNG, around 320×120 px. Scout displays it about 160 px wide.</p>
+        {identityDraft.signature_logo_url ? <div style={{ marginTop: 10 }}><img src={identityDraft.signature_logo_url} alt="Signature logo preview" style={{ maxWidth: 160, height: 'auto', borderRadius: 8 }} /></div> : null}
         <div className="notice" style={{ marginTop: 10 }}>
-          Scout controls email signatures. Actual Gmail/Google profile pictures must be changed directly inside each Google account.
+          Scout can save this signature and logo inside Scout. Gmail signature sync also uses this logo URL, but the image must be publicly reachable by Gmail.
         </div>
         <div className="actions" style={{ marginTop: 12 }}>
           <button className="btn" type="button" disabled={busy || !accounts.length} onClick={() => applyEmailIdentity(false)}>Save to Scout for all senders</button>

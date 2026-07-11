@@ -1,10 +1,10 @@
 {
-  "name": "scout-app-v8-44-simple-ui",
-  "version": "8.44.0",
+  "name": "scout-app-v8-45-settings-schedule-signature-fix",
+  "version": "8.45.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm run typecheck && next build",
+    "build": "tsc --noEmit && next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v8.44: simplifies navigation and page language while keeping the full outreach, Auto Scout, schedule, reply, signature, and automation feature set."
+  "description": "Scout App v8.45: fixes schedule run_kind, settings sender usage display, and signature logo saving/sync."
 }
