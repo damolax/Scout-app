@@ -1,10 +1,10 @@
-# Scout App v9.5
+# Scout App v10.4
 
-No-cron user flow with schedule reminders.
+Simple and stable Scout build.
 
-- Send Now: direct from the open page.
-- Schedule: starts while Scout is open or by clicking Run Due Sends Now.
-- Reminder: browser/PWA notification while open, plus phone/calendar reminder download.
-- Auto Scout: runs from the app when you start it.
-
-No cron-job.org setup is required in this version.
+Main changes:
+- simpler Send Emails page,
+- no schedule follow-up button,
+- due follow-ups are sent manually when you are on the app,
+- extra lists hidden by default,
+- How to Use page added.

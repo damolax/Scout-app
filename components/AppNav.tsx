@@ -2,14 +2,15 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Search, Mail, Inbox, Settings } from 'lucide-react';
+import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle } from 'lucide-react';
 
 const items = [
   { href: '/dashboard', label: 'Home', icon: BarChart3 },
   { href: '/source-scout', label: 'Find Leads', icon: Search },
   { href: '/message', label: 'Send Emails', icon: Mail },
   { href: '/replies', label: 'Replies', icon: Inbox },
-  { href: '/settings', label: 'Settings', icon: Settings }
+  { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/help', label: 'How to Use', icon: HelpCircle }
 ];
 
 const groupedRoutes: Record<string, string[]> = {
@@ -17,7 +18,8 @@ const groupedRoutes: Record<string, string[]> = {
   '/source-scout': ['/source-scout', '/upload', '/auto-scout', '/email-scout', '/verify', '/businesses', '/data-safety', '/no-inbox'],
   '/message': ['/message', '/templates', '/deliverability', '/operations'],
   '/replies': ['/replies'],
-  '/settings': ['/settings']
+  '/settings': ['/settings'],
+  '/help': ['/help']
 };
 
 function isActive(pathname: string, href: string) {

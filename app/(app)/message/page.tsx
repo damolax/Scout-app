@@ -9,12 +9,11 @@ export default async function MessagePage() {
     <div className="stack">
       <div className="page-title">
         <h2>Send Emails</h2>
-        <p>Pick an audience, choose a template, then send now or schedule for later.</p>
+        <p>Send first emails, send due follow-ups, or save a send for later. Keep Scout open when it is time to send.</p>
       </div>
       <div className="quick-links">
-        <Link href="/templates" className="quick-link-card"><strong>Templates</strong><span>Write first emails, follow-ups and replies.</span></Link>
-        <Link href="/operations" className="quick-link-card"><strong>Worker</strong><span>Run queued sends, follow-ups and Auto Scout.</span></Link>
-        <Link href="/deliverability" className="quick-link-card"><strong>Sender safety</strong><span>Check limits, bounces and account health.</span></Link>
+        <Link href="/templates" className="quick-link-card"><strong>Templates</strong><span>Write first emails and follow-up emails.</span></Link>
+        <Link href="/help" className="quick-link-card"><strong>How to use</strong><span>Simple guide for every page and button.</span></Link>
       </div>
       <MessageClient workspace={workspace} />
     </div>

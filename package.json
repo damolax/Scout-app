@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-2-signature-logo-dedup",
-  "version": "10.2.0",
+  "name": "scout-app-v10-4-simpler-followups-help",
+  "version": "10.4.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.2: fixes duplicate signature logo and keeps one logo in outgoing email signatures."
+  "description": "Scout App v10.4: simplifies Send Emails, removes follow-up scheduling from the UI, and adds a simple How to Use guide."
 }

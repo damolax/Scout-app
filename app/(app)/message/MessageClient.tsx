@@ -403,9 +403,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     "all_unanswered" | "no_reply" | "auto_reply"
   >("all_unanswered");
 
-  const [status, setStatus] = useState(
-    "Select category, template option, sender option, total count, and optional per-sender caps.",
-  );
+  const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [stopBusyId, setStopBusyId] = useState("");
@@ -414,6 +412,11 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const scheduleRunnerRef = useRef(false);
   const [scheduleReminderEnabled, setScheduleReminderEnabled] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<string>("unsupported");
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
+  const [showReadyLeads, setShowReadyLeads] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [showSavedSends, setShowSavedSends] = useState(false);
+  const [showDueList, setShowDueList] = useState(false);
   const [lastSavedSchedule, setLastSavedSchedule] = useState<MessageSchedule | null>(null);
   const dueReminderRef = useRef<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -813,7 +816,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (permission === "granted") {
       setScheduleReminderEnabled(true);
       window.localStorage.setItem(`scout_schedule_notifier_${workspace.id}`, "1");
-      setStatus("Schedule notifier is on while Scout is open. For phone alerts while Scout is closed, add the phone/calendar reminder.");
+      setStatus("Notifier is on while Scout is open. For phone alerts when Scout is closed, add a phone reminder.");
     } else {
       setScheduleReminderEnabled(false);
       window.localStorage.setItem(`scout_schedule_notifier_${workspace.id}`, "0");
@@ -825,7 +828,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (typeof window === "undefined" || !("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
     const notification = new Notification("Scout schedule is due", {
-      body: `${scheduleLabel(schedule)} is ready. Open Scout and click Run Due Sends Now, or keep this page open to auto-run it.`,
+      body: `${scheduleLabel(schedule)} is ready. Open Scout and click Run Due Sends Now.`,
       icon: "/icon-192.png",
       tag: `scout-schedule-${schedule.id}`,
     });
@@ -1320,7 +1323,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     });
     setSelectedContacts({});
     setStatus(
-      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). Keep Scout open; the app-wide runner will continue it. Job: ${scheduleId}`,
+      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). Keep Scout open while it sends. Job: ${scheduleId}`,
     );
     await Promise.all([
       loadSchedules(),
@@ -1842,7 +1845,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         .single();
       if (insertError) throw insertError;
       if (insertedSchedule) setLastSavedSchedule(insertedSchedule as MessageSchedule);
-      setStatus("Schedule saved. Keep Scout open; the app-wide runner will start it when the time arrives. Add a phone reminder if you want a top-of-phone alert.");
+      setStatus("Schedule saved. Saved. Keep Scout open when it is time to send, or add a phone reminder so your phone reminds you.");
       await loadSchedules();
     } catch (err) {
       setError(formatError(err));
@@ -1903,7 +1906,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       if (insertError) throw insertError;
       if (insertedSchedule) setLastSavedSchedule(insertedSchedule as MessageSchedule);
       setStatus(
-        `Scheduled ${dueFollowUps.length.toLocaleString()} due follow-up(s). Add a phone reminder if you want a top-of-phone alert.`,
+        `Saved due follow-up schedule.`,
       );
       await loadSchedules();
     } catch (err) {
@@ -1956,7 +1959,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (!options?.silent) {
       setBusy(true);
       setError("");
-      setStatus("Running due schedules from this open app...");
+      setStatus("Checking saved sends that are due now...");
     }
     try {
       const response = await fetch("/api/message/run-schedules", {
@@ -1991,7 +1994,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       if (Number(json.ran || 0) > 0 || !options?.silent) {
         setStatus(
           Number(json.ran || 0) > 0
-            ? `Open-app schedule runner processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. It will continue while Scout stays open.`
+            ? `Due send processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. Keep Scout open while it sends.`
             : "No due schedules right now.",
         );
       }
@@ -2005,7 +2008,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       return json;
     } catch (err) {
       if (!options?.silent) setError(formatError(err));
-      else setStatus(`Auto-run schedule check failed: ${formatError(err)}`);
+      else setStatus(`Due send check failed: ${formatError(err)}`);
       return { ran: 0, error: formatError(err) };
     } finally {
       scheduleRunnerRef.current = false;
@@ -2118,7 +2121,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   return (
     <div className="stack">
       {error ? <div className="error">{error}</div> : null}
-      <div className="success">{status}</div>
+      {status ? <div className="success">{status}</div> : null}
       {busy || loading ? (
         <div className="progress-track">
           <div
@@ -2128,30 +2131,17 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         </div>
       ) : null}
 
-      <div className="grid grid-4">
-        <div className="card kpi">
-          <div className="title">Ready</div>
-          <div className="num">{readyTotal.toLocaleString()}</div>
-        </div>
-        <div className="card kpi">
-          <div className="title">Senders</div>
-          <div className="num">{connectedAccounts.length}</div>
-        </div>
-        <div className="card kpi">
-          <div className="title">Templates</div>
-          <div className="num">{categoryTemplates.length}</div>
-        </div>
-        <div className="card kpi">
-          <div className="title">Due Follow Up</div>
-          <div className="num">{dueFollowUps.length}</div>
-        </div>
+      <div className="notice">
+        Ready to send: <strong>{readyTotal.toLocaleString()}</strong> · Connected senders: <strong>{connectedAccounts.length}</strong> · Due follow-ups: <strong>{dueFollowUps.length.toLocaleString()}</strong>
       </div>
 
       {activeSchedules.length ? (
         <div className="card" style={{ padding: 18 }}>
-          <h3>Active Sending Jobs</h3>
-          <p className="muted">These jobs are controlled from this app. No cron is required.</p>
-          <div className="table-wrap">
+          <div className="actions" style={{ justifyContent: "space-between" }}>
+            <h3 style={{ margin: 0 }}>Saved sends waiting or running</h3>
+            <button className="btn secondary mini" type="button" onClick={() => setShowSavedSends((v) => !v)}>{showSavedSends ? "Hide" : "Show"}</button>
+          </div>
+          {showSavedSends ? <div className="table-wrap">
             <table>
               <thead><tr><th>Type</th><th>Status</th><th>Progress</th><th>Scheduled</th><th>Action</th></tr></thead>
               <tbody>
@@ -2166,7 +2156,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </div> : null}
         </div>
       ) : null}
 
@@ -2206,7 +2196,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               ))}
             </select>
             <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-              Only countries found in your uploaded contactable leads are shown. Scout scans country fields first, then location, city, region, market, address, and raw uploaded fields — but it shows countries only, not full addresses.
+              Countries only. These come from your uploaded leads.
             </p>
           </div>
           <div>
@@ -2399,22 +2389,6 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         </div>
 
         <div className="actions" style={{ marginTop: 14 }}>
-          <label className="checkbox-row" style={{ margin: 0 }}>
-            <input
-              type="checkbox"
-              checked={dryRun}
-              onChange={(e) => setDryRun(e.target.checked)}
-            />{" "}
-            Dry run
-          </label>
-          <label className="checkbox-row" style={{ margin: 0 }}>
-            <input
-              type="checkbox"
-              checked={allowHighRiskSend}
-              onChange={(e) => setAllowHighRiskSend(e.target.checked)}
-            />{" "}
-            Override high spam-risk block
-          </label>
           <button
             className="btn"
             type="button"
@@ -2434,58 +2408,44 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           <button
             className="btn secondary"
             type="button"
-            disabled={busy || loading}
-            onClick={repairReadyContacts}
+            onClick={() => setShowMoreOptions((v) => !v)}
           >
-            Fix Lead Status
-          </button>
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={busy || loading}
-            onClick={syncBlockedAndBounced}
-          >
-            Check Bad Inboxes
-          </button>
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={!lastResults.length}
-            onClick={() =>
-              downloadCsv("scout-message-last-results.csv", lastResults)
-            }
-          >
-            Download Result
+            {showMoreOptions ? "Hide extra buttons" : "More options"}
           </button>
         </div>
+        {showMoreOptions ? (
+          <div className="notice" style={{ marginTop: 12 }}>
+            <div className="actions">
+              <label className="checkbox-row" style={{ margin: 0 }}>
+                <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> Test only, do not send
+              </label>
+              <label className="checkbox-row" style={{ margin: 0 }}>
+                <input type="checkbox" checked={allowHighRiskSend} onChange={(e) => setAllowHighRiskSend(e.target.checked)} /> Allow risky template
+              </label>
+              <button className="btn secondary" type="button" disabled={busy || loading} onClick={repairReadyContacts}>Fix Lead Status</button>
+              <button className="btn secondary" type="button" disabled={busy || loading} onClick={syncBlockedAndBounced}>Check Bad Inboxes</button>
+              <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv("scout-message-last-results.csv", lastResults)}>Download Result</button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      <div className="grid grid-4">
-        <div className="card kpi">
-          <div className="title">Requested</div>
-          <div className="num">{summary.requested}</div>
-        </div>
-        <div className="card kpi">
-          <div className="title">Attempted</div>
-          <div className="num">{summary.attempted}</div>
-        </div>
-        <div className="card kpi">
-          <div className="title">Sent</div>
-          <div className="num">{summary.sent}</div>
-        </div>
-        <div className="card kpi">
-          <div className="title">Failed</div>
-          <div className="num">{summary.failed + summary.skipped}</div>
-        </div>
-      </div>
+      {summary.requested || summary.attempted || summary.sent || summary.failed || summary.skipped ? (
+        <div className="notice">Last send: requested <strong>{summary.requested}</strong>, attempted <strong>{summary.attempted}</strong>, sent <strong>{summary.sent}</strong>, failed/skipped <strong>{summary.failed + summary.skipped}</strong>.</div>
+      ) : null}
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
+          <div className="actions" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+            <h3 style={{ margin: 0 }}>Ready Leads</h3>
+            <button className="btn secondary mini" type="button" onClick={() => setShowReadyLeads((v) => !v)}>{showReadyLeads ? "Hide" : "Show"}</button>
+          </div>
+          {showReadyLeads ? <>
           <div
             className="actions"
             style={{ justifyContent: "space-between", marginBottom: 12 }}
           >
-            <h3 style={{ margin: 0 }}>Ready Leads</h3>
+            <span className="muted">Search or choose exact leads.</span>
             <div className="actions">
               <input
                 className="input"
@@ -2569,10 +2529,15 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               </tbody>
             </table>
           </div>
+          </> : <p className="muted">Hidden to keep this page simple.</p>}
         </div>
 
         <div className="card" style={{ padding: 18 }}>
-          <h3>Preview</h3>
+          <div className="actions" style={{ justifyContent: "space-between" }}>
+            <h3 style={{ margin: 0 }}>Preview</h3>
+            <button className="btn secondary mini" type="button" onClick={() => setShowPreview((v) => !v)}>{showPreview ? "Hide" : "Show"}</button>
+          </div>
+          {showPreview ? <>
           <div className="notice">
             Available fields:{" "}
             {SHORTCODES.map((s) => (
@@ -2652,6 +2617,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               </tbody>
             </table>
           </div>
+          </> : <p className="muted">Hidden. Click Show to check the email before sending.</p>}
         </div>
       </div>
 
@@ -2659,52 +2625,29 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         <div className="card" style={{ padding: 18 }}>
           <h3>Due Follow-ups — 72h no real response</h3>
           <p className="muted">
-            These are contacts Scout found from sent emails older than 72 hours with no real human reply. Auto-replies are kept separate.
+            These are people you emailed more than 72 hours ago who did not send a real human reply. Send them now when you are ready.
           </p>
           <div className="notice" style={{ marginBottom: 12 }}>
             Due now: <strong>{dueFollowUps.length.toLocaleString()}</strong> contact(s).
           </div>
-          <div className="grid grid-3">
-            <div>
-              <label className="label">Segment</label>
-              <select
-                className="select"
-                value={followUpSegment}
-                onChange={(e) =>
-                  setFollowUpSegment(
-                    e.target.value as
-                      | "all_unanswered"
-                      | "no_reply"
-                      | "auto_reply",
-                  )
-                }
-              >
-                <option value="all_unanswered">
-                  All unanswered with inbox
-                </option>
-                <option value="no_reply">No reply at all</option>
-                <option value="auto_reply">Auto-responder only</option>
-              </select>
-            </div>
-            <div>
-              <label className="label">Follow-up time</label>
-              <input
-                className="input"
-                type="datetime-local"
-                value={followUpFor}
-                onChange={(e) => setFollowUpFor(e.target.value)}
-              />
-            </div>
-            <div style={{ display: "flex", alignItems: "end" }}>
-              <button
-                className="btn secondary"
-                type="button"
-                disabled={busy || !dueFollowUps.length}
-                onClick={scheduleFollowUpsForDue}
-              >
-                Schedule Due Follow-ups
-              </button>
-            </div>
+          <div>
+            <label className="label">Show</label>
+            <select
+              className="select"
+              value={followUpSegment}
+              onChange={(e) =>
+                setFollowUpSegment(
+                  e.target.value as
+                    | "all_unanswered"
+                    | "no_reply"
+                    | "auto_reply",
+                )
+              }
+            >
+              <option value="all_unanswered">All due follow-ups</option>
+              <option value="no_reply">No reply at all</option>
+              <option value="auto_reply">Auto reply only</option>
+            </select>
           </div>
           <div className="actions" style={{ marginTop: 12 }}>
             <button
@@ -2723,55 +2666,47 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               Refresh
             </button>
           </div>
-          <div className="notice" style={{ marginTop: 12 }}>
-            Showing:{" "}
-            <strong>{followUpSegment.replace(/_/g, " ")}</strong>. Auto replies are kept separate from human replies.
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button className="btn secondary mini" type="button" onClick={() => setShowDueList((v) => !v)}>{showDueList ? "Hide list" : "Show list"}</button>
           </div>
-          <div className="table-wrap" style={{ marginTop: 12 }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Business</th>
-                  <th>Email</th>
-                  <th>Segment</th>
-                  <th>Last Sent</th>
-                  <th>Subject</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dueFollowUps.map((row) => (
-                  <tr key={`${row.business_id}-${row.last_sent_at}`}>
-                    <td>{row.business_name || "-"}</td>
-                    <td>{row.to_email}</td>
-                    <td>
-                      {row.followup_segment ||
-                        row.segment ||
-                        row.reply_state ||
-                        followUpSegment}
-                    </td>
-                    <td>{new Date(row.last_sent_at).toLocaleString()}</td>
-                    <td>{row.last_subject || "-"}</td>
-                  </tr>
-                ))}
-                {!dueFollowUps.length ? (
+          {showDueList ? (
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={5} className="muted">
-                      No due follow-ups yet. Scout checks sent emails older than 72 hours, excludes real replies, bounces, blocks, and no-inbox records.
-                    </td>
+                    <th>Business</th>
+                    <th>Email</th>
+                    <th>Type</th>
+                    <th>Last Sent</th>
                   </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {dueFollowUps.slice(0, 100).map((row) => (
+                    <tr key={`${row.business_id}-${row.last_sent_at}`}>
+                      <td>{row.business_name || "-"}</td>
+                      <td>{row.to_email}</td>
+                      <td>{row.followup_segment || row.segment || row.reply_state || followUpSegment}</td>
+                      <td>{new Date(row.last_sent_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  {!dueFollowUps.length ? (
+                    <tr>
+                      <td colSpan={4} className="muted">No due follow-ups yet.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedule Email</h3>
-          <p className="muted">Pick a time and count. Schedules run while Scout is open. Add a phone/calendar reminder if you want your phone to alert you when the schedule is due.</p>
+          <p className="muted">Save a first-email send for later. When the time comes, open Scout and click Run Due Sends Now, or keep Scout open.</p>
           {dueSchedules.length ? (
             <div className="notice" style={{ marginBottom: 12 }}>
               <strong>{dueSchedules.length.toLocaleString()} schedule(s) due now.</strong>{" "}
-              Keep Scout open and auto-run will continue, or click <strong>Run Due Sends Now</strong>.
+Click <strong>Run Due Sends Now</strong> to start.
             </div>
           ) : null}
           {lastSavedSchedule ? (
@@ -2782,20 +2717,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               </button>
             </div>
           ) : null}
-          <div className="grid grid-3">
-            <div>
-              <label className="label">Type</label>
-              <select
-                className="select"
-                value={scheduleType}
-                onChange={(e) =>
-                  setScheduleType(e.target.value as "initial" | "follow_up")
-                }
-              >
-                <option value="initial">First email</option>
-                <option value="follow_up">Follow-up</option>
-              </select>
-            </div>
+          <div className="grid grid-2">
             <div>
               <label className="label">Date & time</label>
               <input
@@ -2806,7 +2728,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               />
             </div>
             <div>
-              <label className="label">Count</label>
+              <label className="label">How many first emails</label>
               <input
                 className="input"
                 type="number"
@@ -2823,19 +2745,15 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               checked={autoRunSchedules}
               onChange={(e) => setAutoRunSchedules(e.target.checked)}
             />{" "}
-            Auto-run due schedules while Scout is open
+            Start saved sends automatically while Scout is open
           </label>
-          <div className="notice" style={{ marginTop: 12 }}>
-            <strong>Due notifier</strong><br />
-            Browser notification: {notificationPermission}. This alerts you while Scout/PWA is open or active. For a real top-of-phone reminder when Scout is closed, use <strong>Add phone reminder</strong> on the saved schedule.
-            <div className="actions" style={{ marginTop: 8 }}>
-              <button className="btn secondary" type="button" onClick={enableScheduleNotifier}>
-                {scheduleReminderEnabled && notificationPermission === "granted" ? "Notifier on" : "Enable app notifier"}
-              </button>
-              <button className="btn secondary" type="button" disabled={!lastSavedSchedule} onClick={() => lastSavedSchedule && downloadScheduleReminder(lastSavedSchedule)}>
-                Add last schedule to phone
-              </button>
-            </div>
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button className="btn secondary" type="button" onClick={enableScheduleNotifier}>
+              {scheduleReminderEnabled && notificationPermission === "granted" ? "App notifier on" : "Enable app notifier"}
+            </button>
+            <button className="btn secondary" type="button" disabled={!lastSavedSchedule} onClick={() => lastSavedSchedule && downloadScheduleReminder(lastSavedSchedule)}>
+              Add phone reminder
+            </button>
           </div>
           <div className="actions" style={{ marginTop: 12 }}>
             <button
@@ -2855,48 +2773,44 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               {scheduleRunnerBusy ? "Running Due Sends…" : "Run Due Sends Now"}
             </button>
           </div>
-          <div className="notice" style={{ marginTop: 10 }}>
-            No cron is needed. A saved schedule starts automatically while Scout is open anywhere in the app, or when you click Run Due Sends Now.
+
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button className="btn secondary mini" type="button" onClick={() => setShowSavedSends((v) => !v)}>{showSavedSends ? "Hide saved sends" : "Show saved sends"}</button>
           </div>
-          <div className="table-wrap" style={{ marginTop: 12 }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th>For</th>
-                  <th>Count</th>
-                  <th>Progress</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {schedules.map((s) => (
-                  <tr key={s.id}>
-                    <td>{s.type}</td>
-                    <td>{new Date(s.scheduled_for).toLocaleString()}</td>
-                    <td>{Number(s.target_count || 0).toLocaleString()}</td>
-                    <td>{scheduleProgressText(s)}</td>
-                    <td>{s.status}{s.last_error ? <><br /><span className="error">{s.last_error}</span></> : null}</td>
-                    <td>
-                      <div className="actions" style={{ gap: 6 }}>
-                        {String(s.status || "") === "scheduled" ? <button className="btn secondary mini" type="button" onClick={() => downloadScheduleReminder(s)}>Phone reminder</button> : null}
-                        {["scheduled", "due", "running"].includes(String(s.status || "")) ? <button className="btn secondary mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(s)}>{stopBusyId === s.id ? "Stopping…" : "Stop"}</button> : null}
-                        {String(s.status || "") === "scheduled" ? <button className="btn secondary mini" type="button" onClick={() => clearScheduleReminder(s)}>Reset alert</button> : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {!schedules.length ? (
+          {showSavedSends ? (
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={6} className="muted">
-                      No saved schedules yet.
-                    </td>
+                    <th>For</th>
+                    <th>Count</th>
+                    <th>Status</th>
+                    <th>Action</th>
                   </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {schedules.map((s) => (
+                    <tr key={s.id}>
+                      <td>{new Date(s.scheduled_for).toLocaleString()}</td>
+                      <td>{Number(s.target_count || 0).toLocaleString()}</td>
+                      <td>{s.status}{s.last_error ? <><br /><span className="error">{s.last_error}</span></> : null}</td>
+                      <td>
+                        <div className="actions" style={{ gap: 6 }}>
+                          {String(s.status || "") === "scheduled" ? <button className="btn secondary mini" type="button" onClick={() => downloadScheduleReminder(s)}>Phone reminder</button> : null}
+                          {["scheduled", "due", "running"].includes(String(s.status || "")) ? <button className="btn secondary mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(s)}>{stopBusyId === s.id ? "Stopping…" : "Stop"}</button> : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!schedules.length ? (
+                    <tr>
+                      <td colSpan={4} className="muted">No saved sends yet.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
