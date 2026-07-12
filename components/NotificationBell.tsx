@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, CheckCheck, ExternalLink, RefreshCw, X } from 'lucide-react';
+import { Bell, CheckCheck, ExternalLink, RefreshCw, Trash2, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase-browser';
 
 type NotificationRow = {
@@ -33,7 +33,7 @@ function targetFor(row: NotificationRow) {
   if (row.business_id) return `/businesses/${row.business_id}`;
   if (/reply/i.test(row.type)) return '/replies';
   if (/(no_inbox|blocked|bounce)/i.test(row.type)) return '/no-inbox';
-  return '/operations';
+  return '/message';
 }
 
 export function NotificationBell({ workspaceId }: { workspaceId?: string | null }) {
@@ -115,6 +115,25 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
     }
   }
 
+
+  async function deleteNotification(id?: string) {
+    if (!workspaceId) return;
+    if (!id && !window.confirm('Delete all notifications?')) return;
+    setError('');
+    try {
+      const response = await fetch('/api/notifications/delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId, id: id || null, all: !id })
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Delete failed with HTTP ${response.status}`);
+      await load();
+    } catch (err) {
+      setError(formatError(err));
+    }
+  }
+
   return (
     <div className="notification-menu" ref={wrapperRef}>
       <button className="notification-icon" type="button" onClick={() => setOpen((value) => !value)} aria-label="Open notifications">
@@ -132,6 +151,7 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
             <div className="actions compact">
               <button className="icon-btn" type="button" onClick={load} title="Refresh" disabled={loading}><RefreshCw size={15} /></button>
               <button className="icon-btn" type="button" onClick={() => markRead()} title="Mark all read" disabled={!unread}><CheckCheck size={15} /></button>
+              <button className="icon-btn" type="button" onClick={() => deleteNotification()} title="Delete all" disabled={!rows.length}><Trash2 size={15} /></button>
               <button className="icon-btn" type="button" onClick={() => setOpen(false)} title="Close"><X size={15} /></button>
             </div>
           </div>
@@ -149,6 +169,7 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
                 <div className="notification-actions">
                   <Link href={targetFor(row)} onClick={() => setOpen(false)} title="Open related page"><ExternalLink size={15} /></Link>
                   {!row.read_at ? <button type="button" onClick={() => markRead(row.id)}>Read</button> : null}
+                  <button type="button" onClick={() => deleteNotification(row.id)}>Delete</button>
                 </div>
               </div>
             ))}

@@ -2,7 +2,6 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
-import { createAppNotification } from '@/lib/notifications';
 
 function formatError(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -19,7 +18,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const workspaceId = String(body.workspaceId || body.workspace_id || '').trim();
     const scheduleId = String(body.scheduleId || body.schedule_id || '').trim();
-    if (!workspaceId || !scheduleId) return NextResponse.json({ success: false, error: 'Missing workspaceId or scheduleId.' }, { status: 400 });
+    const allStopped = Boolean(body.allStopped || body.all_stopped || body.all);
+    if (!workspaceId) return NextResponse.json({ success: false, error: 'Missing workspaceId.' }, { status: 400 });
 
     const { data: member, error: memberError } = await supabase
       .from('workspace_members')
@@ -31,35 +31,23 @@ export async function POST(request: NextRequest) {
     if (memberError) throw memberError;
     if (!member) return NextResponse.json({ success: false, error: 'You are not approved for this workspace.' }, { status: 403 });
 
-    const now = new Date().toISOString();
-    const { data, error } = await supabase
-      .from('message_schedules')
-      .update({
-        status: 'stopped',
-        stop_requested: true,
-        stopped_at: now,
-        last_error: 'Stopped by user.',
-        updated_at: now,
-      })
-      .eq('workspace_id', workspaceId)
-      .eq('id', scheduleId)
-      .in('status', ['scheduled', 'due', 'running', 'stopped'])
-      .select('*')
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) return NextResponse.json({ success: false, error: 'No active schedule found to stop.' }, { status: 404 });
+    if (scheduleId) {
+      const { error } = await supabase.from('message_schedules').delete().eq('workspace_id', workspaceId).eq('id', scheduleId);
+      if (error) throw error;
+      return NextResponse.json({ success: true, deleted: 1 });
+    }
 
-    await createAppNotification(supabase as any, {
-      workspaceId,
-      type: 'job_stopped',
-      title: 'Sending job stop requested',
-      message: 'Stopped and hidden from live work.',
-      entityType: 'message_schedule',
-      entityId: scheduleId,
-      raw: { schedule_id: scheduleId },
-    });
+    if (allStopped) {
+      const { error } = await supabase
+        .from('message_schedules')
+        .delete()
+        .eq('workspace_id', workspaceId)
+        .or('status.in.(stopped,cancelled,failed,complete,completed),stop_requested.eq.true');
+      if (error) throw error;
+      return NextResponse.json({ success: true });
+    }
 
-    return NextResponse.json({ success: true, schedule: data });
+    return NextResponse.json({ success: false, error: 'Choose one schedule or all stopped schedules.' }, { status: 400 });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 500 });
   }

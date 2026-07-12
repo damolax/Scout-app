@@ -73,10 +73,11 @@ export async function GET(request: NextRequest) {
       .limit(12), []);
 
     const schedules = schedulesRaw.filter((row) => {
+      if (row.stop_requested) return false;
       const status = String(row.status || '');
       if (status === 'running' || status === 'due') return true;
       const scheduledFor = row.scheduled_for ? new Date(row.scheduled_for).getTime() : 0;
-      return scheduledFor > 0 && scheduledFor <= now + 60_000;
+      return status === 'scheduled' && scheduledFor > 0 && scheduledFor <= now + 60_000;
     });
 
     const outreachEvents = await safeQuery<any[]>(() => admin

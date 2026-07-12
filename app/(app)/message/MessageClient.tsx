@@ -698,9 +698,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       .from("message_schedules")
       .select("*")
       .eq("workspace_id", workspace.id)
-      .in("status", ["scheduled", "due", "running"])
-      .order("scheduled_for", { ascending: true })
-      .limit(50);
+      .in("status", ["scheduled", "due", "running", "stopped", "cancelled", "failed", "complete", "completed"])
+      .order("updated_at", { ascending: false })
+      .limit(80);
     if (scheduleError) throw scheduleError;
     setSchedules((data || []) as MessageSchedule[]);
   }
@@ -2123,7 +2123,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       : `${sent.toLocaleString()} sent in last 24h`;
   }
 
-  const activeSchedules = schedules.filter((s) => ["scheduled", "due", "running"].includes(String(s.status || "")));
+  const activeSchedules = schedules.filter((s) => ["scheduled", "due", "running"].includes(String(s.status || "")) && !s.stop_requested);
+  const stoppedSchedules = schedules.filter((s) => s.stop_requested || ["stopped", "cancelled", "failed", "complete", "completed"].includes(String(s.status || "")));
+  const savedScheduleRows = schedules.slice(0, 40);
 
   function scheduleProgressText(schedule: MessageSchedule) {
     const target = Number(schedule.target_count || 0);
@@ -2148,12 +2150,55 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json?.success === false) throw new Error(json?.error || `Stop failed with HTTP ${response.status}`);
-      setStatus("Stop requested. If a message is already in-flight, Scout will stop after the current recipient finishes.");
+      setStatus("Stopped and hidden from Live Work.");
       await loadSchedules();
     } catch (err) {
       setError(formatError(err));
     } finally {
       setStopBusyId("");
+    }
+  }
+
+
+  async function deleteSchedule(schedule: MessageSchedule) {
+    if (!window.confirm('Delete this saved send from Scout?')) return;
+    setStopBusyId(schedule.id);
+    setError("");
+    try {
+      const response = await fetch("/api/message/delete-schedules", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId: workspace.id, scheduleId: schedule.id }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Delete failed with HTTP ${response.status}`);
+      setStatus("Saved send deleted.");
+      await loadSchedules();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setStopBusyId("");
+    }
+  }
+
+  async function deleteStoppedSchedules() {
+    if (!window.confirm('Delete all stopped, failed, and finished saved sends?')) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/message/delete-schedules", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId: workspace.id, allStopped: true }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Delete failed with HTTP ${response.status}`);
+      setStatus("Old saved sends deleted.");
+      await loadSchedules();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -2178,7 +2223,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         <div className="card" style={{ padding: 18 }}>
           <div className="actions" style={{ justifyContent: "space-between" }}>
             <h3 style={{ margin: 0 }}>Saved sends waiting or running</h3>
-            <button className="btn secondary mini" type="button" onClick={() => setShowSavedSends((v) => !v)}>{showSavedSends ? "Hide" : "Show"}</button>
+            <div className="actions" style={{ gap: 6 }}>
+              {stoppedSchedules.length ? <button className="btn secondary mini" type="button" onClick={deleteStoppedSchedules}>Clear stopped</button> : null}
+              <button className="btn secondary mini" type="button" onClick={() => setShowSavedSends((v) => !v)}>{showSavedSends ? "Hide" : "Show"}</button>
+            </div>
           </div>
           {showSavedSends ? <div className="table-wrap">
             <table>
@@ -2190,7 +2238,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                     <td>{job.status}</td>
                     <td>{scheduleProgressText(job)}{job.last_error ? <><br /><span className="error">{job.last_error}</span></> : null}</td>
                     <td>{new Date(job.scheduled_for).toLocaleString()}</td>
-                    <td><button className="btn secondary" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(job)}>{stopBusyId === job.id ? "Stopping…" : "Stop"}</button></td>
+                    <td><div className="actions" style={{ gap: 6 }}><button className="btn secondary" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(job)}>{stopBusyId === job.id ? "Stopping…" : "Stop"}</button><button className="btn secondary" type="button" disabled={Boolean(stopBusyId)} onClick={() => deleteSchedule(job)}>Delete</button></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -2741,7 +2789,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedule Email</h3>
-          <p className="muted">Save a first-email send for later. When the time comes, open Scout and click Run Due Sends Now, or keep Scout open.</p>
+          <p className="muted">Save a send for later. When it is due, open Scout and click Run Due Sends Now.</p>
           {dueSchedules.length ? (
             <div className="notice" style={{ marginBottom: 12 }}>
               <strong>{dueSchedules.length.toLocaleString()} schedule(s) due now.</strong>{" "}
@@ -2815,6 +2863,7 @@ Click <strong>Run Due Sends Now</strong> to start.
 
           <div className="actions" style={{ marginTop: 12 }}>
             <button className="btn secondary mini" type="button" onClick={() => setShowSavedSends((v) => !v)}>{showSavedSends ? "Hide saved sends" : "Show saved sends"}</button>
+            {stoppedSchedules.length ? <button className="btn secondary mini" type="button" onClick={deleteStoppedSchedules}>Delete stopped/old sends</button> : null}
           </div>
           {showSavedSends ? (
             <div className="table-wrap" style={{ marginTop: 12 }}>
@@ -2828,15 +2877,16 @@ Click <strong>Run Due Sends Now</strong> to start.
                   </tr>
                 </thead>
                 <tbody>
-                  {schedules.map((s) => (
+                  {savedScheduleRows.map((s) => (
                     <tr key={s.id}>
                       <td>{new Date(s.scheduled_for).toLocaleString()}</td>
                       <td>{Number(s.target_count || 0).toLocaleString()}</td>
                       <td>{s.status}{s.last_error ? <><br /><span className="error">{s.last_error}</span></> : null}</td>
                       <td>
                         <div className="actions" style={{ gap: 6 }}>
-                          {String(s.status || "") === "scheduled" ? <button className="btn secondary mini" type="button" onClick={() => downloadScheduleReminder(s)}>Phone reminder</button> : null}
-                          {["scheduled", "due", "running"].includes(String(s.status || "")) ? <button className="btn secondary mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(s)}>{stopBusyId === s.id ? "Stopping…" : "Stop"}</button> : null}
+                          {String(s.status || "") === "scheduled" && !s.stop_requested ? <button className="btn secondary mini" type="button" onClick={() => downloadScheduleReminder(s)}>Phone reminder</button> : null}
+                          {["scheduled", "due", "running"].includes(String(s.status || "")) && !s.stop_requested ? <button className="btn secondary mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(s)}>{stopBusyId === s.id ? "Stopping…" : "Stop"}</button> : null}
+                          <button className="btn secondary mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => deleteSchedule(s)}>Delete</button>
                         </div>
                       </td>
                     </tr>

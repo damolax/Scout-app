@@ -51,12 +51,44 @@ function getEvidenceFromResult(result: any) {
   return '';
 }
 
-function qualityLabel(result: any) {
-  const evidence = getEvidenceFromResult(result);
-  const generated = Boolean(result?.generated || result?.guessed || result?.pattern || String(result?.method || '').toLowerCase().includes('guess'));
-  if (evidence) return 'source seen';
-  if (generated) return 'generated only';
-  return 'unverified candidate';
+function hostname(value: string) {
+  try {
+    const url = value.startsWith('http') ? new URL(value) : new URL(`https://${value}`);
+    return url.hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return String(value || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].toLowerCase();
+  }
+}
+
+function emailDomain(email: string) {
+  return String(email || '').split('@')[1]?.toLowerCase().replace(/^www\./, '') || '';
+}
+
+function looksBrokenEmail(email: string) {
+  const e = String(email || '').toLowerCase().trim();
+  if (!e || !/^[-a-z0-9._%+]+@[-a-z0-9.]+\.[a-z]{2,}$/i.test(e)) return true;
+  if (['abc@xyz.com', 'test@test.com', 'email@example.com', 'ton-courriel@exemple.com'].includes(e)) return true;
+  if (e.includes('chimpst@ic.com') || e.includes('maps.gst@ic.com') || e.includes('instagram.pin@')) return true;
+  if (e.startsWith('www.') || e.includes('@example.') || e.includes('@exemple.')) return true;
+  if (e.includes('@ic.com') && !e.includes('music')) return true;
+  if (/apps?\d*\./.test(e.split('@')[0] || '')) return true;
+  return false;
+}
+
+function trustForEmail(email: string, business: any, result: any, rowEvidence = '') {
+  const cleanEmail = String(email || '').trim();
+  if (!cleanEmail) return { label: 'No email', tone: 'none', reason: 'No usable email found.' };
+  if (looksBrokenEmail(cleanEmail)) return { label: 'Blocked', tone: 'blocked', reason: 'Looks like fake, example, code, or broken website text.' };
+  const domain = emailDomain(cleanEmail);
+  const site = hostname(String(business?.website || business?.domain || business?.url || ''));
+  const evidence = rowEvidence || getEvidenceFromResult(result);
+  if (site && domain && (site === domain || site.endsWith(`.${domain}`) || domain.endsWith(site))) return { label: 'Trusted', tone: 'trusted', reason: 'Email matches the business website domain.' };
+  if (evidence) return { label: 'Trusted', tone: 'trusted', reason: 'Email was seen on a business website page.' };
+  return { label: 'Review', tone: 'review', reason: 'Looks possible, but Scout did not see enough proof yet.' };
+}
+
+function qualityLabel(result: any, business?: any, emailValue?: string) {
+  return trustForEmail(emailValue || getEmailFromResult(result), business, result).label;
 }
 
 function sleep(ms: number) {
@@ -72,7 +104,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   const [stats, setStats] = useState<ScoutStats>({});
   const [recentJobs, setRecentJobs] = useState<JobRow[]>([]);
   const [results, setResults] = useState<Array<Record<string, unknown>>>([]);
-  const [message, setMessage] = useState('Ready. Queue pending/no-email businesses, then click Start Auto Scout. Use the found-email table below as the source of truth.');
+  const [message, setMessage] = useState('Ready. Click Start Auto Scout to find missing emails.');
   const [workerCycles, setWorkerCycles] = useState(8);
   const [workerResult, setWorkerResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
@@ -88,12 +120,13 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
         const email = String(row.email || business?.email || getEmailFromResult(result)).trim();
         const businessName = String(row.businessName || row.business || business?.name || '').trim();
         const evidence = String(row.evidence || getEvidenceFromResult(result)).trim();
-        const quality = String(row.quality || qualityLabel(result));
+        const trust = trustForEmail(email, business, result, evidence);
+        const quality = trust.label;
         const status = String(row.status || '').trim();
-        const reason = String(row.error || row.reason || row.last_error || '').trim();
+        const reason = String(row.error || row.reason || row.last_error || trust.reason || '').trim();
         const pagesChecked = Number(row.pagesChecked || result?.deepWebsiteFinder?.pagesChecked || result?.pagesChecked || 0);
         const id = String(row.business || business?.id || row.id || '');
-        return { id, email, businessName, evidence, quality, status, pagesChecked, reason };
+        return { id, email, businessName, evidence, quality, trustTone: trust.tone, status, pagesChecked, reason };
       })
       .filter((row) => row.email || row.status === 'failed' || row.status === 'no_email_found' || row.reason)
       .slice(0, 120);
@@ -345,68 +378,100 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
 
   function stopAutoScout() {
     stopRef.current = true;
-    setMessage('Stopping Auto Scout after the current backend batch finishes...');
+    setMessage('Stopping Auto Scout after the current batch finishes...');
+  }
+
+  async function deleteInvalidEmailValues() {
+    if (!window.confirm('Remove clearly bad/fake email values and send those leads back to Auto Scout?')) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/research/delete-invalid-emails', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, limit: 5000 })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || 'Delete bad emails failed.');
+      setMessage(`Removed ${Number(json.updated || 0).toLocaleString()} bad email value(s). Those leads can now be redetected.`);
+      await loadStats();
+    } catch (error) {
+      setMessage(`Bad-email cleanup failed: ${fmtError(error)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <div className="stack">
       <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Needs Research</div><div className="num">{(stats.pending_no_email || 0).toLocaleString()}</div><p className="muted">Pending/review businesses with no email.</p></div>
-        <div className="card kpi"><div className="title">Waiting</div><div className="num">{(stats.queued || 0).toLocaleString()}</div><p className="muted">Queued for email research.</p></div>
-        <div className="card kpi"><div className="title">Active Jobs</div><div className="num">{(stats.running || 0).toLocaleString()}</div><p className="muted">Currently marked running. Stale: {(stats.stale_running || 0).toLocaleString()}.</p></div>
-        <div className="card kpi"><div className="title">Trusted Candidates Found</div><div className="num">{(stats.found_with_email || 0).toLocaleString()}</div><p className="muted">Passed strict rules. Still not inbox-proven until send/bounce tracking.</p></div>
+        <div className="card kpi"><div className="title">Need emails</div><div className="num">{(stats.pending_no_email || 0).toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Waiting</div><div className="num">{(stats.queued || 0).toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Checking now</div><div className="num">{(stats.running || 0).toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Emails found</div><div className="num">{(stats.found_with_email || 0).toLocaleString()}</div></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Auto Scout Control</h3>
-        <p className="muted">Auto Scout queues no-email leads and checks websites/emails immediately. Start Auto Scout Now runs visible live batches from this page. Extra live batches are available when you want Scout to keep checking more websites from this page. It rejects captcha/CDN/code false positives, blocks repeated emails across unrelated businesses, then searches deeper: homepage, contact/about/team/impressum/privacy pages, mailto links, obfuscated emails, and Cloudflare-protected emails where possible.</p>
-        <div className="grid grid-4">
-          <div><label className="label">Queue limit</label><input className="input" type="number" min={1} max={50000} value={queueLimit} onChange={(e) => setQueueLimit(Math.max(1, Math.min(50000, Number(e.target.value) || 5000)))} /><p className="muted">How many no-email businesses to add to the research queue.</p></div>
-          <div><label className="label">Batch size</label><input className="input" type="number" min={1} max={500} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))} /><p className="muted">Maximum queued jobs checked in one run.</p></div>
-          <div><label className="label">Concurrency</label><input className="input" type="number" min={1} max={50} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(50, Number(e.target.value) || 20)))} /><p className="muted">How many website lookups run in parallel inside that batch.</p></div>
-          <div><label className="label">Live cycles</label><input className="input" type="number" min={1} max={25} value={workerCycles} onChange={(e) => setWorkerCycles(Math.max(1, Math.min(25, Number(e.target.value) || 8)))} /><p className="muted">How many live batches to run when you click Start Auto Scout Now.</p></div>
+        <div className="actions" style={{ justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Auto Scout</h3>
+            <p className="muted" style={{ margin: '6px 0 0' }}>Find missing emails from the business websites you uploaded.</p>
+          </div>
+          <div className="actions">
+            {running ? <button className="btn secondary" disabled={!running} onClick={stopAutoScout}>Stop</button> : null}
+            <button className="btn" disabled={busy} onClick={startAutoScout}>Start Auto Scout</button>
+          </div>
         </div>
+
+        <div className="choice-row" style={{ marginTop: 14 }}>
+          <label className="label" style={{ margin: 0 }}>How many to queue</label>
+          <input className="input" style={{ width: 150 }} type="number" min={1} max={50000} value={queueLimit} onChange={(e) => setQueueLimit(Math.max(1, Math.min(50000, Number(e.target.value) || 5000)))} />
+          <label className="label" style={{ margin: 0 }}>Check per batch</label>
+          <input className="input" style={{ width: 120 }} type="number" min={1} max={500} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))} />
+          <label className="label" style={{ margin: 0 }}>Speed</label>
+          <input className="input" style={{ width: 95 }} type="number" min={1} max={50} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(50, Number(e.target.value) || 20)))} />
+          <label className="label" style={{ margin: 0 }}>Rounds</label>
+          <input className="input" style={{ width: 95 }} type="number" min={1} max={25} value={workerCycles} onChange={(e) => setWorkerCycles(Math.max(1, Math.min(25, Number(e.target.value) || 8)))} />
+        </div>
+
         <div className="actions" style={{ marginTop: 14 }}>
-          <button className="btn secondary" disabled={busy} onClick={enqueuePendingNoEmail}>Queue Pending No-Email</button>
-          <button className="btn" disabled={busy} onClick={startAutoScout}>Start Auto Scout Now</button>
-          <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Run One Batch</button>
-          <button className="btn" disabled={busy || running} onClick={runAutoScoutWorker}>Run Extra Live Batches</button>
-          <button className="btn secondary" disabled={busy && !running} onClick={loadStats}>Refresh Progress</button>
-          <button className="btn secondary" disabled={busy || running} onClick={quarantineFalsePositiveEmails}>Clean Bad Found Emails</button>
-          <button className="btn secondary" disabled={busy || running} onClick={quarantineRepeatedEmails}>Clean Repeated Emails</button>
+          <button className="btn secondary" disabled={busy} onClick={enqueuePendingNoEmail}>Queue missing emails</button>
+          <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Check one batch</button>
+          <button className="btn secondary" disabled={busy || running} onClick={loadStats}>Refresh</button>
+          <button className="btn secondary" disabled={busy || running} onClick={quarantineFalsePositiveEmails}>Move bad found emails to review</button>
+          <button className="btn danger" disabled={busy || running} onClick={deleteInvalidEmailValues}>Delete bad email values</button>
         </div>
         <div className={message.toLowerCase().includes('failed') || message.toLowerCase().includes('error') ? 'error' : 'notice'} style={{ marginTop: 12 }}>{message}</div>
-        {workerResult ? <div className="notice" style={{ marginTop: 12 }}><strong>Extra run summary:</strong> checked {Number(workerResult.checkedForQueue || 0).toLocaleString()}, queued {Number(workerResult.enqueued || 0).toLocaleString()}, cycles {Number(workerResult.cyclesRun || 0).toLocaleString()}, processed {Number(workerResult.processed || 0).toLocaleString()}, found {Number(workerResult.found || 0).toLocaleString()}.</div> : null}
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>What These Numbers Mean</h3>
-        <p className="muted"><strong>Queue limit</strong> decides how many no-email businesses are placed into the queue. <strong>Batch size</strong> decides how many queued jobs one run tries to process. <strong>Concurrency</strong> decides how many of those lookups happen at the same time. <strong>Run Extra Live Batches</strong> is the v8.28 worker: it queues no-email businesses, resets stale running jobs, then calls <code>/api/research/run-once</code> repeatedly on the server. Render is still used when <code>NEXT_PUBLIC_BACKEND_URL</code> points to your Render email-finder.</p>
-      </div>
-
-      <div className="card" style={{ padding: 18 }}>
-        <h3>Found Emails / Errors</h3>
-        <p className="muted">This table combines current-session results and recent database jobs. Only candidates that pass strict rules are promoted. Weak/generated candidates are kept in Review with a reason instead of being treated as found. Deep website results show source evidence and pages checked when available.</p>
-        <div className="table-wrap"><table><thead><tr><th>Status</th><th>Email</th><th>Business</th><th>Quality</th><th>Evidence</th><th>Pages</th><th>Reason</th></tr></thead><tbody>
-          {foundRows.map((row, index) => <tr key={`${row.id || row.email}-${index}`}><td>{row.status || '-'}</td><td>{row.email || <span className="muted">No email</span>}</td><td>{row.id ? <Link href={`/businesses/${row.id}`}>{row.businessName || row.id}</Link> : row.businessName || '-'}</td><td>{row.quality || '-'}</td><td>{row.evidence ? <a href={row.evidence.startsWith('http') ? row.evidence : `https://${row.evidence}`} target="_blank" rel="noreferrer">source</a> : <span className="muted">No evidence supplied</span>}</td><td>{String((row as any).pagesChecked || '')}</td><td>{row.reason || ''}</td></tr>)}
-          {!foundRows.length ? <tr><td colSpan={7} className="muted">No found-email rows or errors yet. If the top counter says emails were found, click Refresh Progress and check Recent Auto Scout Jobs below.</td></tr> : null}
+        <h3>Auto Scout results</h3>
+        <p className="simple-table-note">Use <strong>Trusted</strong> emails for sending. Check <strong>Review</strong> manually. Scout hides the long explanation here; the full meaning is in How to Use.</p>
+        <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Result</th><th>Email</th><th>Business</th><th>Proof</th><th>Why</th></tr></thead><tbody>
+          {foundRows.map((row, index) => <tr key={`${row.id || row.email}-${index}`}>
+            <td><span className={`trust-pill ${(row as any).trustTone || 'none'}`}>{row.quality || 'Review'}</span></td>
+            <td>{row.email || <span className="muted">No email</span>}</td>
+            <td>{row.id ? <Link href={`/businesses/${row.id}`}>{row.businessName || row.id}</Link> : row.businessName || '-'}</td>
+            <td>{row.evidence ? <a href={row.evidence.startsWith('http') ? row.evidence : `https://${row.evidence}`} target="_blank" rel="noreferrer">source</a> : <span className="muted">-</span>}</td>
+            <td><span className="muted">{row.reason || '-'}</span></td>
+          </tr>)}
+          {!foundRows.length ? <tr><td colSpan={5} className="muted">No results yet. Click Start Auto Scout.</td></tr> : null}
         </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Recent Auto Scout Jobs</h3>
-        <div className="table-wrap"><table><thead><tr><th>Business</th><th>Status</th><th>Email</th><th>Quality</th><th>Attempts</th><th>Error</th></tr></thead><tbody>
+        <div className="actions" style={{ justifyContent: 'space-between' }}>
+          <h3 style={{ margin: 0 }}>Recent checks</h3>
+          <button className="btn secondary mini" type="button" onClick={loadStats}>Refresh</button>
+        </div>
+        <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Business</th><th>State</th><th>Email</th><th>Trust</th><th>Attempts</th></tr></thead><tbody>
           {recentJobs.map((job) => {
             const business = getBusiness(job);
             const email = String(business?.email || getEmailFromResult(job.result) || '');
-            return <tr key={job.id}><td>{business?.id ? <Link href={`/businesses/${business.id}`}><strong>{business?.name || '-'}</strong></Link> : <strong>{business?.name || '-'}</strong>}<br /><span className="muted">{business?.website || business?.domain || ''}</span></td><td><span className={`status ${job.status}`}>{job.status}</span></td><td>{email || <span className="muted">No email yet</span>}</td><td>{qualityLabel(job.result)}</td><td>{job.attempts || 0}</td><td><span className="muted">{job.last_error || ''}</span></td></tr>;
+            const trust = trustForEmail(email, business, job.result);
+            return <tr key={job.id}><td>{business?.id ? <Link href={`/businesses/${business.id}`}><strong>{business?.name || '-'}</strong></Link> : <strong>{business?.name || '-'}</strong>}<br /><span className="muted">{business?.website || business?.domain || ''}</span></td><td><span className={`status ${job.status}`}>{job.status}</span></td><td>{email || <span className="muted">No email yet</span>}</td><td><span className={`trust-pill ${trust.tone}`}>{trust.label}</span></td><td>{job.attempts || 0}</td></tr>;
           })}
-          {!recentJobs.length ? <tr><td colSpan={6} className="muted">No Auto Scout jobs yet.</td></tr> : null}
+          {!recentJobs.length ? <tr><td colSpan={5} className="muted">No Auto Scout jobs yet.</td></tr> : null}
         </tbody></table></div>
-      </div>
-
-      <div className="notice">
-        <strong>Trust rule:</strong> Auto Scout can find email candidates, but a real inbox is only confirmed after sending and bounce/no-inbox detection. v8.17 also blocks one exact email from being promoted across unrelated businesses unless it has business-domain/source evidence.
       </div>
     </div>
   );

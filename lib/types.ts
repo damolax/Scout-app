@@ -227,7 +227,7 @@ export type MessageSchedule = {
   template_id?: string | null;
   target_count?: number | null;
   scheduled_for: string;
-  status: 'scheduled' | 'due' | 'running' | 'sent' | 'cancelled' | 'failed';
+  status: 'scheduled' | 'due' | 'running' | 'sent' | 'cancelled' | 'failed' | 'stopped' | 'complete' | 'completed';
   run_kind?: string | null;
   batch_id?: string | null;
   processed_count?: number | null;

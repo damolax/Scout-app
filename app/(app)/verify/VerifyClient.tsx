@@ -371,7 +371,15 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       }
       const jobRows = ids.map((id) => ({ workspace_id: workspace.id, business_id: id, status: 'queued', attempts: 0, priority: 250, raw: { source: 'verify_redetect', clearEmail, requested_at: now } }));
       const { error: jobError } = await supabase.from('email_research_jobs').upsert(jobRows, { onConflict: 'workspace_id,business_id', ignoreDuplicates: false });
-      if (jobError) throw jobError;
+      if (jobError) {
+        if (String(jobError.message || '').includes("'raw' column") || String(jobError.message || '').includes('raw')) {
+          const fallbackRows = ids.map((id) => ({ workspace_id: workspace.id, business_id: id, status: 'queued', attempts: 0, priority: 250 }));
+          const { error: fallbackError } = await supabase.from('email_research_jobs').upsert(fallbackRows, { onConflict: 'workspace_id,business_id', ignoreDuplicates: false });
+          if (fallbackError) throw fallbackError;
+        } else {
+          throw jobError;
+        }
+      }
       setSelected({});
       setMessage(`${ids.length.toLocaleString()} contact(s) queued for Auto Scout email redetection${clearEmail ? ' and their old email was removed' : ''}.`);
       await refresh();
@@ -392,6 +400,34 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       if (deleteError) throw deleteError;
       setSelected({});
       setMessage(`Deleted ${ids.length.toLocaleString()} selected invalid/no-inbox lead(s).`);
+      await refresh();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+
+  async function deleteAllInvalidEmails() {
+    if (!window.confirm('Delete all invalid, bounced, and no-inbox leads from this workspace?')) return;
+    setBusy(true);
+    setError('');
+    try {
+      const { data, error: selectError } = await supabase
+        .from('businesses')
+        .select('id')
+        .eq('workspace_id', workspace.id)
+        .in('status', ['invalid', 'no_inbox', 'bounced', 'blocked'])
+        .limit(50000);
+      if (selectError) throw selectError;
+      const ids = (data || []).map((row: any) => row.id).filter(Boolean);
+      for (let i = 0; i < ids.length; i += 500) {
+        const { error: deleteError } = await supabase.from('businesses').delete().eq('workspace_id', workspace.id).in('id', ids.slice(i, i + 500));
+        if (deleteError) throw deleteError;
+      }
+      setSelected({});
+      setMessage(`Deleted ${ids.length.toLocaleString()} invalid/no-inbox lead(s).`);
       await refresh();
     } catch (err) {
       setError(formatError(err));
@@ -451,7 +487,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
           </div>
           <button className="btn secondary" type="button" disabled={loading || busy} onClick={refresh}>Refresh</button>
         </div>
-        <div className="notice" style={{ marginTop: 12 }}>{detectorNote}</div>
+        
         {busy ? <div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div> : null}
         <div className={error ? 'error' : 'success'} style={{ marginTop: 12 }}>{error || message}</div>
       </div>
@@ -468,6 +504,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => queueForAutoScout(selectedIds, false)}>Redetect via Auto Scout</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => queueForAutoScout(selectedIds, true)}>Remove Email + Redetect</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => deleteSelectedInvalid(selectedIds)}>Delete Selected</button>
+          <button className="btn danger" type="button" disabled={busy} onClick={deleteAllInvalidEmails}>Delete All Invalid</button>
           <button className="btn secondary" type="button" disabled={!lastResults.length} onClick={() => downloadCsv('scout-ready-email-detection-results.csv', lastResults)}>Download Last Results</button>
         </div>
 

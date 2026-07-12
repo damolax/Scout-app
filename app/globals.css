@@ -355,3 +355,43 @@ code { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-
 .live-event.danger .live-event-icon { color: #fca5a5; box-shadow: 0 0 0 4px rgba(252,165,165,.09); }
 .live-event.neutral .live-event-icon { color: var(--muted); }
 .live-event em { padding-top: 2px; white-space: nowrap; }
+
+/* v10.6: simple collapsible menu */
+.sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  background: rgba(255,255,255,.08);
+  font-weight: 900;
+  padding: 9px 11px;
+}
+.sidebar-toggle.inside { margin-bottom: 14px; width: 100%; }
+.sidebar-toggle.floating {
+  display: none;
+  position: fixed;
+  left: 14px;
+  top: 12px;
+  z-index: 90;
+  background: rgba(9,17,30,.96);
+  box-shadow: 0 12px 38px rgba(0,0,0,.35);
+}
+.app-shell.sidebar-collapsed { grid-template-columns: 1fr; }
+.app-shell.sidebar-collapsed .sidebar { display: none; }
+.app-shell.sidebar-collapsed .sidebar-toggle.floating { display: inline-flex; }
+.app-shell.sidebar-collapsed .main-topbar { padding-left: 110px; }
+.simple-table-note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+.choice-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.trust-pill { display:inline-flex; align-items:center; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:900; }
+.trust-pill.trusted { color:#a9ffe3; background:rgba(51,214,159,.12); border:1px solid rgba(51,214,159,.25); }
+.trust-pill.review { color:#ffe1a3; background:rgba(255,204,102,.11); border:1px solid rgba(255,204,102,.24); }
+.trust-pill.blocked { color:#ffc0c7; background:rgba(255,107,122,.10); border:1px solid rgba(255,107,122,.24); }
+.trust-pill.none { color:var(--muted); background:rgba(255,255,255,.06); border:1px solid var(--line); }
+@media (max-width: 900px) {
+  .app-shell:not(.sidebar-collapsed) .sidebar { position: fixed; left:0; top:0; width:min(290px, 86vw); z-index: 95; height:100vh; }
+  .sidebar-toggle.floating { display:inline-flex; }
+  .main-topbar { padding-left: 110px; }
+}

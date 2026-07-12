@@ -1,12 +1,11 @@
 import Link from 'next/link';
 import { getCurrentWorkspace } from '@/lib/workspace';
-import SourceScoutClient from './SourceScoutClient';
 
 const quickLinks = [
-  { href: '/upload', title: 'Upload CSV', desc: 'Import a list you already have.' },
-  { href: '/auto-scout', title: 'Find missing emails', desc: 'Check queued websites for real emails.' },
-  { href: '/verify', title: 'Clean emails', desc: 'Mark bad emails or send them back to Auto Scout.' },
-  { href: '/businesses', title: 'View leads', desc: 'See ready, contacted, replied and bad-inbox leads.' }
+  { href: '/upload', title: 'Upload leads', desc: 'Add a CSV list.' },
+  { href: '/auto-scout', title: 'Find missing emails', desc: 'Let Scout check websites.' },
+  { href: '/verify', title: 'Clean emails', desc: 'Delete bad emails or redetect.' },
+  { href: '/businesses', title: 'View all leads', desc: 'Open your lead list.' }
 ];
 
 export default async function SourceScoutPage() {
@@ -16,7 +15,7 @@ export default async function SourceScoutPage() {
     <div className="stack">
       <div className="page-title">
         <h2>Find Leads</h2>
-        <p>Use the extension, CSV upload, or Auto Scout to find real business websites and contact emails.</p>
+        <p>Choose what you want to do.</p>
       </div>
       <div className="quick-links">
         {quickLinks.map((link) => (
@@ -26,7 +25,7 @@ export default async function SourceScoutPage() {
           </Link>
         ))}
       </div>
-      <SourceScoutClient workspace={workspace} />
+      <div className="notice">Tip: Upload leads first. Then use Auto Scout to find missing emails. Use Clean emails to delete bad ones.</div>
     </div>
   );
 }
