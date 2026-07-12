@@ -450,6 +450,12 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const categoryTemplates = sendableTemplates.filter(
     (t) => !categoryId || t.category_id === categoryId,
   );
+  const followUpTemplates = templates.filter(
+    (t) => (t.template_type || "initial") === "follow_up" && t.active !== false && (!categoryId || t.category_id === categoryId),
+  );
+  const allFollowUpTemplates = templates.filter(
+    (t) => (t.template_type || "initial") === "follow_up" && t.active !== false,
+  );
   const currentTemplate =
     templates.find((t) => t.id === templateId) ||
     categoryTemplates[0] ||
@@ -2715,26 +2721,45 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             These are people you emailed more than 72 hours ago who did not send a real human reply. Send them now when you are ready.
           </p>
           <div className="notice" style={{ marginBottom: 12 }}>
-            Due now: <strong>{dueFollowUps.length.toLocaleString()}</strong> contact(s).
+            Due now: <strong>{dueFollowUps.length.toLocaleString()}</strong> contact(s). Choose the follow-up template here, then send once.
           </div>
-          <div>
-            <label className="label">Show</label>
-            <select
-              className="select"
-              value={followUpSegment}
-              onChange={(e) =>
-                setFollowUpSegment(
-                  e.target.value as
-                    | "all_unanswered"
-                    | "no_reply"
-                    | "auto_reply",
-                )
-              }
-            >
-              <option value="all_unanswered">All due follow-ups</option>
-              <option value="no_reply">No reply at all</option>
-              <option value="auto_reply">Auto reply only</option>
-            </select>
+          <div className="grid grid-2">
+            <div>
+              <label className="label">Which follow-ups?</label>
+              <select
+                className="select"
+                value={followUpSegment}
+                onChange={(e) =>
+                  setFollowUpSegment(
+                    e.target.value as
+                      | "all_unanswered"
+                      | "no_reply"
+                      | "auto_reply",
+                  )
+                }
+              >
+                <option value="all_unanswered">All due follow-ups</option>
+                <option value="no_reply">No reply at all</option>
+                <option value="auto_reply">Auto reply only</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Follow-up template to use</label>
+              <select
+                className="select"
+                value={(currentTemplate && (currentTemplate.template_type || "initial") === "follow_up") ? currentTemplate.id : ""}
+                onChange={(e) => {
+                  setTemplateMode("specific");
+                  setTemplateId(e.target.value);
+                }}
+              >
+                <option value="">Use first follow-up template</option>
+                {(followUpTemplates.length ? followUpTemplates : allFollowUpTemplates).map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>Only follow-up templates show here. First-message templates are not used.</p>
+            </div>
           </div>
           <div className="actions" style={{ marginTop: 12 }}>
             <button

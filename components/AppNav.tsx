@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle } from 'lucide-react';
+import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle, Trophy } from 'lucide-react';
 
 const items = [
   { href: '/dashboard', label: 'Home', icon: BarChart3 },
@@ -10,6 +10,7 @@ const items = [
   { href: '/message', label: 'Send Emails', icon: Mail },
   { href: '/replies', label: 'Replies', icon: Inbox },
   { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/challenges', label: 'Challenges', icon: Trophy },
   { href: '/help', label: 'How to Use', icon: HelpCircle }
 ];
 
@@ -19,6 +20,7 @@ const groupedRoutes: Record<string, string[]> = {
   '/message': ['/message', '/templates', '/deliverability', '/operations'],
   '/replies': ['/replies'],
   '/settings': ['/settings'],
+  '/challenges': ['/challenges'],
   '/help': ['/help']
 };
 

@@ -238,7 +238,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     let emptyRounds = 0;
 
     try {
-      setMessage('Auto Scout starting now: queueing no-email leads, then checking websites/emails live.');
+      setMessage('Finding emails now. Results will appear below on this same page.');
       emitLiveActivity({ kind: 'auto_scout', status: 'starting', title: 'Auto Scout starting', message: 'Queueing no-email leads and starting live website/email checks.' });
 
       const queueRes = await fetch('/api/research/enqueue', {
@@ -413,12 +413,12 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       <div className="card" style={{ padding: 18 }}>
         <div className="actions" style={{ justifyContent: 'space-between', gap: 12 }}>
           <div>
-            <h3 style={{ margin: 0 }}>Auto Scout</h3>
-            <p className="muted" style={{ margin: '6px 0 0' }}>Find missing emails from the business websites you uploaded.</p>
+            <h3 style={{ margin: 0 }}>Find missing emails</h3>
+            <p className="muted" style={{ margin: '6px 0 0' }}>Click Start. Stop appears only while Scout is working. Results appear below and trusted emails are saved to your leads.</p>
           </div>
           <div className="actions">
             {running ? <button className="btn secondary" disabled={!running} onClick={stopAutoScout}>Stop</button> : null}
-            <button className="btn" disabled={busy} onClick={startAutoScout}>Start Auto Scout</button>
+            <button className="btn" disabled={busy} onClick={startAutoScout}>Start finding emails</button>
           </div>
         </div>
 
@@ -434,18 +434,18 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
         </div>
 
         <div className="actions" style={{ marginTop: 14 }}>
-          <button className="btn secondary" disabled={busy} onClick={enqueuePendingNoEmail}>Queue missing emails</button>
-          <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Check one batch</button>
+          <button className="btn secondary" disabled={busy} onClick={enqueuePendingNoEmail}>Prepare missing-email leads</button>
+          <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Check one group</button>
           <button className="btn secondary" disabled={busy || running} onClick={loadStats}>Refresh</button>
-          <button className="btn secondary" disabled={busy || running} onClick={quarantineFalsePositiveEmails}>Move bad found emails to review</button>
-          <button className="btn danger" disabled={busy || running} onClick={deleteInvalidEmailValues}>Delete bad email values</button>
+          <button className="btn secondary" disabled={busy || running} onClick={quarantineFalsePositiveEmails}>Move bad emails to review</button>
+          <button className="btn danger" disabled={busy || running} onClick={deleteInvalidEmailValues}>Delete invalid emails</button>
         </div>
         <div className={message.toLowerCase().includes('failed') || message.toLowerCase().includes('error') ? 'error' : 'notice'} style={{ marginTop: 12 }}>{message}</div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Auto Scout results</h3>
-        <p className="simple-table-note">Use <strong>Trusted</strong> emails for sending. Check <strong>Review</strong> manually. Scout hides the long explanation here; the full meaning is in How to Use.</p>
+        <h3 id="results">Results</h3>
+        <p className="simple-table-note">Trusted emails are saved for sending. Review means it looks possible but needs checking. Blocked means Scout ignored it.</p>
         <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Result</th><th>Email</th><th>Business</th><th>Proof</th><th>Why</th></tr></thead><tbody>
           {foundRows.map((row, index) => <tr key={`${row.id || row.email}-${index}`}>
             <td><span className={`trust-pill ${(row as any).trustTone || 'none'}`}>{row.quality || 'Review'}</span></td>
@@ -460,7 +460,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
 
       <div className="card" style={{ padding: 18 }}>
         <div className="actions" style={{ justifyContent: 'space-between' }}>
-          <h3 style={{ margin: 0 }}>Recent checks</h3>
+          <h3 style={{ margin: 0 }}>Recent website checks</h3>
           <button className="btn secondary mini" type="button" onClick={loadStats}>Refresh</button>
         </div>
         <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Business</th><th>State</th><th>Email</th><th>Trust</th><th>Attempts</th></tr></thead><tbody>

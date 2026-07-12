@@ -6,7 +6,7 @@ export default async function AutoScoutPage() {
   if (!workspace) return <div className="error">Workspace error: {error}</div>;
   return (
     <div className="stack">
-      <div className="page-title"><h2>Auto Scout</h2><p>Queue backend email research so work can continue from cloud data, not only the active browser tab.</p></div>
+      <div className="page-title"><h2>Find Missing Emails</h2><p>Scout checks business websites and saves trusted emails. Results show on this same page.</p></div>
       <AutoScoutClient workspace={workspace} />
     </div>
   );

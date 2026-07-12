@@ -395,3 +395,76 @@ code { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-
   .sidebar-toggle.floating { display:inline-flex; }
   .main-topbar { padding-left: 110px; }
 }
+
+/* v10.7: calm navigation, setup checklist, and challenges */
+.setup-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.setup-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-height: 74px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255,255,255,.04);
+}
+.setup-item:hover { background: rgba(255,255,255,.075); }
+.setup-item.done { border-color: rgba(51,214,159,.32); background: rgba(51,214,159,.08); }
+.setup-check {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #05111d;
+  background: var(--accent);
+  font-weight: 950;
+}
+.setup-item.done .setup-check { background: var(--ok); }
+.setup-item strong { display: block; font-size: 13px; }
+.setup-item small { display: block; color: var(--muted); margin-top: 4px; line-height: 1.35; }
+.big-action { min-height: 86px; align-content: center; }
+.challenge-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.challenge-card {
+  text-align: left;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(255,255,255,.045);
+  display: grid;
+  gap: 6px;
+}
+.challenge-card:hover { background: rgba(255,255,255,.075); }
+.challenge-card.done { border-color: rgba(51,214,159,.34); background: rgba(51,214,159,.08); }
+.challenge-icon { font-size: 24px; line-height: 1; }
+.challenge-icon.big { font-size: 40px; }
+.challenge-card strong { font-size: 13px; }
+.challenge-card small { color: var(--muted); }
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(0,0,0,.62);
+}
+.modal-card {
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100vh - 36px));
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(9,17,30,.98);
+  box-shadow: 0 30px 80px rgba(0,0,0,.55);
+  padding: 18px;
+}
+.simple-steps { color: var(--text); display: grid; gap: 10px; margin: 16px 0 0; padding-left: 22px; }
+.simple-steps li { color: var(--muted); line-height: 1.45; }
+@media (max-width: 900px) {
+  .setup-list { grid-template-columns: 1fr; }
+}

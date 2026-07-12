@@ -6,13 +6,15 @@ const pages = [
       ["Download today report", "Downloads a small report you can keep or send to someone."],
       ["Notification bell", "Opens small alerts from Scout, like replies or due sends."],
       ["Live Work", "Small box at the bottom. It shows what Scout is doing right now."],
+      ["Setup checklist", "Twelve setup steps. Scout ticks a step when it sees that you have done it."],
+      ["Next action cards", "Big shortcuts for Find emails, Send emails, Send follow-ups, and Challenges."],
     ],
   },
   {
     title: "Find Leads",
     items: [
       ["Upload CSV", "Add your lead list from a spreadsheet."],
-      ["Auto Scout", "Scout checks leads that are missing emails. It looks at websites and pages to find a useful email."],
+      ["Auto Scout", "Scout checks leads that are missing emails. Results appear on the same page below the Start button."],
       ["Verify emails", "Check leads before sending. You can remove bad emails or ask Scout to look again."],
       ["Leads list", "Shows the people and businesses you have uploaded or found."],
       ["Country filter", "Shows countries found in your uploaded leads. It does not show street addresses."],
@@ -38,6 +40,7 @@ const pages = [
       ["More options", "Shows extra tools like test-only mode, fixing lead status, checking bad inboxes, and downloading results."],
       ["Ready Leads", "Hidden by default. Click Show when you want to choose exact leads."],
       ["Preview", "Hidden by default. Click Show when you want to see the email before sending."],
+      ["Follow-up template to use", "Choose the follow-up message before sending due follow-ups. First-message templates are not used here."],
       ["Send Due Follow-ups Now", "Sends follow-up emails now to people who are due."],
       ["Schedule Email", "Save a first-email send for later. Open Scout at that time or use the phone reminder."],
       ["Run Due Sends Now", "Starts saved sends whose time has arrived."],
@@ -62,6 +65,16 @@ const pages = [
       ["Subject", "The email title."],
       ["Body", "The email message."],
       ["Fields like {name}", "Scout replaces these with the lead name, company, website, and other details."],
+    ],
+  },
+
+  {
+    title: "Challenges",
+    items: [
+      ["Challenge card", "A small goal, like send 100 messages or get 10 real replies."],
+      ["Progress bar", "Shows how close you are to finishing that challenge."],
+      ["Click a challenge", "A popup opens and tells you the exact steps to complete it."],
+      ["Completed challenge", "Scout marks it when your numbers reach the target."],
     ],
   },
   {
@@ -130,7 +143,7 @@ export default function HelpPage() {
           <li>Pick audience, country, template, sender, and count.</li>
           <li>Click Send Now.</li>
           <li>Check Replies later.</li>
-          <li>After 72 hours, go to Due Follow-ups and click Send Due Follow-ups Now.</li>
+          <li>After 72 hours, go to Due Follow-ups, choose the follow-up template, and click Send Due Follow-ups Now.</li>
         </ol>
       </div>
     </div>

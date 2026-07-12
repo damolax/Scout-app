@@ -175,6 +175,39 @@ function emailsPerReply(sent: number, replies: number) {
   return replies ? (sent / replies).toFixed(1) : '-';
 }
 
+
+function SetupChecklist({ tasks }: { tasks: Array<{ title: string; href: string; done: boolean; hint: string }> }) {
+  const done = tasks.filter((task) => task.done).length;
+  return (
+    <div className="card" style={{ padding: 18 }}>
+      <div className="actions" style={{ justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Setup checklist</h3>
+          <p className="muted" style={{ margin: '6px 0 0' }}>Do these in order. Scout marks each step when it sees the result.</p>
+        </div>
+        <span className="badge">{done} / {tasks.length} complete</span>
+      </div>
+      <div className="setup-list" style={{ marginTop: 14 }}>
+        {tasks.map((task, index) => (
+          <Link href={task.href} className={`setup-item ${task.done ? 'done' : ''}`} key={task.title}>
+            <span className="setup-check">{task.done ? '✓' : index + 1}</span>
+            <span><strong>{task.title}</strong><small>{task.hint}</small></span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NextActionCard({ title, href, helper }: { title: string; href: string; helper: string }) {
+  return (
+    <Link className="quick-link-card big-action" href={href}>
+      <strong>{title}</strong>
+      <span>{helper}</span>
+    </Link>
+  );
+}
+
 function KpiCard({ title, value, previous, compareLabel, helper }: { title: string; value: number | string; previous?: number; compareLabel?: string; helper?: string }) {
   const numeric = typeof value === 'number' ? value : null;
   const change = numeric !== null && previous !== undefined ? pctChange(numeric, previous) : null;
@@ -281,7 +314,13 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     prevReplies,
     periodNoInbox,
     prevNoInbox,
-    scheduled
+    scheduled,
+    gmailConnected,
+    initialTemplates,
+    followUpTemplates,
+    totalSentAll,
+    autoRepliesAll,
+    totalResearchDoneAll
   ] = await Promise.all([
     safeCount('businesses', workspace.id),
     safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'pending' }] }),
@@ -300,7 +339,13 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     previous ? safeCount('reply_history', workspace.id, { filters: [{ column: 'is_real_reply', value: true }], dateColumn: 'received_at', window: previous }) : Promise.resolve(0),
     safeCount('no_inbox_records', workspace.id, { dateColumn: 'created_at', window: period.current }),
     previous ? safeCount('no_inbox_records', workspace.id, { dateColumn: 'created_at', window: previous }) : Promise.resolve(0),
-    safeCount('message_schedules', workspace.id, { filters: [{ column: 'status', value: 'scheduled' }] })
+    safeCount('message_schedules', workspace.id, { filters: [{ column: 'status', value: 'scheduled' }] }),
+    safeCount('gmail_accounts', workspace.id, { inFilters: [{ column: 'status', values: ['connected', 'active'] }] }),
+    safeCount('templates', workspace.id, { filters: [{ column: 'template_type', value: 'initial' }] }),
+    safeCount('templates', workspace.id, { filters: [{ column: 'template_type', value: 'follow_up' }] }),
+    safeCount('sent_messages', workspace.id, { inFilters: [{ column: 'status', values: ['sent', 'delivered'] }] }),
+    safeCount('reply_history', workspace.id, { filters: [{ column: 'is_auto_reply', value: true }] }),
+    safeCount('email_research_jobs', workspace.id, { filters: [{ column: 'status', value: 'done' }] })
   ]);
 
   let dueFollowups = 0;
@@ -324,18 +369,43 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
   const periodPerformance = await fetchPeriodMessages(workspace.id, period).catch(() => ({ templates: [], senders: [] }));
   const periodResponseRate = ratio(periodReplies, periodSent);
   const periodEmailsPerReply = emailsPerReply(periodSent, periodReplies);
+  const workspaceAny = workspace as any;
+  const hasSignature = Boolean(workspaceAny.email_signature_text || workspaceAny.email_signature_html || workspaceAny.email_logo_url);
+  const setupTasks = [
+    { title: 'Connect your Gmail accounts', href: '/settings', done: gmailConnected > 0, hint: 'Scout needs at least one Gmail account before it can send.' },
+    { title: 'Add your signature and logo', href: '/settings', done: hasSignature, hint: 'This goes at the bottom of your emails.' },
+    { title: 'Add your first-message templates', href: '/templates', done: initialTemplates > 0, hint: 'These are used for new leads.' },
+    { title: 'Add your follow-up templates', href: '/templates', done: followUpTemplates > 0, hint: 'These are used after 72 hours with no real reply.' },
+    { title: 'Import your lead list', href: '/upload', done: totalBusinesses > 0, hint: 'Upload CSV leads before searching or sending.' },
+    { title: 'Find emails with Auto Scout', href: '/auto-scout', done: totalResearchDoneAll > 0, hint: 'Scout checks websites for missing emails.' },
+    { title: 'Get trusted emails ready', href: '/verify', done: currentReady > 0, hint: 'Trusted leads are the safe list for sending.' },
+    { title: 'Send your first message', href: '/message', done: totalSentAll > 0, hint: 'Send Now works while Scout is open.' },
+    { title: 'Save one send for later', href: '/message', done: scheduled > 0, hint: 'Use this when timing matters by country.' },
+    { title: 'Check replies', href: '/replies', done: periodReplies > 0 || autoRepliesAll > 0, hint: 'Scout separates real replies from auto replies.' },
+    { title: 'Send due follow-ups', href: '/message', done: dueFollowups === 0 && totalSentAll > 0, hint: 'After 72 hours, send follow-ups from the Due Follow-ups box.' },
+    { title: 'Complete your first challenge', href: '/challenges', done: totalSentAll >= 10 || currentReady >= 10 || periodReplies >= 1, hint: 'Challenges make progress obvious.' }
+  ];
 
   return (
     <div className="stack">
       <div className="topbar">
         <div className="page-title">
           <h2>Dashboard</h2>
-          <p>Home view for scouting, message sending, replies, and performance by time period.</p>
+          <p>Your simple control center. Start with the checklist, then choose the next action.</p>
         </div>
         <span className="badge">Workspace: {workspace.name}</span>
       </div>
 
       <SendTimeStrip />
+
+      <SetupChecklist tasks={setupTasks} />
+
+      <div className="quick-links">
+        <NextActionCard title="Find missing emails" href="/auto-scout" helper="Use Auto Scout and see results on the same page." />
+        <NextActionCard title="Send emails" href="/message" helper="Pick audience, template, sender, and click Send Now." />
+        <NextActionCard title="Send due follow-ups" href="/message" helper="Use the follow-up template and send when ready." />
+        <NextActionCard title="Try challenges" href="/challenges" helper="Click a goal and Scout shows exact steps." />
+      </div>
 
       <div className="card" style={{ padding: 16 }}>
         <div className="actions" style={{ justifyContent: 'space-between' }}>

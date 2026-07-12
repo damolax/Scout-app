@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-6-simple-navigation-cleanup",
-  "version": "10.6.0",
+  "name": "scout-app-v10-7-easy-navigation-challenges",
+  "version": "10.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.5: pauses senders when Gmail limit is reached and adds template attachments for PDFs/images/files."
+  "description": "Scout App v10.7: easier navigation, dashboard checklist, challenge board, and clearer follow-up template choice."
 }
