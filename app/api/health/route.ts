@@ -16,7 +16,7 @@ export async function GET() {
     googleClientId: has('NEXT_PUBLIC_GOOGLE_CLIENT_ID') || has('GOOGLE_CLIENT_ID'),
     googleClientSecret: has('GOOGLE_CLIENT_SECRET'),
     backendUrl: process.env.NEXT_PUBLIC_BACKEND_URL || '',
-    workerSecretConfigured: has('RUN_ALL_WORKER_SECRET'),
+    legacyWorkerSecretConfigured: has('RUN_ALL_WORKER_SECRET'),
     defaultWorkspaceId: process.env.SCOUT_DEFAULT_WORKSPACE_ID || '00000000-0000-4000-8000-000000000001'
   };
 

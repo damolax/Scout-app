@@ -25,6 +25,24 @@ type WorkerSummary = {
 
 const MAX_WORKER_BATCH_SIZE = 2000;
 const MAX_SCHEDULES_PER_RUN = 25;
+const CONTACTABLE_BUSINESS_STATUSES = ["ready", "found", "connected"];
+const LOCATION_RAW_KEYS = [
+  "location",
+  "country",
+  "country_name",
+  "countryName",
+  "market",
+  "city",
+  "region",
+  "state",
+  "province",
+  "address",
+  "business_location",
+  "businessLocation",
+  "hq_location",
+  "headquarters",
+  "territory",
+];
 
 function b64url(input: string) {
   return Buffer.from(input, "utf8")
@@ -65,6 +83,74 @@ function normalizeEmail(email: unknown) {
   return String(email || "")
     .trim()
     .toLowerCase();
+}
+
+function cleanLocationValue(value: unknown) {
+  const cleaned = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  if (cleaned.length > 90) return "";
+  const lower = cleaned.toLowerCase();
+  if (lower.includes("@")) return "";
+  if (lower.startsWith("http")) return "";
+  if (lower.includes("www.")) return "";
+  if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleaned)) return "";
+  return cleaned;
+}
+
+function addLocationCandidate(target: Set<string>, value: unknown) {
+  const cleaned = cleanLocationValue(value);
+  if (!cleaned) return;
+  const parts = cleaned
+    .split(/[|;\n]/g)
+    .map((item) => cleanLocationValue(item))
+    .filter(Boolean);
+  if (parts.length > 1) {
+    parts.forEach((part) => target.add(part));
+    return;
+  }
+  target.add(cleaned);
+}
+
+function extractBusinessLocations(business: AnyRow) {
+  const values = new Set<string>();
+  addLocationCandidate(values, business.location);
+  const raw = business.raw && typeof business.raw === "object" ? business.raw : {};
+  for (const key of LOCATION_RAW_KEYS) {
+    const direct = raw[key];
+    if (Array.isArray(direct)) direct.forEach((item) => addLocationCandidate(values, item));
+    else addLocationCandidate(values, direct);
+  }
+  for (const [key, value] of Object.entries(raw)) {
+    const normalizedKey = key.toLowerCase();
+    if (
+      normalizedKey.includes("location") ||
+      normalizedKey.includes("country") ||
+      normalizedKey.includes("market") ||
+      normalizedKey.includes("city") ||
+      normalizedKey.includes("region") ||
+      normalizedKey.includes("state") ||
+      normalizedKey.includes("address") ||
+      normalizedKey.includes("territory")
+    ) {
+      if (Array.isArray(value)) value.forEach((item) => addLocationCandidate(values, item));
+      else addLocationCandidate(values, value);
+    }
+  }
+  return Array.from(values);
+}
+
+function businessMatchesLocation(business: AnyRow, selectedLocation: string) {
+  const selected = cleanLocationValue(selectedLocation).toLowerCase();
+  if (!selected) return true;
+  return extractBusinessLocations(business).some((item) => item.toLowerCase() === selected);
+}
+
+function applyLocationFilter(rows: AnyRow[], selectedLocation: string) {
+  const selected = cleanLocationValue(selectedLocation);
+  if (!selected) return rows;
+  return rows.filter((business) => businessMatchesLocation(business, selected));
 }
 
 function isMissingRpcFunction(error: unknown) {
@@ -383,15 +469,16 @@ async function loadReadyBusinesses(
     schedule.audience_category_id || raw.audience_category_id || "",
   ).trim();
 
+  const queryLimit = cleanLocation ? Math.max(1000, Math.min(10000, limit * 8)) : limit;
   let query = supabase
     .from("businesses")
     .select("*")
     .eq("workspace_id", schedule.workspace_id)
-    .eq("status", "ready")
+    .in("status", CONTACTABLE_BUSINESS_STATUSES)
     .not("email", "is", null)
     .neq("email", "")
     .order("updated_at", { ascending: true })
-    .limit(limit);
+    .limit(queryLimit);
 
   if (selectedIds.length) query = query.in("id", selectedIds);
   if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
@@ -400,18 +487,16 @@ async function loadReadyBusinesses(
     query = query.or(
       `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
     );
-  if (cleanLocation) {
-    query = exactUploadedLocation
-      ? query.eq("location", cleanLocation)
-      : query.or(
-          `location.ilike.%${cleanLocation}%,source.ilike.%${cleanLocation}%,website.ilike.%${cleanLocation}%,domain.ilike.%${cleanLocation}%`,
-        );
+  if (cleanLocation && !exactUploadedLocation) {
+    query = query.or(
+      `location.ilike.%${cleanLocation}%,source.ilike.%${cleanLocation}%,website.ilike.%${cleanLocation}%,domain.ilike.%${cleanLocation}%`,
+    );
   }
 
   const { data, error } = await query;
   if (error) throw error;
   const unique = new Map<string, AnyRow>();
-  for (const row of data || []) {
+  for (const row of applyLocationFilter((data || []) as AnyRow[], cleanLocation)) {
     const email = normalizeEmail(row.email);
     if (email && !unique.has(email)) unique.set(email, row);
   }
@@ -871,7 +956,7 @@ async function runOneSchedule(
         stopped_at: stopped ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
         last_heartbeat_at: new Date().toISOString(),
-        last_error: stopped ? "Stopped by user." : shouldContinue ? `Chunk complete. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; cron will continue.` : null,
+        last_error: stopped ? "Stopped by user." : shouldContinue ? `Chunk complete. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; the open app will continue on the next check.` : null,
       })
       .eq("workspace_id", workspaceId)
       .eq("id", scheduleId);
@@ -880,7 +965,7 @@ async function runOneSchedule(
       type: shouldContinue ? "job_progress" : "job_completed",
       title: `${schedule.type === "follow_up" ? "Follow-up" : "Message"} job ${stopped ? "stopped" : shouldContinue ? "progress" : "completed"}`,
       message: shouldContinue
-        ? `Sent ${totalSent.toLocaleString()} so far. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; cron will continue.`
+        ? `Sent ${totalSent.toLocaleString()} so far. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; keep Scout open so it continues on the next check.`
         : `Sent ${totalSent.toLocaleString()}, failed ${totalFailed.toLocaleString()}, skipped ${totalSkipped.toLocaleString()}.`,
       entityType: "message_schedule",
       entityId: scheduleId,
@@ -985,7 +1070,7 @@ async function resetStaleRunningSchedules(
     .update({
       status: "scheduled",
       last_error:
-        "Resuming stale running job after worker timeout or page close.",
+        "Resuming stale running job after a previous run stopped unexpectedly.",
       resume_count: 1,
       updated_at: new Date().toISOString(),
     })
@@ -1050,7 +1135,7 @@ export async function GET(request: NextRequest) {
   try {
     if (!(await isAuthorizedWorkerRequest(request))) {
       return NextResponse.json(
-        { success: false, error: "Invalid schedule worker token or signed-in session." },
+        { success: false, error: "Invalid request. Sign in to Scout and run schedules from the app." },
         { status: 401 },
       );
     }
@@ -1078,7 +1163,7 @@ export async function POST(request: NextRequest) {
     const input = await request.json().catch(() => ({}));
     if (!(await isAuthorizedWorkerRequest(request, input))) {
       return NextResponse.json(
-        { success: false, error: "Invalid schedule worker token or signed-in session." },
+        { success: false, error: "Invalid request. Sign in to Scout and run schedules from the app." },
         { status: 401 },
       );
     }

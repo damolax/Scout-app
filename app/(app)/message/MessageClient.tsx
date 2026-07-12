@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { analyzeSpamRisk } from "@/lib/spam-guard";
 import { emitLiveActivity } from "@/lib/live-activity-client";
@@ -69,6 +69,25 @@ type TemplateMode = "specific" | "rotate";
 type SenderMode = "specific" | "rotate";
 type MessageKind = "initial" | "follow_up";
 
+const CONTACTABLE_BUSINESS_STATUSES = ["ready", "found", "connected"];
+const LOCATION_RAW_KEYS = [
+  "location",
+  "country",
+  "country_name",
+  "countryName",
+  "market",
+  "city",
+  "region",
+  "state",
+  "province",
+  "address",
+  "business_location",
+  "businessLocation",
+  "hq_location",
+  "headquarters",
+  "territory",
+];
+
 const READY_PAGE_SIZE = 100;
 const MAX_MESSAGE_BATCH_SIZE = 50000;
 const SHORTCODES = [
@@ -118,6 +137,85 @@ function normalizeEmail(email: unknown) {
   return String(email || "")
     .trim()
     .toLowerCase();
+}
+
+function cleanLocationValue(value: unknown) {
+  const cleaned = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  if (cleaned.length > 90) return "";
+  const lower = cleaned.toLowerCase();
+  if (lower.includes("@")) return "";
+  if (lower.startsWith("http")) return "";
+  if (lower.includes("www.")) return "";
+  if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleaned)) return "";
+  return cleaned;
+}
+
+function addLocationCandidate(target: Set<string>, value: unknown) {
+  const cleaned = cleanLocationValue(value);
+  if (!cleaned) return;
+  const parts = cleaned
+    .split(/[|;\n]/g)
+    .map((item) => cleanLocationValue(item))
+    .filter(Boolean);
+  if (parts.length > 1) {
+    parts.forEach((part) => target.add(part));
+    return;
+  }
+  target.add(cleaned);
+}
+
+function extractBusinessLocations(business: Partial<Business>) {
+  const values = new Set<string>();
+  addLocationCandidate(values, business.location);
+  const raw = business.raw && typeof business.raw === "object" ? business.raw : {};
+  for (const key of LOCATION_RAW_KEYS) {
+    const direct = (raw as Record<string, unknown>)[key];
+    if (Array.isArray(direct)) direct.forEach((item) => addLocationCandidate(values, item));
+    else addLocationCandidate(values, direct);
+  }
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const normalizedKey = key.toLowerCase();
+    if (
+      normalizedKey.includes("location") ||
+      normalizedKey.includes("country") ||
+      normalizedKey.includes("market") ||
+      normalizedKey.includes("city") ||
+      normalizedKey.includes("region") ||
+      normalizedKey.includes("state") ||
+      normalizedKey.includes("address") ||
+      normalizedKey.includes("territory")
+    ) {
+      if (Array.isArray(value)) value.forEach((item) => addLocationCandidate(values, item));
+      else addLocationCandidate(values, value);
+    }
+  }
+  return Array.from(values);
+}
+
+function businessMatchesLocation(business: Business, selectedLocation: string) {
+  const selected = cleanLocationValue(selectedLocation).toLowerCase();
+  if (!selected) return true;
+  return extractBusinessLocations(business).some(
+    (item) => item.toLowerCase() === selected,
+  );
+}
+
+function applyLocationFilter(rows: Business[], selectedLocation: string) {
+  const selected = cleanLocationValue(selectedLocation);
+  if (!selected) return rows;
+  return rows.filter((business) => businessMatchesLocation(business, selected));
+}
+
+function contactableStatusQuery(query: any) {
+  return query.in("status", CONTACTABLE_BUSINESS_STATUSES);
+}
+
+function isMissingReadyContactIssue(error: unknown) {
+  const text = formatError(error).toLowerCase();
+  return text.includes("no ready to contact") || text.includes("ready to contact with email");
 }
 
 function isMissingRpcFunction(error: unknown) {
@@ -319,6 +417,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [stopBusyId, setStopBusyId] = useState("");
+  const [autoRunSchedules, setAutoRunSchedules] = useState(true);
+  const [scheduleRunnerBusy, setScheduleRunnerBusy] = useState(false);
+  const scheduleRunnerRef = useRef(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [lastResults, setLastResults] = useState<
@@ -443,17 +544,16 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   }
 
   async function loadAvailableLocations() {
-    let query = supabase
-      .from("businesses")
-      .select("location")
-      .eq("workspace_id", workspace.id)
-      .eq("status", "ready")
-      .not("email", "is", null)
-      .neq("email", "")
-      .not("location", "is", null)
-      .neq("location", "")
-      .order("location", { ascending: true })
-      .range(0, 9999);
+    let query = contactableStatusQuery(
+      supabase
+        .from("businesses")
+        .select("id,location,raw,category,category_id,email,status,updated_at")
+        .eq("workspace_id", workspace.id)
+        .not("email", "is", null)
+        .neq("email", "")
+        .order("updated_at", { ascending: false })
+        .range(0, 19999),
+    );
 
     if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
     else {
@@ -465,10 +565,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (locationError) throw locationError;
 
     const counts = new Map<string, number>();
-    for (const row of (data || []) as Array<{ location?: string | null }>) {
-      const value = String(row.location || "").trim();
-      if (!value) continue;
-      counts.set(value, (counts.get(value) || 0) + 1);
+    for (const row of (data || []) as Business[]) {
+      for (const value of extractBusinessLocations(row)) {
+        counts.set(value, (counts.get(value) || 0) + 1);
+      }
     }
 
     const options = Array.from(counts.entries())
@@ -489,15 +589,17 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       typeof window !== "undefined"
         ? new URL(window.location.href).searchParams.get("business")
         : "";
-    let query = supabase
-      .from("businesses")
-      .select("*", { count: "exact" })
-      .eq("workspace_id", workspace.id)
-      .eq("status", "ready")
-      .not("email", "is", null)
-      .neq("email", "")
-      .order("updated_at", { ascending: true })
-      .limit(READY_PAGE_SIZE);
+    const pageLimit = cleanCountry ? 10000 : READY_PAGE_SIZE;
+    let query = contactableStatusQuery(
+      supabase
+        .from("businesses")
+        .select("*", { count: "exact" })
+        .eq("workspace_id", workspace.id)
+        .not("email", "is", null)
+        .neq("email", "")
+        .order("updated_at", { ascending: true })
+        .limit(pageLimit),
+    );
     if (cleanSearch)
       query = query.or(
         `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
@@ -505,10 +607,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
     else if (cleanCategory)
       query = query.ilike("category", `%${cleanCategory}%`);
-    if (cleanCountry) query = query.eq("location", cleanCountry);
     const { data, error: loadError, count } = await query;
     if (loadError) throw loadError;
-    let rows = (data || []) as Business[];
+    let allRows = applyLocationFilter((data || []) as Business[], cleanCountry);
+    let rows = allRows.slice(0, READY_PAGE_SIZE);
     let selected: Record<string, boolean> = {};
     if (targetBusinessId) {
       const { data: target, error: targetError } = await supabase
@@ -528,8 +630,11 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       }
     }
     setReadyContacts(rows);
-    setReadyTotal(count || rows.length);
+    setReadyTotal(cleanCountry ? allRows.length : count || rows.length);
     setSelectedContacts(selected);
+    if (!rows.length && cleanCountry) {
+      setStatus(`No contactable emails matched ${cleanCountry}. Try All available locations or run Repair Ready Contacts.`);
+    }
   }
 
   async function loadRecentSent() {
@@ -640,6 +745,23 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id]);
 
+  useEffect(() => {
+    if (!workspace.id || !autoRunSchedules) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (busy || loading || scheduleRunnerBusy || scheduleRunnerRef.current) return;
+      const now = Date.now();
+      const hasDueSchedule = schedules.some(
+        (schedule) =>
+          String(schedule.status || "") === "scheduled" &&
+          new Date(schedule.scheduled_for).getTime() <= now,
+      );
+      if (hasDueSchedule) runDueSchedulesFromApp({ silent: true }).catch(() => undefined);
+    }, 15000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.id, autoRunSchedules, busy, loading, scheduleRunnerBusy, schedules]);
+
   function templatesForSend(kind: MessageKind = "initial") {
     const requiredType = kind === "follow_up" ? "follow_up" : "initial";
     const hasRequiredType = (template: MessageTemplate) =>
@@ -705,7 +827,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       ),
     );
     if (selected.length) {
-      for (const business of selected) {
+      for (const business of applyLocationFilter(selected, countryFilter)) {
         const key = normalizeEmail(business.email);
         if (key && !unique.has(key)) unique.set(key, business);
       }
@@ -714,15 +836,17 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     const cleanSearch = readySearch.trim().replace(/[%_]/g, "");
     const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
     const cleanCountry = countryFilter.trim().replace(/[%_]/g, "");
-    let query = supabase
-      .from("businesses")
-      .select("*")
-      .eq("workspace_id", workspace.id)
-      .eq("status", "ready")
-      .not("email", "is", null)
-      .neq("email", "")
-      .order("updated_at", { ascending: true })
-      .limit(limit);
+    const queryLimit = cleanCountry ? Math.max(1000, Math.min(10000, limit * 8)) : limit;
+    let query = contactableStatusQuery(
+      supabase
+        .from("businesses")
+        .select("*")
+        .eq("workspace_id", workspace.id)
+        .not("email", "is", null)
+        .neq("email", "")
+        .order("updated_at", { ascending: true })
+        .limit(queryLimit),
+    );
     if (cleanSearch)
       query = query.or(
         `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
@@ -730,10 +854,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
     else if (cleanCategory)
       query = query.ilike("category", `%${cleanCategory}%`);
-    if (cleanCountry) query = query.eq("location", cleanCountry);
     const { data, error: loadError } = await query;
     if (loadError) throw loadError;
-    for (const business of (data || []) as Business[]) {
+    for (const business of applyLocationFilter((data || []) as Business[], cleanCountry)) {
       const key = normalizeEmail(business.email);
       if (key && !unique.has(key)) unique.set(key, business);
     }
@@ -997,7 +1120,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     });
     setSelectedContacts({});
     setStatus(
-      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). You can leave this page; the server job will continue it when the worker/cron runs. Job: ${scheduleId}`,
+      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). Keep Scout open and the in-app runner will continue it. Job: ${scheduleId}`,
     );
     await Promise.all([
       loadSchedules(),
@@ -1031,7 +1154,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     });
     try {
       // v8.48: Send Now uses the proven immediate sender again.
-      // It does NOT depend on cron. Schedules/background resume still use message_schedules.
+      // It does not use cron. Send Now runs directly from this open page.
       const messageKind: MessageKind =
         options?.messageKind || (options?.isFollowUp ? "follow_up" : "initial");
       const templatePool = templatesForSend(messageKind);
@@ -1128,7 +1251,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             businessCategoryFilter,
             countryFilter,
             locationFilter: countryFilter,
-            locationFilterMode: "exact_uploaded_location",
+            locationFilterMode: "uploaded_list_multi_field",
             messageKind,
             isFollowUp: !!options?.isFollowUp,
             followupSegment: options?.followupSegment || null,
@@ -1148,7 +1271,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       let stopped = false;
       const requested = contacts.length;
       setStatus(
-        `Sending now: 0 / ${requested.toLocaleString()} started. This send does not need cron while this page is open.`,
+        `Sending now: 0 / ${requested.toLocaleString()} started. Keep this page open until it finishes.`,
       );
       emitLiveActivity({
         kind: "send",
@@ -1499,7 +1622,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             business_category_filter: businessCategoryFilter,
             country_filter: countryFilter,
             location_filter: countryFilter,
-            location_filter_mode: "exact_uploaded_location",
+            location_filter_mode: "uploaded_list_multi_field",
             followup_segment:
               scheduleType === "follow_up" ? followUpSegment : null,
             template_mode: templateMode,
@@ -1518,7 +1641,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           },
         });
       if (insertError) throw insertError;
-      setStatus("Schedule saved with the current template and sender options.");
+      setStatus("Schedule saved. Keep Scout open on this page; the in-app schedule runner will start it when the time arrives.");
       await loadSchedules();
     } catch (err) {
       setError(formatError(err));
@@ -1622,20 +1745,31 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     });
   }
 
-  async function sendDueSchedulesNow() {
-    setBusy(true);
-    setError("");
+  async function runDueSchedulesFromApp(options?: { silent?: boolean }) {
+    if (scheduleRunnerRef.current) return { ran: 0, skipped: true };
+    scheduleRunnerRef.current = true;
+    setScheduleRunnerBusy(true);
+    if (!options?.silent) {
+      setBusy(true);
+      setError("");
+      setStatus("Running due schedules from this open app...");
+    }
     try {
-      setStatus("Running scheduled sender worker now...");
       const response = await fetch("/api/message/run-schedules", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ limit: 3, workspaceId: workspace.id }),
+        body: JSON.stringify({
+          limit: 1,
+          workspaceId: workspace.id,
+          targetLimit: 25,
+          senderRunLimit: 25,
+          source: "open_app_schedule_runner",
+        }),
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json?.success === false)
         throw new Error(
-          json?.error || `Schedule worker failed with HTTP ${response.status}`,
+          json?.error || `Due schedule run failed with HTTP ${response.status}`,
         );
       const results = Array.isArray(json.results) ? json.results : [];
       const sent = results.reduce(
@@ -1650,9 +1784,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         (sum: number, row: any) => sum + Number(row.skipped || 0),
         0,
       );
-      setStatus(
-        `Scheduled worker finished. Schedules processed: ${Number(json.ran || 0)}. Sent ${sent}, failed ${failed}, skipped ${skipped}.`,
-      );
+      if (Number(json.ran || 0) > 0 || !options?.silent) {
+        setStatus(
+          Number(json.ran || 0) > 0
+            ? `Open-app schedule runner processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. It will continue while this page stays open.`
+            : "No due schedules right now.",
+        );
+      }
       await Promise.all([
         loadSchedules(),
         loadReadyContacts(),
@@ -1660,11 +1798,20 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         loadDueFollowUps(),
         loadAccounts(),
       ]);
+      return json;
     } catch (err) {
-      setError(formatError(err));
+      if (!options?.silent) setError(formatError(err));
+      else setStatus(`Auto-run schedule check failed: ${formatError(err)}`);
+      return { ran: 0, error: formatError(err) };
     } finally {
-      setBusy(false);
+      scheduleRunnerRef.current = false;
+      setScheduleRunnerBusy(false);
+      if (!options?.silent) setBusy(false);
     }
+  }
+
+  async function sendDueSchedulesNow() {
+    await runDueSchedulesFromApp({ silent: false });
   }
 
   async function syncBlockedAndBounced() {
@@ -1799,6 +1946,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       {activeSchedules.length ? (
         <div className="card" style={{ padding: 18 }}>
           <h3>Active Sending Jobs</h3>
+          <p className="muted">These jobs are controlled from this app. No cron is required.</p>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Type</th><th>Status</th><th>Progress</th><th>Scheduled</th><th>Action</th></tr></thead>
@@ -1854,7 +2002,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               ))}
             </select>
             <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-              Only locations found in your uploaded Ready leads are shown.
+              Only locations found in your uploaded contactable leads are shown. Scout scans location, country, city, region, market, address, and raw uploaded fields.
             </p>
           </div>
           <div>
@@ -2305,10 +2453,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <h3>Follow Up</h3>
+          <h3>Due Follow-ups — 72h no real response</h3>
           <p className="muted">
-            Send a follow-up to people who have not sent a real reply.
+            These are contacts Scout found from sent emails older than 72 hours with no real human reply. Auto-replies are kept separate.
           </p>
+          <div className="notice" style={{ marginBottom: 12 }}>
+            Due now: <strong>{dueFollowUps.length.toLocaleString()}</strong> contact(s).
+          </div>
           <div className="grid grid-3">
             <div>
               <label className="label">Segment</label>
@@ -2347,7 +2498,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 disabled={busy || !dueFollowUps.length}
                 onClick={scheduleFollowUpsForDue}
               >
-                Schedule Follow-ups
+                Schedule Due Follow-ups
               </button>
             </div>
           </div>
@@ -2358,7 +2509,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               disabled={busy || !dueFollowUps.length}
               onClick={sendDueFollowUpsNow}
             >
-              Send Follow-ups Now
+              Send Due Follow-ups Now
             </button>
             <button
               className="btn secondary"
@@ -2401,7 +2552,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 {!dueFollowUps.length ? (
                   <tr>
                     <td colSpan={5} className="muted">
-                      No follow-ups due for this segment.
+                      No due follow-ups yet. Scout checks sent emails older than 72 hours, excludes real replies, bounces, blocks, and no-inbox records.
                     </td>
                   </tr>
                 ) : null}
@@ -2412,7 +2563,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedule Email</h3>
-          <p className="muted">Pick a time and count. It can run later even if you leave.</p>
+          <p className="muted">Pick a time and count. Schedules now run from the open app, not cron. Keep Scout open when you want scheduled work to start.</p>
           <div className="grid grid-3">
             <div>
               <label className="label">Type</label>
@@ -2448,6 +2599,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               />
             </div>
           </div>
+          <label className="checkbox-row" style={{ marginTop: 12 }}>
+            <input
+              type="checkbox"
+              checked={autoRunSchedules}
+              onChange={(e) => setAutoRunSchedules(e.target.checked)}
+            />{" "}
+            Auto-run due schedules while this page is open
+          </label>
           <div className="actions" style={{ marginTop: 12 }}>
             <button
               className="btn secondary"
@@ -2460,11 +2619,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             <button
               className="btn"
               type="button"
-              disabled={busy}
+              disabled={busy || scheduleRunnerBusy}
               onClick={sendDueSchedulesNow}
             >
-Run Due Sends Now
+              {scheduleRunnerBusy ? "Running Due Sends…" : "Run Due Sends Now"}
             </button>
+          </div>
+          <div className="notice" style={{ marginTop: 10 }}>
+            No cron is needed. A saved schedule starts automatically only while Scout is open, or when you click Run Due Sends Now.
           </div>
           <div className="table-wrap" style={{ marginTop: 12 }}>
             <table>

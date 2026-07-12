@@ -435,7 +435,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
         <div className="actions" style={{ justifyContent: 'space-between' }}>
           <div>
             <h3 style={{ margin: 0 }}>Reply Sync</h3>
-            <p className="muted" style={{ marginBottom: 0 }}>Native Gmail sync runs from the Operations worker and can also be triggered here. Real human replies move businesses to Responded. Auto replies, bounces, blocked messages, and Gmail limit notices are tracked separately and do not count as real replies.</p>
+            <p className="muted" style={{ marginBottom: 0 }}>Native Gmail sync runs from the app runner and can also be triggered here. Real human replies move businesses to Responded. Auto replies, bounces, blocked messages, and Gmail limit notices are tracked separately and do not count as real replies.</p>
           </div>
           <button className="btn secondary" onClick={() => loadAll().catch((err) => setError(formatError(err)))} disabled={busy}>Refresh</button>
         </div>

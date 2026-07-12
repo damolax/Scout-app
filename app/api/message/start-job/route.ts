@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       business_category_filter: body.businessCategoryFilter || '',
       country_filter: body.locationFilter || body.countryFilter || '',
       location_filter: body.locationFilter || body.countryFilter || '',
-      location_filter_mode: body.locationFilter || body.countryFilter ? 'exact_uploaded_location' : '',
+      location_filter_mode: body.locationFilter || body.countryFilter ? 'uploaded_list_multi_field' : '',
       audience_category_id: body.audienceCategoryId || null,
       audience_category_name: body.audienceCategoryName || null,
       ready_search: body.readySearch || '',
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
       userId: user.id,
       type: 'job_started',
       title: `${type === 'follow_up' ? 'Follow-up' : 'Message'} job started`,
-      message: `Scout created a durable server job for ${(selectedBusinessIds.length || targetCount).toLocaleString()} contact(s). You can leave this page; Operations/Cron will continue it.`,
+      message: `Scout created a saved job for ${(selectedBusinessIds.length || targetCount).toLocaleString()} contact(s). Keep Scout open and the in-app schedule runner will continue it.`,
       entityType: 'message_schedule',
       entityId: data.id,
       raw: { schedule_id: data.id, type, targetCount, selectedBusinessCount: selectedBusinessIds.length }

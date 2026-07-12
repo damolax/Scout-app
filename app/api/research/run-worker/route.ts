@@ -3,6 +3,7 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { createClient as createServerSupabaseClient } from '@/lib/supabase-server';
 
 function errorMessage(error: unknown) {
   if (!error) return 'Unknown error';
@@ -14,21 +15,55 @@ function errorMessage(error: unknown) {
 function workerSecretFromRequest(request: NextRequest, body?: Record<string, unknown>) {
   const auth = request.headers.get('authorization') || '';
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-  return String(body?.token || request.nextUrl.searchParams.get('token') || request.headers.get('x-auto-scout-worker-secret') || request.headers.get('x-cron-secret') || bearer || '');
+  return String(body?.token || request.nextUrl.searchParams.get('token') || request.nextUrl.searchParams.get('secret') || request.headers.get('x-auto-scout-worker-secret') || request.headers.get('x-cron-secret') || request.headers.get('x-worker-secret') || bearer || '');
+}
+
+async function signedInMemberCanRun(workspaceId: string) {
+  if (!workspaceId) return false;
+  try {
+    const supabase = await createServerSupabaseClient();
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) return false;
+    const { data: member, error: memberError } = await supabase
+      .from('workspace_members')
+      .select('workspace_id,user_id,approved')
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', user.id)
+      .eq('approved', true)
+      .maybeSingle();
+    if (memberError) return false;
+    return Boolean(member);
+  } catch {
+    return false;
+  }
+}
+
+function hasUsableResearchInput(row: any) {
+  const raw = row?.raw && typeof row.raw === 'object' ? row.raw : {};
+  const values = [row?.website, row?.domain, row?.name, raw.website, raw.domain, raw.url, raw.company_url, raw.business_url, raw.linkedin, raw.source_url];
+  return values.some((value) => String(value || '').trim());
+}
+
+function canAutoScoutStatus(status: unknown) {
+  const blocked = new Set(['contacted', 'responded', 'bad_inbox', 'bounced', 'no_inbox', 'blocked', 'invalid', 'duplicate', 'archived', 'unsubscribed', 'do_not_contact', 'sent']);
+  const value = String(status || '').trim().toLowerCase();
+  return !blocked.has(value);
 }
 
 async function enqueuePendingNoEmail(workspaceId: string, limit: number) {
   const supabase = createAdminClient();
   const { data: businesses, error } = await supabase
     .from('businesses')
-    .select('id')
+    .select('id,name,status,email,website,domain,raw,updated_at')
     .eq('workspace_id', workspaceId)
-    .in('status', ['pending', 'review', 'found'])
     .or('email.is.null,email.eq.')
     .order('updated_at', { ascending: true })
     .limit(limit);
   if (error) throw error;
-  const ids = (businesses || []).map((row) => row.id).filter(Boolean);
+  const ids = (businesses || [])
+    .filter((row: any) => canAutoScoutStatus(row.status) && hasUsableResearchInput(row))
+    .map((row) => row.id)
+    .filter(Boolean);
   if (!ids.length) return { checked: 0, enqueued: 0 };
   const payload = ids.map((business_id) => ({
     workspace_id: workspaceId,
@@ -61,18 +96,18 @@ async function resetStaleRunning(workspaceId?: string) {
 
 async function runWorker(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
-  const cronSecret = process.env.CRON_SECRET || process.env.AUTO_SCOUT_WORKER_SECRET || '';
+  const workspaceId = String(body.workspaceId || request.nextUrl.searchParams.get('workspaceId') || '').trim();
+  if (!workspaceId) return NextResponse.json({ success: false, error: 'Missing workspaceId.' }, { status: 400 });
+
+  const cronSecret = process.env.CRON_SECRET || process.env.AUTO_SCOUT_WORKER_SECRET || process.env.RUN_ALL_WORKER_SECRET || '';
   if (cronSecret) {
     const supplied = workerSecretFromRequest(request, body);
     const userAgent = request.headers.get('user-agent') || '';
     const isVercelCron = userAgent.toLowerCase().includes('vercel-cron');
-    if (!isVercelCron && supplied !== cronSecret) {
-      return NextResponse.json({ success: false, error: 'Unauthorized Auto Scout worker request.' }, { status: 401 });
+    if (!isVercelCron && supplied !== cronSecret && !(await signedInMemberCanRun(workspaceId))) {
+      return NextResponse.json({ success: false, error: 'Unauthorized Auto Scout worker request. Use a valid worker secret or run it while signed in.' }, { status: 401 });
     }
   }
-
-  const workspaceId = String(body.workspaceId || request.nextUrl.searchParams.get('workspaceId') || '').trim();
-  if (!workspaceId) return NextResponse.json({ success: false, error: 'Missing workspaceId.' }, { status: 400 });
 
   const cycles = Math.max(1, Math.min(25, Number(body.cycles || request.nextUrl.searchParams.get('cycles') || 8)));
   const batchSize = Math.max(1, Math.min(500, Number(body.batchSize || request.nextUrl.searchParams.get('batchSize') || 100)));

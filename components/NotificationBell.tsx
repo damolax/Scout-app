@@ -127,7 +127,7 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
           <div className="notification-popover-head">
             <div>
               <strong>Notifications</strong>
-              <p className="muted">Replies, bounces, worker updates</p>
+              <p className="muted">Replies, bounces, app updates</p>
             </div>
             <div className="actions compact">
               <button className="icon-btn" type="button" onClick={load} title="Refresh" disabled={loading}><RefreshCw size={15} /></button>

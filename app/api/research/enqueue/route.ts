@@ -38,20 +38,30 @@ export async function POST(request: NextRequest) {
 
     let query = supabase
       .from('businesses')
-      .select('id')
+      .select('id,name,status,email,website,domain,raw')
       .eq('workspace_id', workspaceId)
-      .in('status', ['pending', 'review', 'found'])
       .limit(limit);
 
     if (noEmailOnly) query = query.or('email.is.null,email.eq.');
 
     if (importBatchId) query = query.eq('import_batch_id', importBatchId);
-    if (businessIds.length) query = supabase.from('businesses').select('id').eq('workspace_id', workspaceId).in('id', businessIds).limit(limit);
+    if (businessIds.length) query = supabase.from('businesses').select('id,name,status,email,website,domain,raw').eq('workspace_id', workspaceId).in('id', businessIds).limit(limit);
 
     const { data: businesses, error: businessError } = await query;
     if (businessError) throw businessError;
 
-    const ids = (businesses || []).map((b) => b.id);
+    const blockedStatuses = new Set(['contacted', 'responded', 'bad_inbox', 'bounced', 'no_inbox', 'blocked', 'invalid', 'duplicate', 'archived', 'unsubscribed', 'do_not_contact', 'sent']);
+    function hasUsableResearchInput(row: any) {
+      const raw = row?.raw && typeof row.raw === 'object' ? row.raw : {};
+      const values = [row?.website, row?.domain, row?.name, raw.website, raw.domain, raw.url, raw.company_url, raw.business_url, raw.linkedin, raw.source_url];
+      return values.some((value) => String(value || '').trim());
+    }
+
+    const ids = (businesses || [])
+      .filter((b: any) => !blockedStatuses.has(String(b.status || '').trim().toLowerCase()))
+      .filter((b: any) => !noEmailOnly || !String(b.email || '').trim())
+      .filter((b: any) => hasUsableResearchInput(b))
+      .map((b) => b.id);
     if (!ids.length) return NextResponse.json({ success: true, enqueued: 0, message: 'No pending businesses found to enqueue.' });
 
     const payload = ids.map((id) => ({

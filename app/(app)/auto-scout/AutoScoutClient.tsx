@@ -59,6 +59,10 @@ function qualityLabel(result: any) {
   return 'unverified candidate';
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export default function AutoScoutClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const stopRef = useRef(false);
@@ -192,9 +196,62 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
 
   async function startAutoScout() {
     stopRef.current = false;
-    setRunning(false);
-    setMessage('Starting durable server Auto Scout worker. You can leave this page; queued/running jobs remain in the database and Operations/Cron can continue them.');
-    await runAutoScoutWorker();
+    setBusy(true);
+    setRunning(true);
+    setWorkerResult(null);
+    let totalQueued = 0;
+    let totalProcessed = 0;
+    let totalFound = 0;
+    let emptyRounds = 0;
+
+    try {
+      setMessage('Auto Scout starting now: queueing no-email leads, then checking websites/emails live.');
+      emitLiveActivity({ kind: 'auto_scout', status: 'starting', title: 'Auto Scout starting', message: 'Queueing no-email leads and starting live website/email checks.' });
+
+      const queueRes = await fetch('/api/research/enqueue', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, limit: queueLimit, noEmailOnly: true })
+      });
+      const queueJson = await queueRes.json().catch(() => ({}));
+      if (!queueRes.ok || !queueJson.success) throw new Error(queueJson.error || 'Queue request failed.');
+      totalQueued = Number(queueJson.enqueued || 0);
+      setMessage(`Auto Scout queued ${totalQueued.toLocaleString()} new job(s). Starting live checks now...`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'queued', title: 'Auto Scout queued', message: `Queued ${totalQueued.toLocaleString()} new job(s).` });
+
+      const maxCycles = Math.max(1, Math.min(50, workerCycles));
+      for (let cycle = 1; cycle <= maxCycles; cycle += 1) {
+        if (stopRef.current) break;
+        setMessage(`Auto Scout running live batch ${cycle.toLocaleString()} of ${maxCycles.toLocaleString()}...`);
+        emitLiveActivity({ kind: 'auto_scout', status: 'checking', title: 'Auto Scout running', message: `Running live batch ${cycle.toLocaleString()} of ${maxCycles.toLocaleString()}.` });
+
+        const batch = await runOneBatch();
+        totalProcessed += batch.processed;
+        totalFound += batch.found;
+        await loadStats();
+
+        if (!batch.processed) {
+          emptyRounds += 1;
+          if (emptyRounds >= 2) break;
+        } else {
+          emptyRounds = 0;
+        }
+        await sleep(600);
+      }
+
+      const stopped = stopRef.current;
+      setMessage(stopped
+        ? `Auto Scout stopped. Queued ${totalQueued.toLocaleString()}, processed ${totalProcessed.toLocaleString()}, found ${totalFound.toLocaleString()}.`
+        : `Auto Scout complete for this run. Queued ${totalQueued.toLocaleString()}, processed ${totalProcessed.toLocaleString()}, found ${totalFound.toLocaleString()}.`);
+      emitLiveActivity({ kind: 'auto_scout', status: stopped ? 'stopped' : 'complete', title: stopped ? 'Auto Scout stopped' : 'Auto Scout complete', message: `Processed ${totalProcessed.toLocaleString()} job(s); found ${totalFound.toLocaleString()} email(s).` });
+    } catch (error) {
+      setMessage(`Auto Scout failed: ${fmtError(error)}`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'failed', title: 'Auto Scout failed', message: fmtError(error) });
+    } finally {
+      setBusy(false);
+      setRunning(false);
+      await loadStats();
+    }
   }
 
   async function runBatchManually() {
@@ -259,8 +316,8 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     setBusy(true);
     setWorkerResult(null);
     try {
-      setMessage(`Running server Auto Scout worker for up to ${workerCycles} cycle(s). This can continue even if the browser is not looping batches.`);
-      emitLiveActivity({ kind: 'auto_scout', status: 'worker_running', title: 'Auto Scout worker running', message: `Running up to ${workerCycles} worker cycle(s).` });
+      setMessage(`Running extra Auto Scout batches for up to ${workerCycles} cycle(s). Keep this page open while it works.`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'worker_running', title: 'Auto Scout running', message: `Running up to ${workerCycles} live cycle(s).` });
       const res = await fetch('/api/research/run-worker', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -274,13 +331,13 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
         })
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json.success) throw new Error(json.error || 'Auto Scout worker failed.');
+      if (!res.ok || !json.success) throw new Error(json.error || 'Auto Scout run failed.');
       setWorkerResult(json);
-      setMessage(`Worker complete. Queued ${Number(json.enqueued || 0).toLocaleString()}, processed ${Number(json.processed || 0).toLocaleString()}, found ${Number(json.found || 0).toLocaleString()}. ${json.stoppedReason || ''}`);
-      emitLiveActivity({ kind: 'auto_scout', status: 'worker_complete', title: 'Auto Scout worker complete', message: `Queued ${Number(json.enqueued || 0).toLocaleString()}, processed ${Number(json.processed || 0).toLocaleString()}, found ${Number(json.found || 0).toLocaleString()}.` });
+      setMessage(`Extra run complete. Queued ${Number(json.enqueued || 0).toLocaleString()}, processed ${Number(json.processed || 0).toLocaleString()}, found ${Number(json.found || 0).toLocaleString()}. ${json.stoppedReason || ''}`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'worker_complete', title: 'Auto Scout complete', message: `Queued ${Number(json.enqueued || 0).toLocaleString()}, processed ${Number(json.processed || 0).toLocaleString()}, found ${Number(json.found || 0).toLocaleString()}.` });
       await loadStats();
     } catch (error) {
-      setMessage(`Worker failed: ${fmtError(error)}`);
+      setMessage(`Auto Scout run failed: ${fmtError(error)}`);
     } finally {
       setBusy(false);
     }
@@ -295,36 +352,36 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     <div className="stack">
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Needs Research</div><div className="num">{(stats.pending_no_email || 0).toLocaleString()}</div><p className="muted">Pending/review businesses with no email.</p></div>
-        <div className="card kpi"><div className="title">Waiting Jobs</div><div className="num">{(stats.queued || 0).toLocaleString()}</div><p className="muted">Queued for backend email research.</p></div>
+        <div className="card kpi"><div className="title">Waiting</div><div className="num">{(stats.queued || 0).toLocaleString()}</div><p className="muted">Queued for email research.</p></div>
         <div className="card kpi"><div className="title">Active Jobs</div><div className="num">{(stats.running || 0).toLocaleString()}</div><p className="muted">Currently marked running. Stale: {(stats.stale_running || 0).toLocaleString()}.</p></div>
         <div className="card kpi"><div className="title">Trusted Candidates Found</div><div className="num">{(stats.found_with_email || 0).toLocaleString()}</div><p className="muted">Passed strict rules. Still not inbox-proven until send/bounce tracking.</p></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Auto Scout Control</h3>
-        <p className="muted">Auto Scout controls the durable database queue and calls your backend email-finder. v8.33 uses server workers, so jobs remain queued/running even if you leave this page and come back later. It rejects captcha/CDN/code false positives, blocks repeated emails across unrelated businesses, then searches deeper: homepage, contact/about/team/impressum/privacy pages, mailto links, obfuscated emails, and Cloudflare-protected emails where possible.</p>
+        <p className="muted">Auto Scout queues no-email leads and checks websites/emails immediately. Start Auto Scout Now runs visible live batches from this page. Extra live batches are available when you want Scout to keep checking more websites from this page. It rejects captcha/CDN/code false positives, blocks repeated emails across unrelated businesses, then searches deeper: homepage, contact/about/team/impressum/privacy pages, mailto links, obfuscated emails, and Cloudflare-protected emails where possible.</p>
         <div className="grid grid-4">
           <div><label className="label">Queue limit</label><input className="input" type="number" min={1} max={50000} value={queueLimit} onChange={(e) => setQueueLimit(Math.max(1, Math.min(50000, Number(e.target.value) || 5000)))} /><p className="muted">How many no-email businesses to add to the research queue.</p></div>
-          <div><label className="label">Backend batch size</label><input className="input" type="number" min={1} max={500} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))} /><p className="muted">Maximum queued jobs sent to one Node API run.</p></div>
-          <div><label className="label">Backend concurrency</label><input className="input" type="number" min={1} max={50} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(50, Number(e.target.value) || 20)))} /><p className="muted">How many backend lookups run in parallel inside that batch.</p></div>
-          <div><label className="label">Worker cycles</label><input className="input" type="number" min={1} max={25} value={workerCycles} onChange={(e) => setWorkerCycles(Math.max(1, Math.min(25, Number(e.target.value) || 8)))} /><p className="muted">How many server batches the worker should run in one click.</p></div>
+          <div><label className="label">Batch size</label><input className="input" type="number" min={1} max={500} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))} /><p className="muted">Maximum queued jobs checked in one run.</p></div>
+          <div><label className="label">Concurrency</label><input className="input" type="number" min={1} max={50} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(50, Number(e.target.value) || 20)))} /><p className="muted">How many website lookups run in parallel inside that batch.</p></div>
+          <div><label className="label">Live cycles</label><input className="input" type="number" min={1} max={25} value={workerCycles} onChange={(e) => setWorkerCycles(Math.max(1, Math.min(25, Number(e.target.value) || 8)))} /><p className="muted">How many live batches to run when you click Start Auto Scout Now.</p></div>
         </div>
         <div className="actions" style={{ marginTop: 14 }}>
           <button className="btn secondary" disabled={busy} onClick={enqueuePendingNoEmail}>Queue Pending No-Email</button>
-          <button className="btn" disabled={busy} onClick={startAutoScout}>Start Durable Auto Scout</button>
-          <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Run One Backend Batch</button>
-          <button className="btn" disabled={busy || running} onClick={runAutoScoutWorker}>Run Server Worker</button>
+          <button className="btn" disabled={busy} onClick={startAutoScout}>Start Auto Scout Now</button>
+          <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Run One Batch</button>
+          <button className="btn" disabled={busy || running} onClick={runAutoScoutWorker}>Run Extra Live Batches</button>
           <button className="btn secondary" disabled={busy && !running} onClick={loadStats}>Refresh Progress</button>
           <button className="btn secondary" disabled={busy || running} onClick={quarantineFalsePositiveEmails}>Clean Bad Found Emails</button>
           <button className="btn secondary" disabled={busy || running} onClick={quarantineRepeatedEmails}>Clean Repeated Emails</button>
         </div>
         <div className={message.toLowerCase().includes('failed') || message.toLowerCase().includes('error') ? 'error' : 'notice'} style={{ marginTop: 12 }}>{message}</div>
-        {workerResult ? <div className="notice" style={{ marginTop: 12 }}><strong>Worker summary:</strong> checked {Number(workerResult.checkedForQueue || 0).toLocaleString()}, queued {Number(workerResult.enqueued || 0).toLocaleString()}, cycles {Number(workerResult.cyclesRun || 0).toLocaleString()}, processed {Number(workerResult.processed || 0).toLocaleString()}, found {Number(workerResult.found || 0).toLocaleString()}.</div> : null}
+        {workerResult ? <div className="notice" style={{ marginTop: 12 }}><strong>Extra run summary:</strong> checked {Number(workerResult.checkedForQueue || 0).toLocaleString()}, queued {Number(workerResult.enqueued || 0).toLocaleString()}, cycles {Number(workerResult.cyclesRun || 0).toLocaleString()}, processed {Number(workerResult.processed || 0).toLocaleString()}, found {Number(workerResult.found || 0).toLocaleString()}.</div> : null}
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>What These Numbers Mean</h3>
-        <p className="muted"><strong>Queue limit</strong> decides how many no-email businesses are placed into the queue. <strong>Backend batch size</strong> decides how many queued jobs one run tries to process. <strong>Backend concurrency</strong> decides how many of those lookups happen at the same time. <strong>Run Server Worker</strong> is the v8.28 worker: it queues no-email businesses, resets stale running jobs, then calls <code>/api/research/run-once</code> repeatedly on the server. Render is still used when <code>NEXT_PUBLIC_BACKEND_URL</code> points to your Render email-finder.</p>
+        <p className="muted"><strong>Queue limit</strong> decides how many no-email businesses are placed into the queue. <strong>Batch size</strong> decides how many queued jobs one run tries to process. <strong>Concurrency</strong> decides how many of those lookups happen at the same time. <strong>Run Extra Live Batches</strong> is the v8.28 worker: it queues no-email businesses, resets stale running jobs, then calls <code>/api/research/run-once</code> repeatedly on the server. Render is still used when <code>NEXT_PUBLIC_BACKEND_URL</code> points to your Render email-finder.</p>
       </div>
 
       <div className="card" style={{ padding: 18 }}>

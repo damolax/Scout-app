@@ -100,7 +100,7 @@ export default function NotificationsClient({ workspace }: { workspace: Workspac
         <div>
           <div className="eyebrow">Scout v8.33</div>
           <h1>Notifications</h1>
-          <p>Persistent list of real replies, auto replies, bounces, blocked-message notices, Gmail limits, and important worker signals. This is not just a popup; it stays here until you read it.</p>
+          <p>Persistent list of real replies, auto replies, bounces, blocked-message notices, Gmail limits, and important app run signals. This is not just a popup; it stays here until you read it.</p>
         </div>
         <div className="actions">
           <button className="btn secondary" type="button" onClick={load} disabled={loading}><RefreshCw size={16} /> Refresh</button>

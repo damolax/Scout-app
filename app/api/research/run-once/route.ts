@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { createClient as createServerSupabaseClient } from '@/lib/supabase-server';
 import { chooseBestEmailCandidate, type EmailCandidateDecision } from '@/lib/email-candidate-rules';
 import { findEmailsDeepFromWebsite, type DeepWebsiteFinderResult } from '@/lib/website-email-finder';
 import { duplicateEmailRisk } from '@/lib/repeated-email-guard';
@@ -21,6 +22,62 @@ function errorMessage(error: unknown) {
     const e = error as { message?: string; code?: string; details?: string; hint?: string };
     return [e.message, e.code ? `Code: ${e.code}` : '', e.details ? `Details: ${e.details}` : '', e.hint ? `Hint: ${e.hint}` : ''].filter(Boolean).join(' | ') || JSON.stringify(error);
   } catch { return String(error); }
+}
+
+function workerSecretFromRequest(request: NextRequest) {
+  const auth = request.headers.get('authorization') || '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  return String(
+    request.nextUrl.searchParams.get('secret') ||
+    request.nextUrl.searchParams.get('token') ||
+    request.headers.get('x-cron-secret') ||
+    request.headers.get('x-auto-scout-worker-secret') ||
+    request.headers.get('x-worker-secret') ||
+    bearer ||
+    ''
+  );
+}
+
+async function signedInMemberCanRun(workspaceId: string) {
+  if (!workspaceId) return false;
+  try {
+    const supabase = await createServerSupabaseClient();
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) return false;
+    const { data: member, error: memberError } = await supabase
+      .from('workspace_members')
+      .select('workspace_id,user_id,approved')
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', user.id)
+      .eq('approved', true)
+      .maybeSingle();
+    if (memberError) return false;
+    return Boolean(member);
+  } catch {
+    return false;
+  }
+}
+
+async function authorizeResearchRun(request: NextRequest, workspaceId: string) {
+  const configuredSecret = process.env.CRON_SECRET || process.env.AUTO_SCOUT_WORKER_SECRET || process.env.RUN_ALL_WORKER_SECRET || '';
+  if (!configuredSecret) return { ok: true };
+  const supplied = workerSecretFromRequest(request);
+  const userAgent = request.headers.get('user-agent') || '';
+  const isVercelCron = userAgent.toLowerCase().includes('vercel-cron');
+  if (isVercelCron || supplied === configuredSecret) return { ok: true };
+  if (await signedInMemberCanRun(workspaceId)) return { ok: true };
+  return { ok: false, error: 'Unauthorized Auto Scout run. Use a valid worker secret or run it while signed in.' };
+}
+
+async function resetStaleRunningJobs(supabase: ReturnType<typeof createAdminClient>, workspaceId?: string) {
+  const staleSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  let query = supabase
+    .from('email_research_jobs')
+    .update({ status: 'queued', last_error: 'Auto Scout reset stale running job.', updated_at: new Date().toISOString() })
+    .eq('status', 'running')
+    .lt('updated_at', staleSince);
+  if (workspaceId) query = query.eq('workspace_id', workspaceId);
+  await query;
 }
 
 
@@ -149,20 +206,17 @@ async function callBackendFindEmail(business: any) {
 }
 
 async function runOnce(request: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const supplied = request.headers.get('x-cron-secret') || request.nextUrl.searchParams.get('secret');
-    const userAgent = request.headers.get('user-agent') || '';
-    const isVercelCron = userAgent.toLowerCase().includes('vercel-cron');
-    if (!isVercelCron && supplied !== cronSecret) {
-      return NextResponse.json({ success: false, error: 'Unauthorized cron request.' }, { status: 401 });
-    }
-  }
-
-  const supabase = createAdminClient();
   const limit = Math.max(1, Math.min(500, Number(request.nextUrl.searchParams.get('limit') || 100)));
   const concurrency = Math.max(1, Math.min(50, Number(request.nextUrl.searchParams.get('concurrency') || 20)));
   const workspaceId = String(request.nextUrl.searchParams.get('workspaceId') || '').trim();
+
+  const auth = await authorizeResearchRun(request, workspaceId);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: 401 });
+  }
+
+  const supabase = createAdminClient();
+  await resetStaleRunningJobs(supabase, workspaceId || undefined);
 
   let jobQuery = supabase
     .from('email_research_jobs')

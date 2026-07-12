@@ -383,7 +383,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
       <div className="grid grid-4">
         <KpiCard title={`No Inbox / Bounces (${period.shortLabel})`} value={periodNoInbox} previous={previous ? prevNoInbox : undefined} compareLabel={period.compareLabel} />
         <KpiCard title="Due Follow-ups" value={dueFollowups} helper="Sent 72+ hours ago with no real reply and no no-inbox record." />
-        <KpiCard title="Scheduled Messages" value={scheduled} helper="Waiting for scheduled send/follow-up worker." />
+        <KpiCard title="Scheduled Messages" value={scheduled} helper="Waiting for the open-app schedule runner." />
         <KpiCard title="Selected Period" value={period.label} helper={period.compareLabel} />
       </div>
 

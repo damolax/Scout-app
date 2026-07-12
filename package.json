@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v9-1-logo-save-fix",
-  "version": "9.1.0",
+  "name": "scout-app-v9-4-no-cron-open-app",
+  "version": "9.4.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v9.1: fixes logo upload visibility, public URL display, and signature/logo saving."
+  "description": "Scout App v9.4: no-cron user flow with direct Send Now, open-app schedule runner, and app-run Auto Scout."
 }
