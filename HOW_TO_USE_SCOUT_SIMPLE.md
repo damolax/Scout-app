@@ -72,3 +72,27 @@ The simple rule: if you want Scout to send emails, keep Scout open.
 5. Click Send Now.
 6. Check Replies later.
 7. After 72 hours, go to Due Follow-ups and click Send Due Follow-ups Now.
+
+## Dashboard Checklist
+The checklist is the simple path from setup to real outreach:
+1. Connect Gmail accounts.
+2. Add signature and logo.
+3. Add first-message templates.
+4. Add follow-up templates.
+5. Import leads.
+6. Find emails with Auto Scout.
+7. Get trusted emails ready.
+8. Send your first message.
+9. Check replies.
+10. Respond to a prospect from Scout.
+11. Send due follow-ups.
+12. Save one send for later.
+
+## Challenges
+Challenges are not all meant to be easy.
+- Starter challenges help you learn the app.
+- Growth challenges help you build a daily habit.
+- Boss challenges are for serious outreach volume.
+- Legend challenges are huge goals like 1,000,000 or 10,000,000 delivered messages.
+
+Click any challenge to see the exact steps.

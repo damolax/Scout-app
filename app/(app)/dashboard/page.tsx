@@ -320,7 +320,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     followUpTemplates,
     totalSentAll,
     autoRepliesAll,
-    totalResearchDoneAll
+    totalResearchDoneAll,
+    manualRepliesAll
   ] = await Promise.all([
     safeCount('businesses', workspace.id),
     safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'pending' }] }),
@@ -345,7 +346,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     safeCount('templates', workspace.id, { filters: [{ column: 'template_type', value: 'follow_up' }] }),
     safeCount('sent_messages', workspace.id, { inFilters: [{ column: 'status', values: ['sent', 'delivered'] }] }),
     safeCount('reply_history', workspace.id, { filters: [{ column: 'is_auto_reply', value: true }] }),
-    safeCount('email_research_jobs', workspace.id, { filters: [{ column: 'status', value: 'done' }] })
+    safeCount('email_research_jobs', workspace.id, { filters: [{ column: 'status', value: 'done' }] }),
+    safeCount('sent_messages', workspace.id, { filters: [{ column: 'delivery_status', value: 'manual_reply_sent' }] })
   ]);
 
   let dueFollowups = 0;
@@ -380,12 +382,11 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     { title: 'Find emails with Auto Scout', href: '/auto-scout', done: totalResearchDoneAll > 0, hint: 'Scout checks websites for missing emails.' },
     { title: 'Get trusted emails ready', href: '/verify', done: currentReady > 0, hint: 'Trusted leads are the safe list for sending.' },
     { title: 'Send your first message', href: '/message', done: totalSentAll > 0, hint: 'Send Now works while Scout is open.' },
-    { title: 'Save one send for later', href: '/message', done: scheduled > 0, hint: 'Use this when timing matters by country.' },
     { title: 'Check replies', href: '/replies', done: periodReplies > 0 || autoRepliesAll > 0, hint: 'Scout separates real replies from auto replies.' },
-    { title: 'Send due follow-ups', href: '/message', done: dueFollowups === 0 && totalSentAll > 0, hint: 'After 72 hours, send follow-ups from the Due Follow-ups box.' },
-    { title: 'Complete your first challenge', href: '/challenges', done: totalSentAll >= 10 || currentReady >= 10 || periodReplies >= 1, hint: 'Challenges make progress obvious.' }
+    { title: 'Respond to a prospect from Scout', href: '/replies', done: manualRepliesAll > 0, hint: 'Open a real reply and send your answer from Scout.' },
+    { title: 'Send due follow-ups', href: '/message', done: dueFollowups === 0 && totalSentAll > 0, hint: 'After 72 hours, choose a follow-up template and send due follow-ups.' },
+    { title: 'Save one send for later', href: '/message', done: scheduled > 0, hint: 'Use this when timing matters by country.' }
   ];
-
   return (
     <div className="stack">
       <div className="topbar">

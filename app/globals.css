@@ -468,3 +468,23 @@ code { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-
 @media (max-width: 900px) {
   .setup-list { grid-template-columns: 1fr; }
 }
+
+/* v10.8: clearer challenge levels */
+.challenge-tier {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: rgba(255,255,255,.055);
+}
+.challenge-tier-starter { color: #a9ffe3; background: rgba(51,214,159,.10); border-color: rgba(51,214,159,.25); }
+.challenge-tier-growth { color: #b7d7ff; background: rgba(97,168,255,.10); border-color: rgba(97,168,255,.25); }
+.challenge-tier-boss { color: #ffe1a3; background: rgba(255,204,102,.11); border-color: rgba(255,204,102,.25); }
+.challenge-tier-legend { color: #ffc0d1; background: rgba(255,107,170,.10); border-color: rgba(255,107,170,.25); }

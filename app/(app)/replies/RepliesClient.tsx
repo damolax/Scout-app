@@ -157,7 +157,38 @@ function classify(message: NormalizedMessage) {
     'do-not-reply', 'donotreply', 'no-reply', 'noreply', 'your request has been received',
     'we have received your request', 'support ticket has been created', 'ticket has been created',
     'thanks for contacting support', 'thank you for contacting us', 'we will get back to you shortly',
-    'someone from our team will get back to you', 'automated acknowledgement', 'automatic acknowledgement'
+    'someone from our team will get back to you', 'automated acknowledgement', 'automatic acknowledgement',
+    'we’ve received your message', "we\'ve received your message", 'we’ve received your request', "we\'ve received your request",
+    'we received your message', 'we received your request', 'received your message', 'received your request',
+    'request received', 'ticket received', 'case received', 'ticket created', 'case created',
+    'request has been received and is being reviewed', 'has been received and is being reviewed',
+    'being reviewed by our support staff', 'our support team is already looking', 'our team is already looking',
+    'we will be in touch', 'we’ll be in touch', "we\'ll be in touch", 'we will contact you shortly',
+    'we will respond within', 'we respond within', 'within 24 hours', 'within 48 hours',
+    'response time:', 'ticket number:', 'ticket id', 'ticket-id', 'case number:', 'case id',
+    'to add additional comments, reply to this email', 'please type your reply above this line',
+    'delivered by zendesk', 'zendesk', 'reamaze', 'freshdesk', 'gorgias',
+    'we confirm the receipt', 'we confirm receipt', 'confirmation of receipt', 'receipt of your email',
+    'thank you for your recent email', 'thanks for your recent email', 'thank you for getting in touch',
+    'we have created a support ticket', 'created a support ticket', 'assigned you case number',
+    'your inquiry has been received', 'your enquiry has been received', 'your inquiry was received',
+    'your email has been received', 'your message has been received', 'your request was received',
+    'we are currently experiencing a high volume', 'due to high volume', 'due to an unusually high',
+    'do not open multiple tickets', 'support staff', 'customer service team',
+    'automatische antwort', 'automatische antwort:', 'automatisch erzeugte', 'automatisch verschickte',
+    'eingangsbestätigung', 'empfangsbestätigung', 'anfrage eingegangen', 'anfrage ist bei uns eingegangen',
+    'ihre anfrage ist bei uns eingegangen', 'deine anfrage ist bei uns eingegangen',
+    'ihre nachricht ist bei uns eingegangen', 'deine nachricht ist bei uns eingegangen',
+    'vielen dank für ihre nachricht', 'vielen dank für deine nachricht', 'danke für deine nachricht',
+    'wir haben deine nachricht erhalten', 'wir haben ihre nachricht erhalten', 'wir haben ihre e-mail erhalten',
+    'anliegen wurde erstellt', 'wurde erstellt', 'ticketnummer', 'ticket-nummer', 'ticket id:',
+    'teilen sie uns ihr feedback mit', 'zufriedenheit', 'bearbeitung ihrer anfrage', 'bearbeitung deiner anfrage',
+    'wir melden uns', 'melden uns schnellstmöglich', 'schnellstmöglich bearbeiten', 'so schnell wie möglich beantworten',
+    'wir kümmern uns schnellstmöglich', 'eingegangen und wird', 'bearbeitungszeit',
+    'nous confirmons la réception', 'nous avons reçu votre demande', 'votre demande a été reçue',
+    'merci de nous avoir contactés', 'merci pour votre message',
+    'hemos recibido', 'su solicitud ha sido recibida', 'gracias por contactarnos',
+    'abbiamo ricevuto', 'la tua richiesta è stata ricevuta', 'grazie per averci contattato'
   ];
   if (limitTerms.some((term) => text.includes(term))) return { classification: 'gmail_limit_notice', isReal: false, noInbox: false };
   if (bounceTerms.some((term) => text.includes(term))) return { classification: 'no_inbox_or_bounce', isReal: false, noInbox: true };
@@ -170,6 +201,28 @@ function csvEscape(value: unknown) {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+
+
+function looksAutoLikeReply(row: ReplyRow) {
+  const text = `${row.from_email || ''} ${row.subject || ''} ${row.snippet || ''} ${asText(row.raw || '')}`.toLowerCase();
+  const terms = [
+    'automatic reply', 'automatic response', 'automatische antwort', 'auto:', 'auto reply', 'auto-reply', 'autoreply',
+    'out of office', 'out-of-office', 'ooo', 'vacation responder', 'away from the office', 'currently out of office',
+    'we have received your message', 'we received your message', 'we’ve received your message', "we've received your message",
+    'we have received your request', 'we received your request', 'we’ve received your request', "we've received your request",
+    'your request has been received', 'request received', 'ticket received', 'case has been created', 'ticket has been created',
+    'ticket number', 'ticket id', 'case number', 'request #', 'request (', 'support ticket',
+    'being reviewed by our support staff', 'delivered by zendesk', 'please type your reply above this line',
+    'confirmation of receipt', 'thank you for your recent email', 'thank you for contacting', 'thanks for contacting',
+    'we will be in touch', 'we’ll be in touch', "we'll be in touch", 'we will contact you shortly', 'within 24 hours', 'within 48 hours',
+    'eingangsbestätigung', 'empfangsbestätigung', 'anfrage eingegangen', 'anfrage ist bei uns eingegangen',
+    'ihre anfrage ist bei uns eingegangen', 'deine anfrage ist bei uns eingegangen', 'wir haben deine nachricht erhalten',
+    'wir haben ihre nachricht erhalten', 'vielen dank für ihre nachricht', 'vielen dank für deine nachricht', 'danke für deine nachricht',
+    'ticketnummer', 'ticket-nummer', 'anliegen wurde erstellt', 'teilen sie uns ihr feedback mit', 'zufriedenheit',
+    'bearbeitung ihrer anfrage', 'bearbeitung deiner anfrage', 'bearbeitungszeit', 'wir melden uns', 'schnellstmöglich'
+  ];
+  return terms.some((term) => text.includes(term));
+}
 
 function compactReplyRows(rows: ReplyRow[]) {
   const seen = new Set<string>();
@@ -415,8 +468,8 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     });
   }
 
-  const realReplies = compactReplyRows(replyRows.filter((row) => row.is_real_reply === true || row.reply_bucket === 'real_reply'));
-  const autoReplies = compactReplyRows(replyRows.filter((row) => row.is_auto_reply === true || row.reply_bucket === 'auto_reply' || row.classification === 'auto_reply'));
+  const realReplies = compactReplyRows(replyRows.filter((row) => (row.is_real_reply === true || row.reply_bucket === 'real_reply' || row.classification === 'real_reply') && !looksAutoLikeReply(row) && row.is_auto_reply !== true && row.reply_bucket !== 'auto_reply'));
+  const autoReplies = compactReplyRows(replyRows.filter((row) => row.is_auto_reply === true || row.reply_bucket === 'auto_reply' || row.classification === 'auto_reply' || looksAutoLikeReply(row)));
   const deliverySignals = replyRows.filter((row) => row.is_delivery_failure === true || ['no_inbox', 'message_blocked', 'bounce_notice'].includes(String(row.classification || row.reply_bucket || '')));
   const limitSignals = replyRows.filter((row) => row.is_limit_notice === true || row.classification === 'gmail_limit_notice');
   const ignoredReplies = replyRows.filter((row) => row.is_real_reply !== true && row.is_auto_reply !== true && row.is_delivery_failure !== true && row.is_limit_notice !== true && !['real_reply','auto_reply','no_inbox','message_blocked','bounce_notice','gmail_limit_notice'].includes(String(row.classification || row.reply_bucket || '')));
@@ -426,8 +479,8 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     <div className="stack">
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Sent Tracked</div><div className="num">{sentCount.toLocaleString()}</div><p className="muted">All Gmail-accepted sent rows in the database. The table below only shows recent rows.</p></div>
-        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{trackingCounts.realReplies.toLocaleString()}</div><p className="muted">Human replies classified from Gmail inbox sync.</p></div>
-        <div className="card kpi"><div className="title">Auto Replies</div><div className="num">{trackingCounts.autoReplies.toLocaleString()}</div><p className="muted">Vacation/out-of-office/automated responses.</p></div>
+        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{realReplies.length.toLocaleString()}</div><p className="muted">Human replies in the loaded list. Auto replies are filtered out.</p></div>
+        <div className="card kpi"><div className="title">Auto Replies</div><div className="num">{autoReplies.length.toLocaleString()}</div><p className="muted">Tickets, confirmations, out-of-office, and automated replies.</p></div>
         <div className="card kpi"><div className="title">No Inbox / Blocked</div><div className="num">{trackingCounts.noInboxBlocked.toLocaleString()}</div><p className="muted">Bounced, address-not-found, and blocked notices.</p></div>
       </div>
 

@@ -6,7 +6,7 @@ const pages = [
       ["Download today report", "Downloads a small report you can keep or send to someone."],
       ["Notification bell", "Opens small alerts from Scout, like replies or due sends."],
       ["Live Work", "Small box at the bottom. It shows what Scout is doing right now."],
-      ["Setup checklist", "Twelve setup steps. Scout ticks a step when it sees that you have done it."],
+      ["Setup checklist", "Twelve important steps. Scout ticks a step when it sees that you have done it, including replying to a prospect from Scout."],
       ["Next action cards", "Big shortcuts for Find emails, Send emails, Send follow-ups, and Challenges."],
     ],
   },
@@ -71,10 +71,10 @@ const pages = [
   {
     title: "Challenges",
     items: [
-      ["Challenge card", "A small goal, like send 100 messages or get 10 real replies."],
+      ["Challenge card", "A goal that helps you grow. Some are quick wins, but most are big goals like 10,000, 100,000, 1,000,000, or 10,000,000 delivered messages."],
       ["Progress bar", "Shows how close you are to finishing that challenge."],
       ["Click a challenge", "A popup opens and tells you the exact steps to complete it."],
-      ["Completed challenge", "Scout marks it when your numbers reach the target."],
+      ["Completed challenge", "Scout marks it when your numbers reach the target. The hard challenges are supposed to take time."],
     ],
   },
   {
@@ -143,6 +143,7 @@ export default function HelpPage() {
           <li>Pick audience, country, template, sender, and count.</li>
           <li>Click Send Now.</li>
           <li>Check Replies later.</li>
+          <li>When a real person replies, open the reply and answer from Scout.</li>
           <li>After 72 hours, go to Due Follow-ups, choose the follow-up template, and click Send Due Follow-ups Now.</li>
         </ol>
       </div>

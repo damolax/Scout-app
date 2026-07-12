@@ -6,15 +6,16 @@ export const dynamic = 'force-dynamic';
 
 export type MetricKey =
   | 'deliveredMessages'
-  | 'autoReplies'
   | 'realReplies'
+  | 'realRepliesToday'
   | 'trustedEmails'
   | 'gmailAccounts'
   | 'templates'
   | 'sentToday'
   | 'dueFollowups'
   | 'schedules'
-  | 'autoScoutJobs';
+  | 'autoScoutJobs'
+  | 'manualReplies';
 
 export type Challenge = {
   id: string;
@@ -22,82 +23,141 @@ export type Challenge = {
   title: string;
   metric: MetricKey;
   target: number;
+  tier: 'Starter' | 'Growth' | 'Boss' | 'Legend';
   steps: string[];
 };
 
-function milestones(prefix: string, icon: string, metric: MetricKey, values: number[], steps: string[]): Challenge[] {
+function tierFor(target: number, easy: number, growth: number, boss: number): Challenge['tier'] {
+  if (target <= easy) return 'Starter';
+  if (target <= growth) return 'Growth';
+  if (target <= boss) return 'Boss';
+  return 'Legend';
+}
+
+function milestones(
+  slug: string,
+  prefix: string,
+  icon: string,
+  metric: MetricKey,
+  values: number[],
+  steps: string[],
+  tierBreaks: { easy: number; growth: number; boss: number }
+): Challenge[] {
   return values.map((target) => ({
-    id: `${metric}-${target}`,
+    id: `${slug}-${target}`,
     icon,
     title: `${prefix} ${target.toLocaleString()}`,
     metric,
     target,
+    tier: tierFor(target, tierBreaks.easy, tierBreaks.growth, tierBreaks.boss),
     steps
   }));
 }
 
+const sendSteps = [
+  'Go to Send Emails.',
+  'Choose the audience and country you want.',
+  'Choose the correct first-message template.',
+  'Choose one sender or rotate many Gmail accounts.',
+  'Click Send Now and keep Scout open while it sends.'
+];
+
+const trustedEmailSteps = [
+  'Go to Find Leads.',
+  'Open Find missing emails.',
+  'Click Start finding emails.',
+  'Let Scout check the business websites.',
+  'Trusted emails are saved so you can use them later.'
+];
+
 const challenges: Challenge[] = [
-  ...milestones('Send delivered messages', '📨', 'deliveredMessages', [10, 20, 30, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000], [
-    'Go to Send Emails.',
-    'Choose who should get the email.',
-    'Choose your message template.',
-    'Choose one Gmail or rotate Gmail senders.',
-    'Click Send Now and keep Scout open while it sends.'
-  ]),
-  ...milestones('Get real replies', '💬', 'realReplies', [1, 3, 5, 10, 20, 30, 50, 75, 100, 200, 500, 1000], [
+  // Only a few quick wins. The rest are meant to stretch users for days, weeks, or months.
+  ...milestones('starter-sent', 'First delivery goal', '📨', 'deliveredMessages', [250, 1000], sendSteps, { easy: 250, growth: 1000, boss: 1000 }),
+  ...milestones('starter-replies', 'First real reply goal', '💬', 'realReplies', [1, 5], [
     'Send useful emails to the right leads.',
     'Go to Replies later.',
-    'Click refresh or sync replies.',
-    'Scout counts only human replies here.'
-  ]),
-  ...milestones('Get auto replies', '🤖', 'autoReplies', [10, 25, 50, 100, 250, 500, 1000], [
-    'Send emails normally.',
-    'Go to Replies.',
-    'Scout separates automatic messages like out-of-office or ticket-created emails.'
-  ]),
-  ...milestones('Find trusted emails', '🔎', 'trustedEmails', [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000], [
-    'Go to Find Leads.',
-    'Open Find missing emails.',
-    'Click Start Auto Scout.',
-    'Trusted emails are saved so you can send to them later.'
-  ]),
-  ...milestones('Connect Gmail accounts', '📮', 'gmailAccounts', [1, 3, 5, 10, 20, 30, 50], [
+    'Sync replies.',
+    'Only human replies count here. Auto replies do not count.'
+  ], { easy: 1, growth: 5, boss: 5 }),
+  ...milestones('starter-trusted', 'First trusted emails', '🔎', 'trustedEmails', [500, 1000], trustedEmailSteps, { easy: 500, growth: 1000, boss: 1000 }),
+  ...milestones('starter-gmail', 'Connect Gmail accounts', '📮', 'gmailAccounts', [1, 5], [
     'Go to Settings.',
     'Open Gmail accounts.',
     'Connect each Gmail account you want Scout to use.',
     'Set a safe daily limit for every sender.'
-  ]),
-  ...milestones('Create templates', '✍️', 'templates', [1, 3, 5, 10, 20, 30, 50], [
-    'Go to Send Emails.',
-    'Click Manage Templates.',
+  ], { easy: 1, growth: 5, boss: 5 }),
+  ...milestones('starter-templates', 'Create message templates', '✍️', 'templates', [1, 5], [
+    'Go to Templates.',
     'Create first-message templates and follow-up templates.',
-    'Use clear messages, not spammy words.'
-  ]),
-  ...milestones('Send today', '⚡', 'sentToday', [10, 25, 50, 100, 250, 500, 1000, 2000, 5000], [
-    'Go to Send Emails.',
-    'Choose a safe batch or your normal batch.',
-    'Click Send Now.',
-    'Live Work shows what is being sent right now.'
-  ]),
-  ...milestones('Have due follow-ups ready', '↩️', 'dueFollowups', [10, 25, 50, 100, 250, 500, 1000], [
-    'Send first emails.',
+    'Use clear messages that sound human.'
+  ], { easy: 1, growth: 5, boss: 5 }),
+
+  // Scale sending.
+  ...milestones('delivered', 'Send delivered messages', '🚀', 'deliveredMessages', [5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000], sendSteps, { easy: 0, growth: 50000, boss: 1000000 }),
+  ...milestones('sent-today', 'Send in one day', '⚡', 'sentToday', [5000, 10000, 20000, 35000, 50000, 75000, 100000], [
+    'Go to Send Emails early in the day.',
+    'Use many healthy Gmail accounts.',
+    'Use safe delays and sender limits.',
+    'Keep Scout open while sending.'
+  ], { easy: 0, growth: 10000, boss: 50000 }),
+
+  // Real replies. Auto replies are removed from challenges.
+  ...milestones('real-replies-today', 'Get real replies in one day', '🔥', 'realRepliesToday', [10, 20, 30, 50, 100], [
+    'Send useful messages to a clean list.',
+    'Check Replies after sending.',
+    'Sync replies.',
+    'Only human replies count here.'
+  ], { easy: 0, growth: 30, boss: 100 }),
+  ...milestones('real-replies', 'Get real replies', '🏆', 'realReplies', [10, 20, 30, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000], [
+    'Send useful emails to the right leads.',
+    'Keep your message simple and specific.',
+    'Go to Replies and sync replies.',
+    'Auto replies do not count here.'
+  ], { easy: 0, growth: 100, boss: 2500 }),
+
+  // Auto Scout and email quality.
+  ...milestones('trusted-emails', 'Find trusted emails', '💎', 'trustedEmails', [5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000], trustedEmailSteps, { easy: 0, growth: 50000, boss: 500000 }),
+  ...milestones('auto-scout-work', 'Run Auto Scout checks', '🧭', 'autoScoutJobs', [10000, 25000, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000], [
+    'Go to Find Leads.',
+    'Click Find missing emails.',
+    'Start finding emails.',
+    'Results appear on the same page and trusted emails are saved.'
+  ], { easy: 0, growth: 100000, boss: 1000000 }),
+
+  // Account and template scale.
+  ...milestones('gmail-scale', 'Connect Gmail accounts', '📮', 'gmailAccounts', [10, 20, 30, 50, 75, 100, 150, 200, 300], [
+    'Go to Settings.',
+    'Connect another Gmail account.',
+    'Set a safe daily limit.',
+    'Repeat until you have enough healthy senders.'
+  ], { easy: 0, growth: 50, boss: 150 }),
+  ...milestones('template-scale', 'Create message templates', '✍️', 'templates', [10, 20, 30, 50, 100, 250, 500], [
+    'Go to Templates.',
+    'Create clear first-message templates.',
+    'Create follow-up templates.',
+    'Create reply templates for real replies.'
+  ], { easy: 0, growth: 50, boss: 250 }),
+
+  // Follow-up and response workflow.
+  ...milestones('due-followups', 'Have due follow-ups ready', '↩️', 'dueFollowups', [500, 1000, 2500, 5000, 10000, 25000, 50000], [
+    'Send first messages.',
     'Wait 72 hours.',
     'Go to Send Emails, then Due Follow-ups.',
-    'Click Send Due Follow-ups Now when you are ready.'
-  ]),
-  ...milestones('Save sends for later', '⏰', 'schedules', [1, 3, 5, 10, 25], [
+    'Choose the follow-up template and send when ready.'
+  ], { easy: 0, growth: 5000, boss: 25000 }),
+  ...milestones('manual-replies', 'Reply to prospects from Scout', '✉️', 'manualReplies', [1, 5, 10, 20, 50, 100, 250, 500, 1000, 5000], [
+    'Go to Replies.',
+    'Open a real prospect reply.',
+    'Choose or write a reply message.',
+    'Send the reply from Scout.'
+  ], { easy: 1, growth: 50, boss: 500 }),
+  ...milestones('schedules', 'Save sends for later', '⏰', 'schedules', [10, 25, 50, 100, 250, 500, 1000], [
     'Go to Send Emails.',
     'Choose audience, template, sender, and count.',
     'Pick a date and time.',
-    'Click Save Schedule.',
-    'Open Scout at that time and click Run Due Sends Now.'
-  ]),
-  ...milestones('Run Auto Scout jobs', '🧭', 'autoScoutJobs', [10, 50, 100, 250, 500, 1000, 5000, 10000], [
-    'Go to Find Leads.',
-    'Click Find missing emails.',
-    'Click Start Auto Scout.',
-    'Results appear lower on the same page and trusted emails are saved to your leads.'
-  ])
+    'Save the schedule.',
+    'Open Scout when it is time and run due sends.'
+  ], { easy: 0, growth: 100, boss: 500 })
 ];
 
 async function safeCount(table: string, workspaceId: string, build?: (query: any) => any) {
@@ -117,13 +177,13 @@ async function loadMetrics(workspaceId: string): Promise<Record<MetricKey, numbe
   today.setHours(0, 0, 0, 0);
   const deliveredMessages = await safeCount('sent_messages', workspaceId, (q) => q.in('status', ['sent', 'delivered']));
   const sentToday = await safeCount('sent_messages', workspaceId, (q) => q.in('status', ['sent', 'delivered']).gte('sent_at', today.toISOString()));
-  const autoReplies = await safeCount('reply_history', workspaceId, (q) => q.or('is_auto_reply.eq.true,reply_bucket.eq.auto_reply'));
-  const realReplies = await safeCount('reply_history', workspaceId, (q) => q.or('is_real_reply.eq.true,reply_bucket.eq.real_reply'));
+  const realReplies = await safeCount('reply_history', workspaceId, (q) => q.or('is_real_reply.eq.true,reply_bucket.eq.real_reply,classification.eq.real_reply').neq('is_auto_reply', true));
   const trustedEmails = await safeCount('businesses', workspaceId, (q) => q.not('email', 'is', null).neq('email', '').in('status', ['ready', 'found', 'connected']));
   const gmailAccounts = await safeCount('gmail_accounts', workspaceId, (q) => q.or('status.eq.connected,status.eq.active,status.is.null'));
-  const templates = await safeCount('templates', workspaceId, (q) => q.or('active.eq.true,active.is.null'));
+  const templates = await safeCount('templates', workspaceId, (q) => q.or('active.eq.true,is_active.eq.true,active.is.null,is_active.is.null'));
   const schedules = await safeCount('message_schedules', workspaceId, (q) => q.in('status', ['scheduled', 'due', 'running', 'completed']));
   const autoScoutJobs = await safeCount('email_research_jobs', workspaceId, (q) => q.in('status', ['done', 'found']));
+  const manualReplies = await safeCount('sent_messages', workspaceId, (q) => q.eq('delivery_status', 'manual_reply_sent'));
 
   let dueFollowups = 0;
   try {
@@ -138,7 +198,9 @@ async function loadMetrics(workspaceId: string): Promise<Record<MetricKey, numbe
     dueFollowups = 0;
   }
 
-  return { deliveredMessages, autoReplies, realReplies, trustedEmails, gmailAccounts, templates, sentToday, dueFollowups, schedules, autoScoutJobs };
+  const realRepliesToday = await safeCount('reply_history', workspaceId, (q) => q.or('is_real_reply.eq.true,reply_bucket.eq.real_reply,classification.eq.real_reply').gte('received_at', today.toISOString()).neq('is_auto_reply', true));
+
+  return { deliveredMessages, realReplies, realRepliesToday, trustedEmails, gmailAccounts, templates, sentToday, dueFollowups, schedules, autoScoutJobs, manualReplies };
 }
 
 export default async function ChallengesPage() {
