@@ -67,6 +67,52 @@ function logoHtml(identity: SignatureIdentity) {
   return `<br /><br /><img src="${escapeHtml(url)}" alt="Logo" width="160" style="display:block;max-width:160px;height:auto;border:0;outline:none;text-decoration:none;" />`;
 }
 
+function unescapeHtmlAttribute(value: string) {
+  return String(value || '')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#039;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+}
+
+function normalizeUrlForCompare(value: string) {
+  const raw = unescapeHtmlAttribute(value).trim();
+  if (!raw) return '';
+  try {
+    return new URL(raw).toString();
+  } catch {
+    return raw;
+  }
+}
+
+function imageSrcFromTag(tag: string) {
+  const match = tag.match(/\bsrc\s*=\s*(["'])(.*?)\1/i) || tag.match(/\bsrc\s*=\s*([^\s>]+)/i);
+  return match ? normalizeUrlForCompare(match[2] || match[1] || '') : '';
+}
+
+function hasAnyImage(html: string) {
+  return /<img\b/i.test(String(html || ''));
+}
+
+function hasImageWithSrc(html: string, url: string) {
+  const target = normalizeUrlForCompare(url);
+  if (!target) return false;
+  const tags = String(html || '').match(/<img\b[^>]*>/gi) || [];
+  return tags.some((tag) => imageSrcFromTag(tag) === target);
+}
+
+function dedupeImageTags(html: string) {
+  const seen = new Set<string>();
+  return String(html || '').replace(/<img\b[^>]*>/gi, (tag) => {
+    const src = imageSrcFromTag(tag);
+    if (!src) return tag;
+    if (seen.has(src)) return '';
+    seen.add(src);
+    return tag;
+  });
+}
+
 export function signatureText(identity: SignatureIdentity) {
   const fallback = rawIdentity(identity);
   const rawText = String(identity.signature_text || fallback.signature_text || '').trim();
@@ -77,9 +123,17 @@ export function signatureText(identity: SignatureIdentity) {
 export function signatureHtml(identity: SignatureIdentity) {
   const fallback = rawIdentity(identity);
   const rawHtml = String(identity.signature_html || fallback.signature_html || '').trim();
-  if (rawHtml) return `${rawHtml}${logoHtml(identity)}`;
+  const logo = logoHtml(identity);
+  const url = logoUrl(identity);
+  if (rawHtml) {
+    const cleanHtml = dedupeImageTags(rawHtml).trim();
+    // If the saved HTML already contains the logo image, do not append it again.
+    // If it contains any image at all, treat that as the signature logo and avoid a second logo.
+    if (!logo || hasImageWithSrc(cleanHtml, url) || hasAnyImage(cleanHtml)) return cleanHtml;
+    return `${cleanHtml}${logo}`;
+  }
   const text = signatureText(identity);
-  return text ? `${textToHtml(text)}${logoHtml(identity)}` : logoHtml(identity).replace(/^<br \/><br \/>/, '');
+  return text ? `${textToHtml(text)}${logo}` : logo.replace(/^<br \/><br \/>/, '');
 }
 
 export function shouldAppendSignature(identity: SignatureIdentity) {

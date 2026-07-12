@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase-server";
 import { analyzeSpamRisk } from "@/lib/spam-guard";
 import { createAppNotification } from "@/lib/notifications";
 import { buildMimeMessage, appendSignatureToText } from "@/lib/email-signature";
+import { applyCountryFilter, businessMatchesCountry, extractBusinessCountries } from "@/lib/country-location";
 
 type AnyRow = Record<string, any>;
 
@@ -114,43 +115,15 @@ function addLocationCandidate(target: Set<string>, value: unknown) {
 }
 
 function extractBusinessLocations(business: AnyRow) {
-  const values = new Set<string>();
-  addLocationCandidate(values, business.location);
-  const raw = business.raw && typeof business.raw === "object" ? business.raw : {};
-  for (const key of LOCATION_RAW_KEYS) {
-    const direct = raw[key];
-    if (Array.isArray(direct)) direct.forEach((item) => addLocationCandidate(values, item));
-    else addLocationCandidate(values, direct);
-  }
-  for (const [key, value] of Object.entries(raw)) {
-    const normalizedKey = key.toLowerCase();
-    if (
-      normalizedKey.includes("location") ||
-      normalizedKey.includes("country") ||
-      normalizedKey.includes("market") ||
-      normalizedKey.includes("city") ||
-      normalizedKey.includes("region") ||
-      normalizedKey.includes("state") ||
-      normalizedKey.includes("address") ||
-      normalizedKey.includes("territory")
-    ) {
-      if (Array.isArray(value)) value.forEach((item) => addLocationCandidate(values, item));
-      else addLocationCandidate(values, value);
-    }
-  }
-  return Array.from(values);
+  return extractBusinessCountries(business);
 }
 
 function businessMatchesLocation(business: AnyRow, selectedLocation: string) {
-  const selected = cleanLocationValue(selectedLocation).toLowerCase();
-  if (!selected) return true;
-  return extractBusinessLocations(business).some((item) => item.toLowerCase() === selected);
+  return businessMatchesCountry(business, selectedLocation);
 }
 
 function applyLocationFilter(rows: AnyRow[], selectedLocation: string) {
-  const selected = cleanLocationValue(selectedLocation);
-  if (!selected) return rows;
-  return rows.filter((business) => businessMatchesLocation(business, selected));
+  return applyCountryFilter(rows, selectedLocation);
 }
 
 function isMissingRpcFunction(error: unknown) {

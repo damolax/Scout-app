@@ -1,0 +1,14 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.oyeola.scout'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.oyeola.scout'
+        minSdk 23
+        targetSdk 35
+        versionCode 101
+        versionName '10.1'
+    }
+}

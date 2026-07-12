@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { analyzeSpamRisk } from "@/lib/spam-guard";
 import { emitLiveActivity } from "@/lib/live-activity-client";
+import { applyCountryFilter, businessMatchesCountry, extractBusinessCountries } from "@/lib/country-location";
 import {
   Business,
   GmailAccount,
@@ -168,45 +169,15 @@ function addLocationCandidate(target: Set<string>, value: unknown) {
 }
 
 function extractBusinessLocations(business: Partial<Business>) {
-  const values = new Set<string>();
-  addLocationCandidate(values, business.location);
-  const raw = business.raw && typeof business.raw === "object" ? business.raw : {};
-  for (const key of LOCATION_RAW_KEYS) {
-    const direct = (raw as Record<string, unknown>)[key];
-    if (Array.isArray(direct)) direct.forEach((item) => addLocationCandidate(values, item));
-    else addLocationCandidate(values, direct);
-  }
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    const normalizedKey = key.toLowerCase();
-    if (
-      normalizedKey.includes("location") ||
-      normalizedKey.includes("country") ||
-      normalizedKey.includes("market") ||
-      normalizedKey.includes("city") ||
-      normalizedKey.includes("region") ||
-      normalizedKey.includes("state") ||
-      normalizedKey.includes("address") ||
-      normalizedKey.includes("territory")
-    ) {
-      if (Array.isArray(value)) value.forEach((item) => addLocationCandidate(values, item));
-      else addLocationCandidate(values, value);
-    }
-  }
-  return Array.from(values);
+  return extractBusinessCountries(business);
 }
 
 function businessMatchesLocation(business: Business, selectedLocation: string) {
-  const selected = cleanLocationValue(selectedLocation).toLowerCase();
-  if (!selected) return true;
-  return extractBusinessLocations(business).some(
-    (item) => item.toLowerCase() === selected,
-  );
+  return businessMatchesCountry(business, selectedLocation);
 }
 
 function applyLocationFilter(rows: Business[], selectedLocation: string) {
-  const selected = cleanLocationValue(selectedLocation);
-  if (!selected) return rows;
-  return rows.filter((business) => businessMatchesLocation(business, selected));
+  return applyCountryFilter(rows, selectedLocation);
 }
 
 function contactableStatusQuery(query: any) {
@@ -667,7 +638,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     setReadyTotal(cleanCountry ? allRows.length : count || rows.length);
     setSelectedContacts(selected);
     if (!rows.length && cleanCountry) {
-      setStatus(`No contactable emails matched ${cleanCountry}. Try All available locations or run Repair Ready Contacts.`);
+      setStatus(`No contactable emails matched ${cleanCountry}. Try All countries or run Repair Ready Contacts.`);
     }
   }
 
@@ -875,6 +846,28 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     const appUrl = `${workspace.app_url || window.location.origin}/message`;
     const title = `Scout schedule due: ${scheduleLabel(schedule)}`;
     const description = `Open Scout and run due sends. Schedule type: ${schedule.type}. Count: ${Number(schedule.target_count || 0)}. URL: ${appUrl}`;
+    const nativePayload = {
+      id: schedule.id,
+      title,
+      body: description,
+      url: appUrl,
+      triggerAt: Math.max(Date.now() + 60 * 1000, start.getTime() - 5 * 60 * 1000),
+    };
+
+    const nativeBridge = (window as unknown as { ScoutNative?: { scheduleReminder?: (payload: string) => void } }).ScoutNative;
+    if (nativeBridge?.scheduleReminder) {
+      nativeBridge.scheduleReminder(JSON.stringify(nativePayload));
+      setStatus("Phone reminder saved inside the Scout Android app. Your phone will alert you before the schedule is due.");
+      return;
+    }
+
+    const iosBridge = (window as unknown as { webkit?: { messageHandlers?: { ScoutNative?: { postMessage?: (payload: unknown) => void } } } }).webkit?.messageHandlers?.ScoutNative;
+    if (iosBridge?.postMessage) {
+      iosBridge.postMessage(nativePayload);
+      setStatus("Phone reminder saved inside the Scout iOS app. Your phone will alert you before the schedule is due.");
+      return;
+    }
+
     const ics = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
@@ -1009,8 +1002,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         `${Number(contactableWithEmail || 0).toLocaleString()} have a contactable status: ${CONTACTABLE_BUSINESS_STATUSES.join(", ")}.`,
       ];
       if (audienceCategoryId || cleanCategory || cleanSearch) pieces.push(`${Number(filteredBeforeLocation || 0).toLocaleString()} match your audience/category/search filters before location.`);
-      if (cleanCountry) pieces.push(`${locationMatched.toLocaleString()} match the selected uploaded location: ${cleanCountry}.`);
-      pieces.push("Use All available locations, clear search/category filters, or run Auto Scout/Repair Ready Contacts if the email exists but is not marked contactable.");
+      if (cleanCountry) pieces.push(`${locationMatched.toLocaleString()} match the selected country: ${cleanCountry}.`);
+      pieces.push("Use All countries, clear search/category filters, or run Auto Scout/Repair Ready Contacts if the email exists but is not marked contactable.");
       return pieces.join(" ");
     } catch {
       return messageKind === "follow_up"
@@ -1456,7 +1449,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             businessCategoryFilter,
             countryFilter,
             locationFilter: countryFilter,
-            locationFilterMode: "uploaded_list_multi_field",
+            locationFilterMode: "country_only_from_uploaded_fields",
             messageKind,
             isFollowUp: !!options?.isFollowUp,
             followupSegment: options?.followupSegment || null,
@@ -2205,7 +2198,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               value={countryFilter}
               onChange={(e) => setCountryFilter(e.target.value)}
             >
-              <option value="">All available locations</option>
+              <option value="">All countries</option>
               {locationOptions.map((location) => (
                 <option key={location.value} value={location.value}>
                   {location.label}
@@ -2213,7 +2206,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               ))}
             </select>
             <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-              Only locations found in your uploaded contactable leads are shown. Scout scans location, country, city, region, market, address, and raw uploaded fields.
+              Only countries found in your uploaded contactable leads are shown. Scout scans country fields first, then location, city, region, market, address, and raw uploaded fields — but it shows countries only, not full addresses.
             </p>
           </div>
           <div>
