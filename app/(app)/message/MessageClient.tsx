@@ -362,6 +362,27 @@ function inHours(hours: number) {
   return asLocalDateTimeValue(d);
 }
 
+
+function safeIcsText(value: unknown) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r?\n/g, "\\n");
+}
+
+function toIcsDate(value: string | Date) {
+  const d = value instanceof Date ? value : new Date(value);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+}
+
+function scheduleLabel(schedule: Pick<MessageSchedule, "type" | "target_count" | "scheduled_for">) {
+  const type = schedule.type === "follow_up" ? "follow-ups" : "emails";
+  const count = Number(schedule.target_count || 0);
+  return `${count ? count.toLocaleString() : ""} ${type}`.trim();
+}
+
 export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const [categories, setCategories] = useState<MessageCategory[]>([]);
@@ -420,6 +441,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [autoRunSchedules, setAutoRunSchedules] = useState(true);
   const [scheduleRunnerBusy, setScheduleRunnerBusy] = useState(false);
   const scheduleRunnerRef = useRef(false);
+  const [scheduleReminderEnabled, setScheduleReminderEnabled] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<string>("unsupported");
+  const [lastSavedSchedule, setLastSavedSchedule] = useState<MessageSchedule | null>(null);
+  const dueReminderRef = useRef<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [lastResults, setLastResults] = useState<
@@ -458,6 +483,12 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       !isPaused(a) &&
       (a.access_token || a.refresh_token),
   );
+  const dueSchedules = schedules.filter((schedule) => {
+    const statusText = String(schedule.status || "");
+    if (!["scheduled", "due"].includes(statusText)) return false;
+    const scheduledTime = new Date(schedule.scheduled_for).getTime();
+    return Number.isFinite(scheduledTime) && scheduledTime <= Date.now();
+  });
   const previewBusiness =
     readyContacts.find((b) => selectedContacts[b.id]) || readyContacts[0];
   const previewSubject =
@@ -761,6 +792,120 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, autoRunSchedules, busy, loading, scheduleRunnerBusy, schedules]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setNotificationPermission("Notification" in window ? Notification.permission : "unsupported");
+    setScheduleReminderEnabled(window.localStorage.getItem(`scout_schedule_notifier_${workspace.id}`) === "1");
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    }
+  }, [workspace.id]);
+
+  useEffect(() => {
+    if (!workspace.id || !scheduleReminderEnabled) return;
+    if (typeof window === "undefined") return;
+    for (const schedule of dueSchedules) {
+      const key = `scout_due_notified_${workspace.id}_${schedule.id}`;
+      if (dueReminderRef.current.has(schedule.id) || window.localStorage.getItem(key)) continue;
+      dueReminderRef.current.add(schedule.id);
+      window.localStorage.setItem(key, "1");
+      notifyScheduleDue(schedule);
+      emitLiveActivity({
+        kind: "schedule",
+        status: "due",
+        title: "Schedule due",
+        message: `${scheduleLabel(schedule)} is due now.`,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.id, scheduleReminderEnabled, schedules]);
+
+  async function enableScheduleNotifier() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      setStatus("This browser does not support browser notifications. Use the phone reminder button instead.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    if (permission === "granted") {
+      setScheduleReminderEnabled(true);
+      window.localStorage.setItem(`scout_schedule_notifier_${workspace.id}`, "1");
+      setStatus("Schedule notifier is on while Scout is open. For phone alerts while Scout is closed, add the phone/calendar reminder.");
+    } else {
+      setScheduleReminderEnabled(false);
+      window.localStorage.setItem(`scout_schedule_notifier_${workspace.id}`, "0");
+      setStatus("Browser notification permission was not granted. Use phone/calendar reminder instead.");
+    }
+  }
+
+  function notifyScheduleDue(schedule: MessageSchedule) {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+    const notification = new Notification("Scout schedule is due", {
+      body: `${scheduleLabel(schedule)} is ready. Open Scout and click Run Due Sends Now, or keep this page open to auto-run it.`,
+      icon: "/icon-192.png",
+      tag: `scout-schedule-${schedule.id}`,
+    });
+    notification.onclick = () => {
+      window.focus();
+      window.location.href = "/message";
+    };
+  }
+
+  function downloadScheduleReminder(schedule: MessageSchedule) {
+    if (typeof window === "undefined") return;
+    const start = new Date(schedule.scheduled_for);
+    if (Number.isNaN(start.getTime())) {
+      setError("This schedule has an invalid date/time.");
+      return;
+    }
+    const end = new Date(start.getTime() + 30 * 60 * 1000);
+    const appUrl = `${workspace.app_url || window.location.origin}/message`;
+    const title = `Scout schedule due: ${scheduleLabel(schedule)}`;
+    const description = `Open Scout and run due sends. Schedule type: ${schedule.type}. Count: ${Number(schedule.target_count || 0)}. URL: ${appUrl}`;
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Scout//Schedule Reminder//EN",
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      "BEGIN:VEVENT",
+      `UID:scout-${schedule.id}@scout-app`,
+      `DTSTAMP:${toIcsDate(new Date())}`,
+      `DTSTART:${toIcsDate(start)}`,
+      `DTEND:${toIcsDate(end)}`,
+      `SUMMARY:${safeIcsText(title)}`,
+      `DESCRIPTION:${safeIcsText(description)}`,
+      `URL:${safeIcsText(appUrl)}`,
+      "BEGIN:VALARM",
+      "TRIGGER:-PT5M",
+      "ACTION:DISPLAY",
+      `DESCRIPTION:${safeIcsText(title)}`,
+      "END:VALARM",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `scout-schedule-${schedule.id}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus("Phone/calendar reminder downloaded. Open it on your phone or desktop calendar and save it.");
+  }
+
+  function clearScheduleReminder(schedule: MessageSchedule) {
+    dueReminderRef.current.delete(schedule.id);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(`scout_due_notified_${workspace.id}_${schedule.id}`);
+    }
+  }
 
   function templatesForSend(kind: MessageKind = "initial") {
     const requiredType = kind === "follow_up" ? "follow_up" : "initial";
@@ -1594,7 +1739,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         throw new Error("Create/select at least one template first.");
       if (!senders.length)
         throw new Error("Select at least one connected sender first.");
-      const { error: insertError } = await supabase
+      const { data: insertedSchedule, error: insertError } = await supabase
         .from("message_schedules")
         .insert({
           workspace_id: workspace.id,
@@ -1639,9 +1784,12 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             dry_run: dryRun,
             allow_high_risk_send: allowHighRiskSend,
           },
-        });
+        })
+        .select("*")
+        .single();
       if (insertError) throw insertError;
-      setStatus("Schedule saved. Keep Scout open on this page; the in-app schedule runner will start it when the time arrives.");
+      if (insertedSchedule) setLastSavedSchedule(insertedSchedule as MessageSchedule);
+      setStatus("Schedule saved. Keep Scout open on this page; the in-app schedule runner will start it when the time arrives. Add a phone reminder if you want a top-of-phone alert.");
       await loadSchedules();
     } catch (err) {
       setError(formatError(err));
@@ -1661,7 +1809,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         throw new Error("Create/select at least one follow-up template first.");
       if (!senders.length)
         throw new Error("Select at least one connected sender first.");
-      const { error: insertError } = await supabase
+      const { data: insertedSchedule, error: insertError } = await supabase
         .from("message_schedules")
         .insert({
           workspace_id: workspace.id,
@@ -1696,10 +1844,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             dry_run: dryRun,
             allow_high_risk_send: allowHighRiskSend,
           },
-        });
+        })
+        .select("*")
+        .single();
       if (insertError) throw insertError;
+      if (insertedSchedule) setLastSavedSchedule(insertedSchedule as MessageSchedule);
       setStatus(
-        `Scheduled ${dueFollowUps.length.toLocaleString()} due follow-up(s).`,
+        `Scheduled ${dueFollowUps.length.toLocaleString()} due follow-up(s). Add a phone reminder if you want a top-of-phone alert.`,
       );
       await loadSchedules();
     } catch (err) {
@@ -2563,7 +2714,21 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedule Email</h3>
-          <p className="muted">Pick a time and count. Schedules now run from the open app, not cron. Keep Scout open when you want scheduled work to start.</p>
+          <p className="muted">Pick a time and count. Schedules run from the open app. Add a phone/calendar reminder if you want your phone to alert you when the schedule is due.</p>
+          {dueSchedules.length ? (
+            <div className="notice" style={{ marginBottom: 12 }}>
+              <strong>{dueSchedules.length.toLocaleString()} schedule(s) due now.</strong>{" "}
+              Keep this page open and auto-run will continue, or click <strong>Run Due Sends Now</strong>.
+            </div>
+          ) : null}
+          {lastSavedSchedule ? (
+            <div className="notice" style={{ marginBottom: 12 }}>
+              Saved schedule for <strong>{new Date(lastSavedSchedule.scheduled_for).toLocaleString()}</strong>.{" "}
+              <button className="btn secondary mini" type="button" onClick={() => downloadScheduleReminder(lastSavedSchedule)}>
+                Add phone reminder
+              </button>
+            </div>
+          ) : null}
           <div className="grid grid-3">
             <div>
               <label className="label">Type</label>
@@ -2607,6 +2772,18 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             />{" "}
             Auto-run due schedules while this page is open
           </label>
+          <div className="notice" style={{ marginTop: 12 }}>
+            <strong>Due notifier</strong><br />
+            Browser notification: {notificationPermission}. This alerts you while Scout/PWA is open or active. For a real top-of-phone reminder when Scout is closed, use <strong>Add phone reminder</strong> on the saved schedule.
+            <div className="actions" style={{ marginTop: 8 }}>
+              <button className="btn secondary" type="button" onClick={enableScheduleNotifier}>
+                {scheduleReminderEnabled && notificationPermission === "granted" ? "Notifier on" : "Enable app notifier"}
+              </button>
+              <button className="btn secondary" type="button" disabled={!lastSavedSchedule} onClick={() => lastSavedSchedule && downloadScheduleReminder(lastSavedSchedule)}>
+                Add last schedule to phone
+              </button>
+            </div>
+          </div>
           <div className="actions" style={{ marginTop: 12 }}>
             <button
               className="btn secondary"
@@ -2648,7 +2825,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                     <td>{Number(s.target_count || 0).toLocaleString()}</td>
                     <td>{scheduleProgressText(s)}</td>
                     <td>{s.status}{s.last_error ? <><br /><span className="error">{s.last_error}</span></> : null}</td>
-                    <td>{["scheduled", "due", "running"].includes(String(s.status || "")) ? <button className="btn secondary" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(s)}>{stopBusyId === s.id ? "Stopping…" : "Stop"}</button> : null}</td>
+                    <td>
+                      <div className="actions" style={{ gap: 6 }}>
+                        {String(s.status || "") === "scheduled" ? <button className="btn secondary mini" type="button" onClick={() => downloadScheduleReminder(s)}>Phone reminder</button> : null}
+                        {["scheduled", "due", "running"].includes(String(s.status || "")) ? <button className="btn secondary mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(s)}>{stopBusyId === s.id ? "Stopping…" : "Stop"}</button> : null}
+                        {String(s.status || "") === "scheduled" ? <button className="btn secondary mini" type="button" onClick={() => clearScheduleReminder(s)}>Reset alert</button> : null}
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {!schedules.length ? (
