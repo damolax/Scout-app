@@ -18,6 +18,7 @@ type ReplyRow = {
   to_email?: string | null;
   subject?: string | null;
   snippet?: string | null;
+  body?: string | null;
   classification?: string | null;
   is_real_reply?: boolean | null;
   is_auto_reply?: boolean | null;
@@ -190,8 +191,17 @@ function classify(message: NormalizedMessage) {
     'hemos recibido', 'su solicitud ha sido recibida', 'gracias por contactarnos',
     'abbiamo ricevuto', 'la tua richiesta è stata ricevuta', 'grazie per averci contattato'
   ];
+  const humanReplyTerms = [
+    'we don\'t need', 'we do not need', 'we are not interested', 'not interested', 'not looking to', 'not looking for',
+    'we are not looking', 'we\'re not looking', 'we appreciate your', 'appreciate your insight', 'appreciate the insight',
+    'thanks for sharing', 'thank you for sharing', 'thank you for reaching out and sharing', 'we value thoughtful',
+    'your email itself is', 'highly unprofessional', 'please send', 'can you send', 'could you send', 'send more details',
+    'tell me more', 'book a call', 'schedule a call', 'let us talk', 'let\'s talk', 'we would be interested', 'sounds interesting',
+    'we already have', 'we are happy with', 'this is not something', 'no thank you', 'no thanks'
+  ];
   if (limitTerms.some((term) => text.includes(term))) return { classification: 'gmail_limit_notice', isReal: false, noInbox: false };
   if (bounceTerms.some((term) => text.includes(term))) return { classification: 'no_inbox_or_bounce', isReal: false, noInbox: true };
+  if (humanReplyTerms.some((term) => text.includes(term))) return { classification: 'real_reply', isReal: true, noInbox: false };
   if (autoTerms.some((term) => text.includes(term))) return { classification: 'auto_reply_ignored', isReal: false, noInbox: false };
   return { classification: 'real_reply', isReal: true, noInbox: false };
 }
@@ -205,6 +215,14 @@ function csvEscape(value: unknown) {
 
 function looksAutoLikeReply(row: ReplyRow) {
   const text = `${row.from_email || ''} ${row.subject || ''} ${row.snippet || ''} ${asText(row.raw || '')}`.toLowerCase();
+  const humanTerms = [
+    'we don\'t need', 'we do not need', 'not interested', 'not looking to', 'not looking for', 'we are not looking',
+    'we\'re not looking', 'we appreciate your', 'appreciate your insight', 'appreciate the insight', 'thanks for sharing',
+    'thank you for sharing', 'thank you for reaching out and sharing', 'your email itself is', 'highly unprofessional',
+    'please send', 'can you send', 'could you send', 'send more details', 'tell me more', 'book a call', 'schedule a call',
+    'no thank you', 'no thanks'
+  ];
+  if (humanTerms.some((term) => text.includes(term))) return false;
   const terms = [
     'automatic reply', 'automatic response', 'automatische antwort', 'auto:', 'auto reply', 'auto-reply', 'autoreply',
     'out of office', 'out-of-office', 'ooo', 'vacation responder', 'away from the office', 'currently out of office',
@@ -222,6 +240,18 @@ function looksAutoLikeReply(row: ReplyRow) {
     'bearbeitung ihrer anfrage', 'bearbeitung deiner anfrage', 'bearbeitungszeit', 'wir melden uns', 'schnellstmöglich'
   ];
   return terms.some((term) => text.includes(term));
+}
+
+function fullReplyText(row: ReplyRow) {
+  const raw = row.raw || {};
+  const rawGmail = (raw as any).gmail || {};
+  return asText(row.body)
+    || asText(row.snippet)
+    || asText((raw as any).body)
+    || asText((raw as any).text)
+    || asText((raw as any).message)
+    || asText(rawGmail.snippet)
+    || 'No full message body was saved for this reply.';
 }
 
 function compactReplyRows(rows: ReplyRow[]) {
@@ -274,6 +304,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   const [status, setStatus] = useState('Native Gmail reply sync is ready. It separates real replies, auto replies, no-inbox failures, message-blocked notices, and Gmail limit notices so response analytics stay clean.');
   const [error, setError] = useState('');
   const [lastStats, setLastStats] = useState<SyncStats>({ scanned: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, ignored: 0, inserted: 0, errors: [] });
+  const [openedReply, setOpenedReply] = useState<ReplyRow | null>(null);
 
   async function loadAll() {
     setError('');
@@ -543,9 +574,10 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Real Replies</h3>
-        <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Template</th><th>Received</th></tr></thead><tbody>
-          {realReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{templates.find((t) => t.id === r.template_id)?.name || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
-          {!realReplies.length ? <tr><td colSpan={6} className="muted">No real replies yet.</td></tr> : null}
+        <p className="muted">Click Read to see the exact message the prospect sent. Click Open to reply from the business page.</p>
+        <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Template</th><th>Received</th><th>Message</th></tr></thead><tbody>
+          {realReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{templates.find((t) => t.id === r.template_id)?.name || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td><td><button className="btn secondary mini" type="button" onClick={() => setOpenedReply(r)}>Read</button></td></tr>)}
+          {!realReplies.length ? <tr><td colSpan={7} className="muted">No real replies yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
@@ -574,6 +606,23 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
           {!ignoredReplies.length ? <tr><td colSpan={5} className="muted">No ignored/bounce records yet.</td></tr> : null}
         </tbody></table></div>
       </div>
+
+      {openedReply ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setOpenedReply(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="actions" style={{ justifyContent: 'space-between' }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Exact prospect message</h3>
+                <p className="muted" style={{ margin: '6px 0 0' }}>{openedReply.from_email || '-'} · {openedReply.received_at ? new Date(openedReply.received_at).toLocaleString() : '-'}</p>
+              </div>
+              <button className="btn secondary mini" type="button" onClick={() => setOpenedReply(null)}>Close</button>
+            </div>
+            <div className="notice" style={{ marginTop: 12 }}><strong>Subject:</strong> {openedReply.subject || '-'}</div>
+            <pre className="message-body-view">{fullReplyText(openedReply)}</pre>
+            {openedReply.business_id ? <Link className="btn" href={`/businesses/${openedReply.business_id}`}>Open business and reply</Link> : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

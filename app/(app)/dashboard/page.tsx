@@ -397,9 +397,10 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
         <span className="badge">Workspace: {workspace.name}</span>
       </div>
 
-      <SendTimeStrip />
-
-      <SetupChecklist tasks={setupTasks} />
+      <details className="card" style={{ padding: 16 }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 900 }}>Check best sending time</summary>
+        <div style={{ marginTop: 12 }}><SendTimeStrip /></div>
+      </details>
 
       <div className="quick-links">
         <NextActionCard title="Find missing emails" href="/auto-scout" helper="Use Auto Scout and see results on the same page." />
@@ -457,6 +458,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
         <KpiCard title="Scheduled Messages" value={scheduled} helper="Waiting for the open-app schedule runner." />
         <KpiCard title="Selected Period" value={period.label} helper={period.compareLabel} />
       </div>
+
+      <SetupChecklist tasks={setupTasks} />
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>

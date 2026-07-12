@@ -2,6 +2,7 @@ import { AppShellClient } from '@/components/AppShellClient';
 import { NotificationBell } from '@/components/NotificationBell';
 import { LiveActivityWindow } from '@/components/LiveActivityWindow';
 import { AppOpenRunner } from '@/components/AppOpenRunner';
+import { ScoutingLevel } from '@/components/ScoutingLevel';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
 
@@ -24,6 +25,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
         <div className="container">{children}</div>
         <AppOpenRunner workspaceId={workspace?.id} />
+        <ScoutingLevel workspaceId={workspace?.id} />
         <LiveActivityWindow workspaceId={workspace?.id} />
       </main>
     </AppShellClient>

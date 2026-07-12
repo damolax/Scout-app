@@ -290,9 +290,21 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
   if (blockedTerms.some((term) => text.includes(term))) return { classification: 'message_blocked', replyBucket: 'blocked', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: true, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
   if (bounceTerms.some((term) => text.includes(term))) return { classification: 'bounce_notice', replyBucket: 'bounce_notice', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
   if (temporaryTerms.some((term) => text.includes(term))) return { classification: 'temporary_failure', replyBucket: 'temporary_failure', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: true, ignored: false };
-  if (autoHeaderTerms.some((term) => autoHeaderText.includes(term)) || autoTerms.some((term) => text.includes(term))) return { classification: 'auto_reply', replyBucket: 'auto_reply', isRealReply: false, isAutoReply: true, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false };
+  const humanReplyTerms = [
+    'we don\'t need', 'we do not need', 'we are not interested', 'not interested', 'not looking to', 'not looking for',
+    'we are not looking', 'we\'re not looking', 'we appreciate your', 'appreciate your insight', 'appreciate the insight',
+    'thanks for sharing', 'thank you for sharing', 'thank you for reaching out and sharing', 'we value thoughtful',
+    'your email itself is', 'highly unprofessional', 'please send', 'can you send', 'could you send', 'send more details',
+    'tell me more', 'book a call', 'schedule a call', 'let us talk', 'let\'s talk', 'we would be interested', 'sounds interesting',
+    'we already have', 'we are happy with', 'this is not something', 'no thank you', 'no thanks'
+  ];
+  const hasHumanReplySignal = Boolean(sentMatch) && humanReplyTerms.some((term) => text.includes(term));
+  const hasAutoHeaderSignal = autoHeaderTerms.some((term) => autoHeaderText.includes(term));
+  const hasAutoBodySignal = autoTerms.some((term) => text.includes(term));
   if (isSelf) return { classification: 'self_message_ignored', replyBucket: 'ignored', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
   if (!sentMatch) return { classification: 'unmatched_inbound', replyBucket: 'unmatched', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
+  if (hasHumanReplySignal) return { classification: 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
+  if (hasAutoHeaderSignal || hasAutoBodySignal) return { classification: 'auto_reply', replyBucket: 'auto_reply', isRealReply: false, isAutoReply: true, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false };
   return { classification: 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
 }
 async function findSentMatch(supabase: SupabaseClient<any, any, any>, workspaceId: string, message: NormalizedInbound) {

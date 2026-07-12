@@ -96,3 +96,39 @@ Challenges are not all meant to be easy.
 - Legend challenges are huge goals like 1,000,000 or 10,000,000 delivered messages.
 
 Click any challenge to see the exact steps.
+
+## Scouting Level
+
+You will see **Scouting Level** in the lower-left corner.
+
+Click it to see your current stage.
+
+It grows when you do real Scout work:
+
+- find trusted emails
+- run Auto Scout
+- send messages
+- get real replies
+- reply to prospects from Scout
+- connect Gmail accounts
+- create templates
+- save sends
+- keep working in Scout
+
+The app does not show the exact requirement for the next stage. Just keep doing useful work and your level will move up. The last stage is **Ultimate**.
+
+## Reading the exact prospect message
+
+Go to **Replies**.
+
+Find the prospect.
+
+Click **Read**.
+
+Scout opens the exact message the prospect sent.
+
+Click **Open business and reply** to answer.
+
+## Replying to a prospect
+
+When you reply from Scout, Scout uses the same Gmail account that sent the original message to that business. You cannot change it. This keeps each conversation clean and safe.

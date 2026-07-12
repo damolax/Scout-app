@@ -99,17 +99,32 @@ function formatError(error: unknown) {
   try { return JSON.stringify(error); } catch { return String(error); }
 }
 
+function fullMessage(row: AnyRow) {
+  const raw = row.raw || {};
+  const rawGmail = raw.gmail || {};
+  return text(row.body)
+    || text(row.snippet)
+    || text(raw.body)
+    || text(raw.text)
+    || text(raw.message)
+    || text(rawGmail.snippet)
+    || 'No full message body was saved for this item.';
+}
+
 export default function BusinessConversationPanel({ workspace, business, accounts, sentRows, replyRows, noInboxRows, socialLinks }: Props) {
   const supabase = useMemo(() => createClient(), []);
   const connectedAccounts = accounts.filter((account) => ['connected', 'ready'].includes(String(account.status || '')));
+  const lockedReplySenderId = text(sentRows.find((row) => text(row.gmail_account_id))?.gmail_account_id);
+  const lockedReplySender = accounts.find((account) => account.id === lockedReplySenderId) || connectedAccounts[0];
   const [replyTemplates, setReplyTemplates] = useState<MessageTemplate[]>([]);
   const [selectedReplyTemplateId, setSelectedReplyTemplateId] = useState('');
-  const [accountId, setAccountId] = useState(connectedAccounts[0]?.id || '');
+  const [accountId, setAccountId] = useState(lockedReplySender?.id || '');
   const [toEmail, setToEmail] = useState(text(business.email));
   const [subject, setSubject] = useState(subjectFromRows(sentRows, replyRows, text(business.name)));
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [openedMessage, setOpenedMessage] = useState<AnyRow | null>(null);
 
   const timeline = useMemo(() => {
     const sent = sentRows.map((row) => ({ ...row, kind: row.delivery_status === 'manual_reply_sent' ? 'manual_reply_sent' : row.is_follow_up ? 'follow_up_sent' : 'sent', sortTime: rowTime(row) }));
@@ -124,6 +139,10 @@ export default function BusinessConversationPanel({ workspace, business, account
   const lastSent = sentRows[0];
   const threadId = latestThread(sentRows, replyRows);
   const currentReplyTemplate = replyTemplates.find((template) => template.id === selectedReplyTemplateId);
+
+  useEffect(() => {
+    if (lockedReplySender?.id) setAccountId(lockedReplySender.id);
+  }, [lockedReplySender?.id]);
 
   useEffect(() => {
     async function loadReplyTemplates() {
@@ -201,9 +220,9 @@ export default function BusinessConversationPanel({ workspace, business, account
           <div className="notice"><strong>Latest inbound:</strong><br />{latestInbound ? `${formatDate(latestInbound.received_at)} · ${classifyLabel(latestInbound)}` : 'No inbound reply yet.'}</div>
           <div className="notice"><strong>Current reply state:</strong><br />{nice(business.reply_state || business.last_reply_classification || business.status)}</div>
         </div>
-        <div className="table-wrap"><table><thead><tr><th>Type</th><th>Email</th><th>Subject</th><th>When</th></tr></thead><tbody>
-          {timeline.slice(0, 100).map((row, index) => <tr key={`${row.kind}-${row.id || row.gmail_message_id || index}`}><td><span className={`status ${String(row.kind).replace(/_/g, '-')}`}>{String(row.kind).replace(/_/g, ' ')}</span></td><td>{nice(row.from_email || row.to_email || row.email)}</td><td>{nice(row.subject)}</td><td>{formatDate(rowTime(row))}</td></tr>)}
-          {!timeline.length ? <tr><td colSpan={4} className="muted">No conversation history yet.</td></tr> : null}
+        <div className="table-wrap"><table><thead><tr><th>Type</th><th>Email</th><th>Subject</th><th>When</th><th>Message</th></tr></thead><tbody>
+          {timeline.slice(0, 100).map((row, index) => <tr key={`${row.kind}-${row.id || row.gmail_message_id || index}`}><td><span className={`status ${String(row.kind).replace(/_/g, '-')}`}>{String(row.kind).replace(/_/g, ' ')}</span></td><td>{nice(row.from_email || row.to_email || row.email)}</td><td>{nice(row.subject)}</td><td>{formatDate(rowTime(row))}</td><td><button className="btn secondary mini" type="button" onClick={() => setOpenedMessage(row)}>Read</button></td></tr>)}
+          {!timeline.length ? <tr><td colSpan={5} className="muted">No conversation history yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
@@ -217,9 +236,10 @@ export default function BusinessConversationPanel({ workspace, business, account
         </select>
         {currentReplyTemplate?.purpose ? <div className="notice" style={{ marginTop: 8 }}>{currentReplyTemplate.purpose}</div> : null}
         <label className="label" style={{ marginTop: 12 }}>Sender Gmail</label>
-        <select className="select" value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-          {connectedAccounts.map((account) => <option key={account.id} value={account.id}>{account.email}</option>)}
-        </select>
+        <div className="notice">
+          <strong>{lockedReplySender?.email || 'No original sender found'}</strong><br />
+          Scout locks replies to the Gmail account that sent the original message to this business.
+        </div>
         <label className="label">To</label>
         <input className="input" value={toEmail} onChange={(event) => setToEmail(event.target.value)} placeholder="prospect@example.com" />
         <label className="label">Subject</label>
@@ -248,6 +268,22 @@ export default function BusinessConversationPanel({ workspace, business, account
           {!socialLinks.length ? <div className="muted">No social/profile links found in the imported raw data yet.</div> : null}
         </div>
       </div>
+
+      {openedMessage ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setOpenedMessage(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="actions" style={{ justifyContent: 'space-between' }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Exact message</h3>
+                <p className="muted" style={{ margin: '6px 0 0' }}>{nice(openedMessage.from_email || openedMessage.to_email || openedMessage.email)} · {formatDate(rowTime(openedMessage))}</p>
+              </div>
+              <button className="btn secondary mini" type="button" onClick={() => setOpenedMessage(null)}>Close</button>
+            </div>
+            <div className="notice" style={{ marginTop: 12 }}><strong>Subject:</strong> {nice(openedMessage.subject)}</div>
+            <pre className="message-body-view">{fullMessage(openedMessage)}</pre>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

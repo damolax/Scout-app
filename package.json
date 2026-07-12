@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-8-stretch-challenges",
-  "version": "10.8.0",
+  "name": "scout-app-v10-9-level-replies",
+  "version": "10.9.0",
   "private": true,
   "scripts": {
     "dev": "next dev",

@@ -70,16 +70,31 @@ export async function POST(request: NextRequest) {
     const input = await request.json();
     const workspaceId = String(input.workspace_id || '');
     const businessId = String(input.business_id || '');
-    const accountId = String(input.gmail_account_id || '');
+    const requestedAccountId = String(input.gmail_account_id || '');
     const templateId = String(input.template_id || input.templateId || '').trim() || null;
     const to = normalizeEmail(input.to || input.email || '');
     const subject = String(input.subject || '').trim();
     const body = String(input.body || input.message || '').trim();
-    const threadId = String(input.gmail_thread_id || input.thread_id || '').trim() || null;
-    if (!workspaceId || !businessId || !accountId) throw new Error('workspace_id, business_id, and gmail_account_id are required.');
+    const inputThreadId = String(input.gmail_thread_id || input.thread_id || '').trim() || null;
+    if (!workspaceId || !businessId) throw new Error('workspace_id and business_id are required.');
     if (!to || !subject || !body) throw new Error('to, subject, and body are required.');
 
     const supabase = createAdminClient();
+    const { data: latestSent, error: latestSentError } = await supabase
+      .from('sent_messages')
+      .select('id,gmail_account_id,gmail_thread_id,subject,to_email,from_email,sent_at')
+      .eq('workspace_id', workspaceId)
+      .eq('business_id', businessId)
+      .not('gmail_account_id', 'is', null)
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestSentError) throw latestSentError;
+    if (!latestSent?.gmail_account_id) throw new Error('Scout could not find the Gmail account that sent the original message to this business. Reply from the business page after syncing the conversation again.');
+    if (requestedAccountId && requestedAccountId !== latestSent.gmail_account_id) throw new Error('For safety, Scout replies to this business only with the same Gmail account that sent the original message.');
+    const accountId = String(latestSent.gmail_account_id);
+    const threadId = inputThreadId || String(latestSent.gmail_thread_id || '') || null;
+
     const [{ data: account, error: accountError }, { data: business, error: businessError }] = await Promise.all([
       supabase.from('gmail_accounts').select('*').eq('workspace_id', workspaceId).eq('id', accountId).single(),
       supabase.from('businesses').select('id,email,name,status').eq('workspace_id', workspaceId).eq('id', businessId).single()
