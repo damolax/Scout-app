@@ -328,3 +328,30 @@ code { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-
 @media (max-width: 900px) {
   .live-activity { right: 10px; bottom: 10px; }
 }
+
+/* v9: live work shows current actions, not old history */
+.live-current { border-color: rgba(99, 179, 237, .35); }
+.live-now-text { color: #dbeafe !important; font-weight: 800; }
+.live-event {
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: start;
+}
+.live-event-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255,255,255,.07);
+  margin-top: 1px;
+}
+.live-event-main { min-width: 0; }
+.live-event-main strong { display: block; font-size: 12px; }
+.live-event-main p { margin: 2px 0 0; color: var(--text); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+.live-event-main small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-event.ok .live-event-icon { color: var(--ok); box-shadow: 0 0 0 4px rgba(51,214,159,.09); }
+.live-event.active .live-event-icon { color: #93c5fd; box-shadow: 0 0 0 4px rgba(147,197,253,.09); }
+.live-event.danger .live-event-icon { color: #fca5a5; box-shadow: 0 0 0 4px rgba(252,165,165,.09); }
+.live-event.neutral .live-event-icon { color: var(--muted); }
+.live-event em { padding-top: 2px; white-space: nowrap; }

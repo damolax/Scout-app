@@ -4,6 +4,15 @@ import { chooseBestEmailCandidate, type EmailCandidateDecision } from '@/lib/ema
 import { findEmailsDeepFromWebsite, type DeepWebsiteFinderResult } from '@/lib/website-email-finder';
 import { duplicateEmailRisk } from '@/lib/repeated-email-guard';
 
+
+async function logAutoScoutActivity(supabase: ReturnType<typeof createAdminClient>, workspaceId: string, type: string, message: string, raw: Record<string, unknown> = {}) {
+  try {
+    await supabase.from('activity_logs').insert({ workspace_id: workspaceId, type, message, raw });
+  } catch {
+    // Live work logging must never stop the research worker.
+  }
+}
+
 function errorMessage(error: unknown) {
   if (!error) return 'Unknown error';
   if (error instanceof Error) return error.message;
@@ -179,6 +188,7 @@ async function runOnce(request: NextRequest) {
 
     await supabase.from('email_research_jobs').update({ status: 'running', started_at: new Date().toISOString(), updated_at: new Date().toISOString(), attempts: (job.attempts || 0) + 1 }).eq('id', job.id);
     await supabase.from('businesses').update({ status: 'scanning' }).eq('id', business.id).neq('status', 'contacted');
+    await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_checking', `Checking ${business.name || 'business'} for email`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '' });
 
     try {
       let backendResult: any = {};
@@ -193,6 +203,7 @@ async function runOnce(request: NextRequest) {
       const backendDecision = bestEmailDecisionFromPayload(backendResult, business);
       let deepResult: DeepWebsiteFinderResult | null = null;
       if (shouldDeepSearch(backendDecision)) {
+        await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_deep_check', `Checking website pages for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '' });
         deepResult = await findEmailsDeepFromWebsite(business, { maxPages: 7, timeoutMs: 6500 });
       }
 
@@ -238,6 +249,7 @@ async function runOnce(request: NextRequest) {
           await supabase.from('businesses').update({ email, status: 'found', score: decision.score, raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
           await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
           results.push({ job: job.id, business: business.id, businessName: business.name, status: 'found', email, method: merged.method, quality: decision.quality, evidence: decision.sourceEvidence, pagesChecked: deepResult?.pagesChecked || 0, reason: merged.reason || 'Email passed strict candidate rules.' });
+          await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_found', `Found ${email} for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, email, website: business.website || business.domain || '', business_name: business.name || '', pages_checked: deepResult?.pagesChecked || 0, evidence: decision.sourceEvidence || '' });
         }
       } else if (email && decision.valid && !decision.promote) {
         await supabase.from('email_candidates').upsert({
@@ -252,10 +264,12 @@ async function runOnce(request: NextRequest) {
         await supabase.from('businesses').update({ status: 'review', raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
         await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
         results.push({ job: job.id, business: business.id, businessName: business.name, status: 'candidate_needs_evidence', email, method: merged.method, quality: decision.quality, evidence: decision.sourceEvidence, pagesChecked: deepResult?.pagesChecked || 0, reason: merged.reason || 'Valid format, but not trusted enough to promote.' });
+        await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_candidate', `Candidate needs evidence: ${email} for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, email, website: business.website || business.domain || '', business_name: business.name || '', pages_checked: deepResult?.pagesChecked || 0 });
       } else {
         await supabase.from('businesses').update({ status: 'review', raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
         await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
         results.push({ job: job.id, business: business.id, businessName: business.name, status: 'no_trusted_email_found', method: merged.method, pagesChecked: deepResult?.pagesChecked || 0, rejected: decision.rejected, reason: merged.reason });
+        await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_no_email', `No trusted email found for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '', pages_checked: deepResult?.pagesChecked || 0, reason: merged.reason || '' });
       }
     } catch (error) {
       const attempts = (job.attempts || 0) + 1;
@@ -263,6 +277,7 @@ async function runOnce(request: NextRequest) {
       await supabase.from('email_research_jobs').update({ status: nextStatus, attempts, last_error: errorMessage(error), finished_at: nextStatus === 'failed' ? new Date().toISOString() : null }).eq('id', job.id);
       if (nextStatus === 'failed') await supabase.from('businesses').update({ status: 'review' }).eq('id', business.id);
       results.push({ job: job.id, business: business.id, businessName: business.name, status: nextStatus, error: errorMessage(error) });
+      await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_failed', `Auto Scout failed for ${business.name || 'business'}: ${errorMessage(error)}`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '', error: errorMessage(error) });
     }
   }
 

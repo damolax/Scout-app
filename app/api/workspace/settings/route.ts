@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     const admin = createAdminClient();
     const { data, error } = await admin
       .from('workspaces')
-      .select('id,name,api_key,app_url,render_backend_url,default_audience_category_id,default_audience_category_name,dork_settings,extension_settings')
+      .select('id,name,api_key,app_url,render_backend_url,default_audience_category_id,default_audience_category_name,dork_settings,extension_settings,email_signature_text,email_signature_html,email_logo_url')
       .eq('id', workspaceId)
       .single();
     if (error) throw error;
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString()
     };
 
-    const { data, error } = await admin.from('workspaces').update(patch).eq('id', workspaceId).select('id,name,api_key,app_url,render_backend_url,default_audience_category_id,default_audience_category_name,extension_settings').single();
+    const { data, error } = await admin.from('workspaces').update(patch).eq('id', workspaceId).select('id,name,api_key,app_url,render_backend_url,default_audience_category_id,default_audience_category_name,extension_settings,email_signature_text,email_signature_html,email_logo_url').single();
     if (error) throw error;
 
     await admin.from('activity_logs').insert({

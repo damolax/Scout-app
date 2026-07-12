@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v8-50-location-dropdown",
-  "version": "8.50.0",
+  "name": "scout-app-v9-1-logo-save-fix",
+  "version": "9.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v8.50: uses an uploaded-list location dropdown for send/schedule filters to avoid mistyped country/location errors."
+  "description": "Scout App v9.1: fixes logo upload visibility, public URL display, and signature/logo saving."
 }

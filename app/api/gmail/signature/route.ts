@@ -74,16 +74,44 @@ export async function POST(request: NextRequest) {
     if (!applyAll && !accountId) throw new Error('gmail_account_id is required unless apply_all is true.');
 
     const supabase = createAdminClient();
+
+    const identity = { signature_enabled, signature_html, signature_text, signature_logo_url };
+    const safeHtml = signatureHtml(identity);
+    const safeText = signatureText(identity);
+
+    const workspaceUpdate: Record<string, unknown> = {
+      email_signature_text: safeText,
+      email_signature_html: safeHtml,
+      email_logo_url: signature_logo_url || null,
+      updated_at: new Date().toISOString()
+    };
+    const { error: workspaceError } = await supabase
+      .from('workspaces')
+      .update(workspaceUpdate)
+      .eq('id', workspaceId);
+    if (workspaceError) {
+      const msg = formatError(workspaceError).toLowerCase();
+      const missingWorkspaceColumns = msg.includes('email_signature') || msg.includes('email_logo_url');
+      if (!missingWorkspaceColumns) throw workspaceError;
+    }
+
     let query = supabase.from('gmail_accounts').select('*').eq('workspace_id', workspaceId);
     if (!applyAll) query = query.eq('id', accountId);
     const { data: accounts, error: accountError } = await query.order('created_at', { ascending: true });
     if (accountError) throw accountError;
     const rows = accounts || [];
-    if (!rows.length) throw new Error('No Gmail sender accounts found.');
+    if (!rows.length) {
+      return NextResponse.json({
+        success: true,
+        updated: 0,
+        workspace_saved: true,
+        results: [],
+        message: syncToGmail
+          ? 'Signature and logo were saved to the workspace, but no Gmail sender accounts are connected yet. Connect Gmail before syncing to Gmail.'
+          : 'Signature and logo were saved to the workspace.'
+      });
+    }
 
-    const identity = { signature_enabled, signature_html, signature_text, signature_logo_url };
-    const safeHtml = signatureHtml(identity);
-    const safeText = signatureText(identity);
     const results: Array<Record<string, unknown>> = [];
 
     for (const account of rows) {
@@ -138,7 +166,7 @@ export async function POST(request: NextRequest) {
       results.push({ account_id: account.id, email: account.email, sync_status: syncStatus, sync_error: syncError });
     }
 
-    return NextResponse.json({ success: true, updated: results.length, results });
+    return NextResponse.json({ success: true, updated: results.length, workspace_saved: true, results });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 400 });
   }

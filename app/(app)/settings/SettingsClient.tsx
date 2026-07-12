@@ -53,6 +53,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   const [limitDrafts, setLimitDrafts] = useState<Record<string, { daily_limit: string; default_run_limit: string; account_type: string; seed_inbox_enabled: boolean; seed_test_address: string }>>({});
   const [identityDraft, setIdentityDraft] = useState<IdentityDraft>({ signature_enabled: true, signature_text: workspace.email_signature_text || '', signature_html: workspace.email_signature_html || '', signature_logo_url: workspace.email_logo_url || '' });
   const [logoUploadBusy, setLogoUploadBusy] = useState(false);
+  const [logoMessage, setLogoMessage] = useState('');
   const [manualEmail, setManualEmail] = useState('');
   const [manualAccessToken, setManualAccessToken] = useState('');
   const [manualRefreshToken, setManualRefreshToken] = useState('');
@@ -299,6 +300,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   async function uploadSignatureLogo(file: File | null) {
     if (!file) return;
     setLogoUploadBusy(true);
+    setLogoMessage('Uploading logo…');
     setError('');
     try {
       const form = new FormData();
@@ -310,14 +312,31 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json?.success === false) throw new Error(json?.error || `Logo upload failed with HTTP ${response.status}`);
-      const logoUrl = String(json.publicUrl || json.logoUrl || '').trim();
+      const logoUrl = String(json.publicUrl || json.logoUrl || json.public_url || json.url || '').trim();
       if (!logoUrl) throw new Error('Logo uploaded but no public URL was returned.');
       setIdentityDraft((draft) => ({ ...draft, signature_logo_url: logoUrl }));
-      setStatus('Logo uploaded. Click Save to Scout for all senders, or Save + sync signature to Gmail.');
+      setLogoMessage('Logo uploaded and saved as the workspace default. The public URL is now shown below. Click Save signature & logo to apply it to sender accounts.');
+      setStatus('Logo uploaded. Public URL is visible in the Logo URL box. Click Save signature & logo to apply it to Scout emails.');
     } catch (err) {
-      setError(formatError(err));
+      const message = formatError(err);
+      setLogoMessage(`Logo upload failed: ${message}`);
+      setError(message);
     } finally {
       setLogoUploadBusy(false);
+    }
+  }
+
+  async function copyLogoUrl() {
+    const url = identityDraft.signature_logo_url.trim();
+    if (!url) {
+      setLogoMessage('No logo URL to copy yet. Upload a logo first.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setLogoMessage('Logo URL copied.');
+    } catch {
+      setLogoMessage('Could not copy automatically. Select the URL and copy it manually.');
     }
   }
 
@@ -345,7 +364,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         ? failed.length
           ? `Saved signature in Scout for all senders. Gmail sync failed for ${failed.length} sender(s); reconnect after this version if Google asks for the Gmail settings permission.`
           : `Saved in Scout and synced to Gmail for ${Number(json.updated || 0).toLocaleString()} sender(s).`
-        : `Saved Scout signature for ${Number(json.updated || 0).toLocaleString()} sender(s).`);
+        : Number(json.updated || 0) > 0 ? `Saved Scout signature and logo for ${Number(json.updated || 0).toLocaleString()} sender(s).` : 'Saved workspace signature and logo. Connect Gmail to apply it to sender accounts.');
       await loadAccounts();
     } catch (err) {
       setError(formatError(err));
@@ -576,10 +595,16 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
               onChange={(event) => uploadSignatureLogo(event.target.files?.[0] || null)}
             />
             <p className="muted" style={{ marginTop: 6 }}>Upload PNG/JPG/WebP. Recommended 320×120 px, transparent PNG, under 2 MB.</p>
+            {logoMessage ? <p className={logoMessage.toLowerCase().includes('failed') ? 'error' : 'success'} style={{ marginTop: 6 }}>{logoMessage}</p> : null}
           </div>
           <div>
+            <label className="label">Public logo URL</label>
             <input className="input" value={identityDraft.signature_logo_url} onChange={(event) => setIdentityDraft((draft) => ({ ...draft, signature_logo_url: event.target.value }))} placeholder="Logo URL appears here after upload" />
-            <p className="muted" style={{ marginTop: 6 }}>{logoUploadBusy ? 'Uploading logo…' : 'Scout stores uploads in Supabase Storage and uses the public image URL here.'}</p>
+            <div className="actions" style={{ marginTop: 8 }}>
+              <button className="btn secondary" type="button" disabled={!identityDraft.signature_logo_url.trim()} onClick={copyLogoUrl}>Copy URL</button>
+              <button className="btn" type="button" disabled={busy} onClick={() => applyEmailIdentity(false)}>Save signature & logo</button>
+            </div>
+            <p className="muted" style={{ marginTop: 6 }}>{logoUploadBusy ? 'Uploading logo…' : 'After upload, the URL stays here. Save signature & logo applies it to Scout-sent emails.'}</p>
           </div>
         </div>
         {identityDraft.signature_logo_url ? <div style={{ marginTop: 10 }}><img src={identityDraft.signature_logo_url} alt="Signature logo preview" style={{ maxWidth: 160, height: 'auto', borderRadius: 8 }} /></div> : null}
@@ -587,8 +612,8 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           A bucket is just a storage folder in Supabase. Scout uses the public <code>email-assets</code> bucket to host signature logos so Gmail and recipients can see the image.
         </div>
         <div className="actions" style={{ marginTop: 12 }}>
-          <button className="btn" type="button" disabled={busy || !accounts.length} onClick={() => applyEmailIdentity(false)}>Save to Scout for all senders</button>
-          <button className="btn secondary" type="button" disabled={busy || !accounts.length} onClick={() => applyEmailIdentity(true)}>Save + sync signature to Gmail</button>
+          <button className="btn" type="button" disabled={busy} onClick={() => applyEmailIdentity(false)}>Save signature & logo</button>
+          <button className="btn secondary" type="button" disabled={busy || !accounts.length} onClick={() => applyEmailIdentity(true)}>Save + sync to Gmail</button>
         </div>
         <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Sender</th><th>Signature</th><th>Gmail sync</th></tr></thead><tbody>
           {accounts.map((account) => <tr key={`identity-${account.id}`}><td>{account.email}</td><td>{account.signature_enabled === false ? 'Disabled' : shortenSignature(account)}</td><td>{account.gmail_signature_sync_error ? <span className="error">Failed: {account.gmail_signature_sync_error}</span> : account.gmail_signature_synced_at ? `Synced ${new Date(account.gmail_signature_synced_at).toLocaleString()}` : 'Not synced'}</td></tr>)}

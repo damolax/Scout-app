@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { analyzeSpamRisk } from "@/lib/spam-guard";
+import { emitLiveActivity } from "@/lib/live-activity-client";
 import {
   Business,
   GmailAccount,
@@ -1149,6 +1150,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       setStatus(
         `Sending now: 0 / ${requested.toLocaleString()} started. This send does not need cron while this page is open.`,
       );
+      emitLiveActivity({
+        kind: "send",
+        status: "started",
+        title: "Send started",
+        message: `Starting ${requested.toLocaleString()} email(s).`,
+        countText: `0 / ${requested.toLocaleString()}`
+      });
 
       for (let i = 0; i < contacts.length; i++) {
         if (!activeAccounts.length) {
@@ -1185,6 +1193,16 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         setStatus(
           `Sending now ${attempted.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`,
         );
+        emitLiveActivity({
+          kind: "send",
+          status: "sending",
+          title: "Sending message",
+          message: `Sending message to ${payload.email}`,
+          toEmail: payload.email,
+          fromEmail: account.email,
+          businessName: business.name || "",
+          countText: `${attempted.toLocaleString()} / ${requested.toLocaleString()}`
+        });
 
         const response = await fetch("/api/gmail/send", {
           method: "POST",
@@ -1241,6 +1259,16 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             status: "not_sent_sender_limit",
             reason,
           });
+          emitLiveActivity({
+            kind: "send",
+            status: "paused",
+            title: "Sender limit reached",
+            message: `${account.email} was paused before sending to ${payload.email}.`,
+            toEmail: payload.email,
+            fromEmail: account.email,
+            businessName: business.name || "",
+            countText: `${attempted.toLocaleString()} / ${requested.toLocaleString()}`
+          });
           activeAccounts = activeAccounts.filter((a) => a.id !== account.id);
           failed += 1;
           i -= 1;
@@ -1293,6 +1321,16 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             message: reason,
             raw: json,
           });
+          emitLiveActivity({
+            kind: "send",
+            status: failedStatus,
+            title: blocked ? "Message blocked" : "Send failed",
+            message: `${payload.email}: ${reason}`,
+            toEmail: payload.email,
+            fromEmail: account.email,
+            businessName: business.name || "",
+            countText: `${attempted.toLocaleString()} / ${requested.toLocaleString()}`
+          });
         } else if (statusText === "sent" || statusText === "dry_run") {
           if (statusText === "sent") sent += 1;
           else skipped += 1;
@@ -1321,6 +1359,16 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             setStatus(
               `Message sent ${sent.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`,
             );
+            emitLiveActivity({
+              kind: "send",
+              status: "sent",
+              title: "Message sent",
+              message: `Message sent to ${payload.email}`,
+              toEmail: payload.email,
+              fromEmail: account.email,
+              businessName: business.name || "",
+              countText: `${sent.toLocaleString()} sent · ${attempted.toLocaleString()} / ${requested.toLocaleString()}`
+            });
           }
           await logOutreachEvent({
             batch_id: batchId,
@@ -1353,6 +1401,16 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             dryRun,
             isFollowUp: options?.isFollowUp,
           });
+          emitLiveActivity({
+            kind: "send",
+            status: statusText || "skipped",
+            title: "Message not sent",
+            message: `${payload.email}: ${reason}`,
+            toEmail: payload.email,
+            fromEmail: account.email,
+            businessName: business.name || "",
+            countText: `${attempted.toLocaleString()} / ${requested.toLocaleString()}`
+          });
         }
 
         setProgress(Math.round(((i + 1) / contacts.length) * 100));
@@ -1383,6 +1441,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       setStatus(
         `Batch ${finalStatus}. Requested ${requested}, sent ${sent}, failed ${failed}, skipped/not sent ${skipped}.`,
       );
+      emitLiveActivity({
+        kind: "send",
+        status: finalStatus,
+        title: "Send finished",
+        message: `Requested ${requested.toLocaleString()}, sent ${sent.toLocaleString()}, failed ${failed.toLocaleString()}, skipped ${skipped.toLocaleString()}.`,
+        countText: `${sent.toLocaleString()} sent`
+      });
       await Promise.all([
         loadReadyContacts(),
         loadAccounts(),

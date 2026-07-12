@@ -641,6 +641,35 @@ async function runOneSchedule(
       const toEmail = normalizeEmail(business.email);
       const nowIso = new Date().toISOString();
 
+      await supabase
+        .from("outreach_events")
+        .insert({
+          workspace_id: workspaceId,
+          batch_id: batchId,
+          business_id: business.id,
+          template_id: template.id,
+          gmail_account_id: account.id,
+          type: "sending",
+          message: `Sending message to ${toEmail}`,
+          raw: {
+            schedule_id: scheduleId,
+            business_name: business.name || "",
+            from_email: normalizeEmail(account.email),
+            to_email: toEmail,
+            current: baseProcessed + attempted,
+            target: totalTarget
+          },
+        });
+      await supabase
+        .from("message_schedules")
+        .update({
+          last_heartbeat_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          last_error: `Sending message to ${toEmail}`
+        })
+        .eq("workspace_id", workspaceId)
+        .eq("id", scheduleId);
+
       try {
         let gmailMessageId = "";
         let gmailThreadId = "";
@@ -717,8 +746,8 @@ async function runOneSchedule(
             template_id: template.id,
             gmail_account_id: account.id,
             type: statusText,
-            message: `Scheduled ${statusText}: ${toEmail}`,
-            raw: { schedule_id: scheduleId },
+            message: statusText === "sent" ? `Message sent to ${toEmail}` : `Scheduled ${statusText}: ${toEmail}`,
+            raw: { schedule_id: scheduleId, business_name: business.name || "", from_email: normalizeEmail(account.email), to_email: toEmail, current: baseProcessed + attempted, target: totalTarget },
           });
       } catch (sendError) {
         const err = sendError as Error & {
@@ -767,8 +796,8 @@ async function runOneSchedule(
             template_id: template.id,
             gmail_account_id: account.id,
             type: failedStatus,
-            message: reason,
-            raw: { schedule_id: scheduleId },
+            message: `${toEmail}: ${reason}`,
+            raw: { schedule_id: scheduleId, business_name: business.name || "", from_email: normalizeEmail(account.email), to_email: toEmail, current: baseProcessed + attempted, target: totalTarget },
           });
         if (err.limitHit) {
           const until = new Date(

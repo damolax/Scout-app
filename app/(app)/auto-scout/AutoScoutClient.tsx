@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
+import { emitLiveActivity } from '@/lib/live-activity-client';
 import type { Workspace } from '@/lib/types';
 
 type JobRow = {
@@ -145,6 +146,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   async function enqueuePendingNoEmail() {
     setBusy(true);
     setMessage(`Queuing up to ${queueLimit.toLocaleString()} pending/no-email businesses for Auto Scout...`);
+    emitLiveActivity({ kind: 'auto_scout', status: 'queueing', title: 'Auto Scout queueing', message: `Queueing up to ${queueLimit.toLocaleString()} businesses for email research.` });
     try {
       const res = await fetch('/api/research/enqueue', {
         method: 'POST',
@@ -154,6 +156,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.success) throw new Error(json.error || 'Queue request failed.');
       setMessage(`Queued ${Number(json.enqueued || 0).toLocaleString()} job(s). Checked ${Number(json.checked || 0).toLocaleString()} pending/no-email business(es).`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'queued', title: 'Auto Scout queued', message: `Queued ${Number(json.enqueued || 0).toLocaleString()} job(s).` });
       await loadStats();
     } catch (error) {
       setMessage(`Queue failed: ${fmtError(error)}`);
@@ -165,12 +168,26 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   async function runOneBatch() {
     const safeBatch = Math.max(1, Math.min(500, batchSize));
     const safeConcurrency = Math.max(1, Math.min(50, concurrency));
-    const res = await fetch(`/api/research/run-once?limit=${safeBatch}&concurrency=${safeConcurrency}`, { method: 'POST' });
+    emitLiveActivity({ kind: 'auto_scout', status: 'checking', title: 'Auto Scout checking', message: `Checking up to ${safeBatch.toLocaleString()} queued website(s) for emails.` });
+    const res = await fetch(`/api/research/run-once?limit=${safeBatch}&concurrency=${safeConcurrency}&workspaceId=${encodeURIComponent(workspace.id)}`, { method: 'POST' });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.success) throw new Error(json.error || 'Run request failed.');
     const newResults = Array.isArray(json.results) ? json.results : [];
     setResults((current) => [...newResults, ...current].slice(0, 300));
-    return { processed: Number(json.processed || 0), found: newResults.filter((r: any) => r.status === 'found' || r.email).length };
+    const found = newResults.filter((r: any) => r.status === 'found' || r.email).length;
+    for (const item of newResults.slice(0, 8)) {
+      emitLiveActivity({
+        kind: 'auto_scout',
+        status: item.email ? 'found' : String(item.status || 'checked'),
+        title: item.email ? 'Email found' : 'Website checked',
+        message: item.email ? `${item.businessName || 'Business'} → ${item.email}` : `${item.businessName || 'Business'}: ${item.status || 'checked'}`,
+        businessName: item.businessName || '',
+        website: item.evidence || '',
+        countText: item.pagesChecked ? `${item.pagesChecked} page(s)` : undefined
+      });
+    }
+    emitLiveActivity({ kind: 'auto_scout', status: 'batch_complete', title: 'Auto Scout batch complete', message: `Processed ${Number(json.processed || 0).toLocaleString()} job(s); found ${found.toLocaleString()} email(s).` });
+    return { processed: Number(json.processed || 0), found };
   }
 
   async function startAutoScout() {
@@ -243,6 +260,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     setWorkerResult(null);
     try {
       setMessage(`Running server Auto Scout worker for up to ${workerCycles} cycle(s). This can continue even if the browser is not looping batches.`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'worker_running', title: 'Auto Scout worker running', message: `Running up to ${workerCycles} worker cycle(s).` });
       const res = await fetch('/api/research/run-worker', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -259,6 +277,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       if (!res.ok || !json.success) throw new Error(json.error || 'Auto Scout worker failed.');
       setWorkerResult(json);
       setMessage(`Worker complete. Queued ${Number(json.enqueued || 0).toLocaleString()}, processed ${Number(json.processed || 0).toLocaleString()}, found ${Number(json.found || 0).toLocaleString()}. ${json.stoppedReason || ''}`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'worker_complete', title: 'Auto Scout worker complete', message: `Queued ${Number(json.enqueued || 0).toLocaleString()}, processed ${Number(json.processed || 0).toLocaleString()}, found ${Number(json.found || 0).toLocaleString()}.` });
       await loadStats();
     } catch (error) {
       setMessage(`Worker failed: ${fmtError(error)}`);
