@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
-import { MessageCategory, MessageTemplate, Workspace } from '@/lib/types';
+import { MessageCategory, MessageTemplate, TemplateAttachment, Workspace } from '@/lib/types';
 
 const SHORTCODES = ['{name}', '{business}', '{company}', '{email}', '{website}', '{domain}', '{phone}', '{category}', '{industry}', '{location}', '{source}', '{last_subject}', '{last_message}', '{reply_snippet}', '{reply_type}'];
 const DEFAULT_INITIAL = `Hi {name},\n\nI found {business} while reviewing {category} businesses.\n\nWould you like me to send a short, practical idea for improving {business}?\n\nBest regards,\nOlalekan`;
@@ -41,6 +41,18 @@ function defaultSubject(type: TemplateType) {
   return '{name}, quick question';
 }
 
+function templateAttachments(template: MessageTemplate): TemplateAttachment[] {
+  const direct = Array.isArray((template as any).attachments) ? ((template as any).attachments as TemplateAttachment[]) : [];
+  const raw = (template as any).raw && Array.isArray((template as any).raw.attachments) ? ((template as any).raw.attachments as TemplateAttachment[]) : [];
+  return direct.length ? direct : raw;
+}
+
+function attachmentLabel(attachment: TemplateAttachment) {
+  const size = Number(attachment.size_bytes || 0);
+  const sizeText = size > 0 ? ` · ${(size / 1024 / 1024).toFixed(size > 1024 * 1024 ? 1 : 2)} MB` : '';
+  return `${attachment.name || attachment.filename || 'Attachment'}${sizeText}`;
+}
+
 export default function TemplateLibraryClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const [categories, setCategories] = useState<MessageCategory[]>([]);
@@ -56,6 +68,9 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
   const [subject, setSubject] = useState(defaultSubject('initial'));
   const [subjectVariants, setSubjectVariants] = useState('{business}, quick idea\nQuick idea for {name}');
   const [message, setMessage] = useState(DEFAULT_INITIAL);
+  const [attachments, setAttachments] = useState<TemplateAttachment[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [attachmentStatus, setAttachmentStatus] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | TemplateType>('all');
   const [status, setStatus] = useState('Create initial, follow-up, and reply-only templates. Reply templates cannot be used for first-message batches.');
   const [error, setError] = useState('');
@@ -93,6 +108,8 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setSubject(defaultSubject(type));
     setSubjectVariants(type === 'reply' ? 'Re: {business}\nRe: {last_subject}' : type === 'follow_up' ? 'Following up on {business}\nRe: quick idea for {business}' : '{business}, quick idea\nQuick idea for {name}');
     setMessage(defaultBody(type));
+    setAttachments([]);
+    setAttachmentStatus('');
     setPurpose(type === 'reply' ? 'Use only when replying from a business conversation.' : type === 'follow_up' ? 'Use for businesses with inbox but no real reply yet.' : 'Use only for first outreach messages.');
     setReplyContext(type === 'reply' ? 'Useful after a real buyer reply or an auto-responder follow-up.' : '');
   }
@@ -107,6 +124,8 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setSubject(template.subject || defaultSubject(type));
     setSubjectVariants((template.subject_variants || []).join('\n'));
     setMessage(template.message || defaultBody(type));
+    setAttachments(templateAttachments(template));
+    setAttachmentStatus('');
     if (template.category_id) setCategoryId(template.category_id);
   }
 
@@ -180,9 +199,41 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       template_type: templateType,
       purpose: purpose.trim() || null,
       reply_context: templateType === 'reply' ? (replyContext.trim() || null) : null,
+      attachments,
+      raw: { attachments },
       active: true,
       created_by: userId || null
     };
+  }
+
+  async function uploadAttachment(file: File | null | undefined) {
+    if (!file) return;
+    setUploadingAttachment(true);
+    setAttachmentStatus('Uploading attachment...');
+    setError('');
+    try {
+      if (attachments.length >= 5) throw new Error('Use up to 5 attachments per template.');
+      const form = new FormData();
+      form.append('workspace_id', workspace.id);
+      form.append('template_id', templateId || templateName || 'new-template');
+      form.append('attachment', file);
+      const response = await fetch('/api/assets/template-attachment-upload', { method: 'POST', body: form });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Upload failed with HTTP ${response.status}`);
+      const next = [...attachments, json.attachment as TemplateAttachment];
+      setAttachments(next);
+      setAttachmentStatus(`Attached: ${json.attachment?.name || file.name}. Click Save/Update Template.`);
+    } catch (err) {
+      setError(formatError(err));
+      setAttachmentStatus('Attachment upload failed.');
+    } finally {
+      setUploadingAttachment(false);
+    }
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((current) => current.filter((_item, i) => i !== index));
+    setAttachmentStatus('Attachment removed. Click Save/Update Template.');
   }
 
   async function saveNewTemplate() {
@@ -330,6 +381,18 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
           <textarea className="textarea" style={{ minHeight: 70 }} value={subjectVariants} onChange={(e) => setSubjectVariants(e.target.value)} />
           <label className="label" style={{ marginTop: 12 }}>Message</label>
           <textarea className="textarea" value={message} onChange={(e) => setMessage(e.target.value)} />
+          <div className="card" style={{ padding: 14, marginTop: 12, background: 'rgba(255,255,255,0.03)' }}>
+            <h4 style={{ marginTop: 0 }}>Attach file to this template</h4>
+            <p className="muted">Use this for a guide, PDF, image, or proposal. Keep files small. Attachments can slow sending and may reduce inbox placement, so use them only when needed.</p>
+            <input className="input" type="file" accept="application/pdf,image/*,.txt,.csv,.docx,.xlsx,.pptx" disabled={uploadingAttachment || attachments.length >= 5} onChange={(e) => { const file = e.target.files?.[0]; uploadAttachment(file); e.currentTarget.value = ''; }} />
+            {attachmentStatus ? <p className="muted" style={{ marginTop: 8 }}>{attachmentStatus}</p> : null}
+            {attachments.length ? <div style={{ marginTop: 10 }}>
+              {attachments.map((attachment, index) => <div key={`${attachment.public_url || attachment.url}-${index}`} className="notice" style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginTop: 8 }}>
+                <span>{attachmentLabel(attachment)}</span>
+                <button className="btn secondary" type="button" disabled={busy} onClick={() => removeAttachment(index)}>Remove</button>
+              </div>)}
+            </div> : <p className="muted" style={{ marginTop: 8 }}>No attachment on this template.</p>}
+          </div>
           {templateType === 'reply' ? <div className="notice" style={{ marginTop: 12 }}>This is reply-only. It will not appear in first-message batch sending. It appears inside Business → Conversation → Reply template.</div> : null}
           <div className="actions" style={{ marginTop: 12 }}>
             <button className="btn" type="button" disabled={busy} onClick={saveNewTemplate}>Save New Template</button>
@@ -339,9 +402,9 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Templates in this Category</h3>
-          <div className="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Subject</th><th>Action</th></tr></thead><tbody>
-            {categoryTemplates.map((t) => <tr key={t.id}><td><strong>{t.name}</strong><br /><span className="muted">{t.category_name || 'No category'}</span></td><td><span className="badge">{typeLabel(t.template_type)}</span></td><td>{t.subject}</td><td><button className="btn secondary" type="button" onClick={() => loadTemplate(t)}>Open</button> <button className="btn secondary" type="button" onClick={() => archiveTemplate(t.id)}>Archive</button></td></tr>)}
-            {!categoryTemplates.length ? <tr><td colSpan={4} className="muted">No templates matching this category/type yet.</td></tr> : null}
+          <div className="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Subject</th><th>Files</th><th>Action</th></tr></thead><tbody>
+            {categoryTemplates.map((t) => <tr key={t.id}><td><strong>{t.name}</strong><br /><span className="muted">{t.category_name || 'No category'}</span></td><td><span className="badge">{typeLabel(t.template_type)}</span></td><td>{t.subject}</td><td>{templateAttachments(t).length ? `${templateAttachments(t).length} file(s)` : 'None'}</td><td><button className="btn secondary" type="button" onClick={() => loadTemplate(t)}>Open</button> <button className="btn secondary" type="button" onClick={() => archiveTemplate(t.id)}>Archive</button></td></tr>)}
+            {!categoryTemplates.length ? <tr><td colSpan={5} className="muted">No templates matching this category/type yet.</td></tr> : null}
           </tbody></table></div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-4-simpler-followups-help",
-  "version": "10.4.0",
+  "name": "scout-app-v10-5-limit-attachments",
+  "version": "10.5.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.4: simplifies Send Emails, removes follow-up scheduling from the UI, and adds a simple How to Use guide."
+  "description": "Scout App v10.5: pauses senders when Gmail limit is reached and adds template attachments for PDFs/images/files."
 }

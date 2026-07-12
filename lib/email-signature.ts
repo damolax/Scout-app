@@ -6,6 +6,13 @@ export type SignatureIdentity = {
   raw?: Record<string, any> | null;
 };
 
+export type EmailAttachment = {
+  filename: string;
+  mimeType?: string | null;
+  contentBase64: string;
+  sizeBytes?: number | null;
+};
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -159,32 +166,70 @@ export function buildHtmlBody(body: string, identity: SignatureIdentity) {
   return `${bodyHtml}<br /><br />${sig}`;
 }
 
-export function buildMimeMessage(input: { from: string; to: string; subject: string; body: string; identity?: SignatureIdentity | null; replyTo?: string | null }) {
+function safeHeaderValue(value: string) {
+  return String(value || '').replace(/[\r\n]+/g, ' ').trim();
+}
+
+function safeAttachmentFilename(value: string) {
+  return safeHeaderValue(value || 'attachment').replace(/["\\]/g, '').slice(0, 180) || 'attachment';
+}
+
+function wrapBase64(value: string) {
+  return String(value || '').replace(/\s+/g, '').replace(/(.{76})/g, '$1\r\n');
+}
+
+export function buildMimeMessage(input: { from: string; to: string; subject: string; body: string; identity?: SignatureIdentity | null; replyTo?: string | null; attachments?: EmailAttachment[] | null }) {
   const identity = input.identity || {};
-  const boundary = `scout_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const altBoundary = `scout_alt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const mixedBoundary = `scout_mixed_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const attachments = (input.attachments || []).filter((item) => item && item.filename && item.contentBase64);
   const textBody = appendSignatureToText(input.body, identity);
   const htmlBody = buildHtmlBody(input.body, identity);
   const headers = [
-    `From: ${input.from}`,
-    `To: ${input.to}`,
-    ...(input.replyTo ? [`Reply-To: ${input.replyTo}`] : []),
-    `Subject: ${input.subject}`,
+    `From: ${safeHeaderValue(input.from)}`,
+    `To: ${safeHeaderValue(input.to)}`,
+    ...(input.replyTo ? [`Reply-To: ${safeHeaderValue(input.replyTo)}`] : []),
+    `Subject: ${safeHeaderValue(input.subject)}`,
     'MIME-Version: 1.0',
-    `Content-Type: multipart/alternative; boundary="${boundary}"`
+    attachments.length
+      ? `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`
+      : `Content-Type: multipart/alternative; boundary="${altBoundary}"`
   ];
-  const parts = [
-    `--${boundary}`,
+  const alternativeParts = [
+    `--${altBoundary}`,
     'Content-Type: text/plain; charset="UTF-8"',
     'Content-Transfer-Encoding: 8bit',
     '',
     textBody,
-    `--${boundary}`,
+    `--${altBoundary}`,
     'Content-Type: text/html; charset="UTF-8"',
     'Content-Transfer-Encoding: 8bit',
     '',
     htmlBody,
-    `--${boundary}--`,
+    `--${altBoundary}--`,
     ''
   ];
-  return { raw: [...headers, '', ...parts].join('\r\n'), textBody, htmlBody };
+  if (!attachments.length) return { raw: [...headers, '', ...alternativeParts].join('\r\n'), textBody, htmlBody };
+
+  const mixedParts = [
+    `--${mixedBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+    '',
+    ...alternativeParts,
+  ];
+  for (const attachment of attachments) {
+    const filename = safeAttachmentFilename(attachment.filename);
+    const mimeType = safeHeaderValue(attachment.mimeType || 'application/octet-stream') || 'application/octet-stream';
+    mixedParts.push(
+      `--${mixedBoundary}`,
+      `Content-Type: ${mimeType}; name="${filename}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${filename}"`,
+      '',
+      wrapBase64(attachment.contentBase64),
+      ''
+    );
+  }
+  mixedParts.push(`--${mixedBoundary}--`, '');
+  return { raw: [...headers, '', ...mixedParts].join('\r\n'), textBody, htmlBody };
 }

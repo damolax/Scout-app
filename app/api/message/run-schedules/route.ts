@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase-server";
 import { analyzeSpamRisk } from "@/lib/spam-guard";
 import { createAppNotification } from "@/lib/notifications";
-import { buildMimeMessage, appendSignatureToText } from "@/lib/email-signature";
+import { buildMimeMessage, appendSignatureToText, EmailAttachment } from "@/lib/email-signature";
 import { applyCountryFilter, businessMatchesCountry, extractBusinessCountries } from "@/lib/country-location";
 
 type AnyRow = Record<string, any>;
@@ -143,7 +143,11 @@ function looksLikeLimit(message: string, status: number) {
     text.includes("daily") ||
     text.includes("quota") ||
     text.includes("user-rate") ||
-    text.includes("limit exceeded")
+    text.includes("limit exceeded") ||
+    text.includes("rate_limit_exceeded") ||
+    text.includes("userratelimitexceeded") ||
+    text.includes("mailratelimitexceeded") ||
+    text.includes("recipientratelimitexceeded")
   );
 }
 
@@ -160,6 +164,8 @@ function looksLikeMessageBlocked(message: string, status: number) {
 }
 
 function isPaused(account: AnyRow) {
+  const status = String(account.status || "").toLowerCase();
+  if (account.is_paused === true || ["limit_hit", "paused", "blocked"].includes(status)) return true;
   if (!account.paused_until) return false;
   return new Date(account.paused_until).getTime() > Date.now();
 }
@@ -255,6 +261,63 @@ async function loadScheduleControl(
   };
 }
 
+function templateAttachments(template: AnyRow) {
+  const direct = Array.isArray(template.attachments) ? template.attachments : [];
+  const raw = template.raw && Array.isArray(template.raw.attachments) ? template.raw.attachments : [];
+  return direct.length ? direct : raw;
+}
+
+function safeAttachmentName(value: unknown) {
+  return String(value || 'attachment').replace(/[\r\n"\\]+/g, ' ').trim().slice(0, 180) || 'attachment';
+}
+
+async function prepareAttachments(items: unknown): Promise<EmailAttachment[]> {
+  if (!Array.isArray(items)) return [];
+  const selected = items.slice(0, 5);
+  const attachments: EmailAttachment[] = [];
+  let totalBytes = 0;
+  for (const item of selected) {
+    const row = (item || {}) as AnyRow;
+    const url = String(row.public_url || row.url || '').trim();
+    if (!url) continue;
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) continue;
+    const response = await fetch(parsed.toString());
+    if (!response.ok) throw new Error(`Attachment download failed for ${safeAttachmentName(row.name || row.filename)} with HTTP ${response.status}`);
+    const contentType = String(row.mime_type || row.mimeType || response.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
+    const buffer = Buffer.from(await response.arrayBuffer());
+    totalBytes += buffer.length;
+    if (buffer.length > 10 * 1024 * 1024) throw new Error(`${safeAttachmentName(row.name || row.filename)} is over 10 MB.`);
+    if (totalBytes > 18 * 1024 * 1024) throw new Error('Attachments are too large together. Keep total attachments under about 18 MB.');
+    attachments.push({
+      filename: safeAttachmentName(row.filename || row.name || parsed.pathname.split('/').pop() || 'attachment'),
+      mimeType: contentType,
+      contentBase64: buffer.toString('base64'),
+      sizeBytes: buffer.length,
+    });
+  }
+  return attachments;
+}
+
+async function pauseSenderForLimit(supabase: ReturnType<typeof createAdminClient>, workspaceId: string, accountId: string, reason: string, until: string) {
+  const rich = await supabase.from('gmail_accounts').update({
+    status: 'limit_hit',
+    paused_until: until,
+    is_paused: true,
+    paused_reason: reason,
+    last_error: reason,
+    updated_at: new Date().toISOString(),
+  }).eq('workspace_id', workspaceId).eq('id', accountId);
+  if (rich.error) {
+    await supabase.from('gmail_accounts').update({
+      status: 'limit_hit',
+      paused_until: until,
+      last_error: reason,
+      updated_at: new Date().toISOString(),
+    }).eq('workspace_id', workspaceId).eq('id', accountId);
+  }
+}
+
 async function refreshAccessToken(account: AnyRow) {
   const clientId =
     process.env.GOOGLE_CLIENT_ID ||
@@ -299,8 +362,9 @@ async function sendWithGmail(
   subject: string,
   body: string,
   identity?: Record<string, unknown>,
+  attachments?: EmailAttachment[],
 ) {
-  const message = buildMimeMessage({ from, to, subject, body, identity });
+  const message = buildMimeMessage({ from, to, subject, body, identity, attachments });
   const response = await fetch(
     "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
     {
@@ -696,6 +760,7 @@ async function runOneSchedule(
       );
       const body = renderTemplate(String(template.message || ""), business);
       const finalBody = appendSignatureToText(body, account);
+      const attachments = await prepareAttachments(templateAttachments(template));
       const toEmail = normalizeEmail(business.email);
       const nowIso = new Date().toISOString();
 
@@ -740,6 +805,7 @@ async function runOneSchedule(
             subject,
             finalBody,
             account,
+            attachments,
           );
           gmailMessageId = result.id || "";
           gmailThreadId = result.threadId || "";
@@ -769,6 +835,7 @@ async function runOneSchedule(
             signature_applied:
               account.signature_enabled !== false &&
               Boolean(account.signature_text || account.signature_html),
+            attachments: templateAttachments(template).map((a: AnyRow) => ({ name: a.name || a.filename, url: a.public_url || a.url })),
           },
         });
         if (!dryRun) {
@@ -843,6 +910,7 @@ async function runOneSchedule(
             signature_applied:
               account.signature_enabled !== false &&
               Boolean(account.signature_text || account.signature_html),
+            attachments: templateAttachments(template).map((a: AnyRow) => ({ name: a.name || a.filename, url: a.public_url || a.url })),
           },
         });
         await supabase
@@ -861,16 +929,7 @@ async function runOneSchedule(
           const until = new Date(
             Date.now() + 24 * 60 * 60 * 1000,
           ).toISOString();
-          await supabase
-            .from("gmail_accounts")
-            .update({
-              status: "limit_hit",
-              paused_until: until,
-              last_error: reason,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("workspace_id", workspaceId)
-            .eq("id", account.id);
+          await pauseSenderForLimit(supabase, workspaceId, String(account.id), reason, until);
           activeAccounts = activeAccounts.filter((a) => a.id !== account.id);
         } else if (err.blocked) {
           await supabase

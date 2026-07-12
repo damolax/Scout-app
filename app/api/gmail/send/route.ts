@@ -2,7 +2,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { buildMimeMessage } from '@/lib/email-signature';
+import { buildMimeMessage, EmailAttachment } from '@/lib/email-signature';
 
 function b64url(input: string) {
   return Buffer.from(input, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -24,6 +24,57 @@ function looksLikeMessageBlocked(message: string, status: number) {
   return status === 403 || text.includes('message blocked') || text.includes('blocked') || text.includes('policy') || text.includes('spam') || text.includes('rejected');
 }
 
+function safeFilename(value: unknown) {
+  return String(value || 'attachment').replace(/[\r\n"\\]+/g, ' ').trim().slice(0, 180) || 'attachment';
+}
+
+async function prepareAttachments(items: unknown): Promise<EmailAttachment[]> {
+  if (!Array.isArray(items)) return [];
+  const selected = items.slice(0, 5);
+  const attachments: EmailAttachment[] = [];
+  let totalBytes = 0;
+  for (const item of selected) {
+    const row = (item || {}) as Record<string, unknown>;
+    const url = String(row.public_url || row.url || '').trim();
+    if (!url) continue;
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) continue;
+    const response = await fetch(parsed.toString());
+    if (!response.ok) throw new Error(`Attachment download failed for ${safeFilename(row.name || row.filename)} with HTTP ${response.status}`);
+    const contentType = String(row.mime_type || row.mimeType || response.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
+    const buffer = Buffer.from(await response.arrayBuffer());
+    totalBytes += buffer.length;
+    if (buffer.length > 10 * 1024 * 1024) throw new Error(`${safeFilename(row.name || row.filename)} is over 10 MB.`);
+    if (totalBytes > 18 * 1024 * 1024) throw new Error('Attachments are too large together. Keep total attachments under about 18 MB.');
+    attachments.push({
+      filename: safeFilename(row.filename || row.name || parsed.pathname.split('/').pop() || 'attachment'),
+      mimeType: contentType,
+      contentBase64: buffer.toString('base64'),
+      sizeBytes: buffer.length,
+    });
+  }
+  return attachments;
+}
+
+async function pauseSenderForLimit(supabase: ReturnType<typeof createAdminClient>, workspaceId: string, accountId: string, reason: string, until: string) {
+  const rich = await supabase.from('gmail_accounts').update({
+    status: 'limit_hit',
+    paused_until: until,
+    is_paused: true,
+    paused_reason: reason,
+    last_error: reason,
+    updated_at: new Date().toISOString(),
+  }).eq('workspace_id', workspaceId).eq('id', accountId);
+  if (rich.error) {
+    await supabase.from('gmail_accounts').update({
+      status: 'limit_hit',
+      paused_until: until,
+      last_error: reason,
+      updated_at: new Date().toISOString(),
+    }).eq('workspace_id', workspaceId).eq('id', accountId);
+  }
+}
+
 async function refreshAccessToken(refreshToken: string) {
   const clientId = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -38,8 +89,8 @@ async function refreshAccessToken(refreshToken: string) {
   return { access_token: String(json.access_token || ''), expires_in: Number(json.expires_in || 3600) };
 }
 
-async function sendWithGmail(accessToken: string, from: string, to: string, subject: string, body: string, identity?: Record<string, unknown>) {
-  const message = buildMimeMessage({ from, to, subject, body, identity });
+async function sendWithGmail(accessToken: string, from: string, to: string, subject: string, body: string, identity?: Record<string, unknown>, attachments?: EmailAttachment[]) {
+  const message = buildMimeMessage({ from, to, subject, body, identity, attachments });
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
@@ -76,8 +127,10 @@ export async function POST(request: NextRequest) {
     if (account.status && !['connected', 'ready'].includes(String(account.status))) throw new Error(`Sender is not connected. Current status: ${account.status}`);
     if (!account.refresh_token && !account.access_token) throw new Error('Sender has no Gmail OAuth token. Reconnect Gmail in Settings.');
 
+    const attachments = await prepareAttachments(input.attachments);
+
     if (dryRun) {
-      return NextResponse.json({ success: true, results: [{ status: 'dry_run', gmailMessageId: '', gmailThreadId: '', reason: 'Dry run only' }] });
+      return NextResponse.json({ success: true, results: [{ status: 'dry_run', gmailMessageId: '', gmailThreadId: '', reason: attachments.length ? `Dry run only · ${attachments.length} attachment(s) ready` : 'Dry run only' }] });
     }
 
     let accessToken = String(account.access_token || '');
@@ -90,7 +143,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account);
+      const result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account, attachments);
       return NextResponse.json({ success: true, access_token: accessToken, results: [{ status: 'sent', gmailMessageId: result.id || '', gmailThreadId: result.threadId || '', raw: result }] });
     } catch (sendErr) {
       const err = sendErr as Error & { status?: number; payload?: unknown; limitHit?: boolean; blocked?: boolean };
@@ -98,12 +151,12 @@ export async function POST(request: NextRequest) {
         const refreshed = await refreshAccessToken(String(account.refresh_token));
         accessToken = refreshed.access_token;
         await supabase.from('gmail_accounts').update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), last_error: null }).eq('workspace_id', workspaceId).eq('id', accountId);
-        const result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account);
+        const result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account, attachments);
         return NextResponse.json({ success: true, access_token: accessToken, results: [{ status: 'sent', gmailMessageId: result.id || '', gmailThreadId: result.threadId || '', raw: result }] });
       }
       if (err.limitHit) {
         const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-        await supabase.from('gmail_accounts').update({ status: 'limit_hit', paused_until: until, last_error: err.message }).eq('workspace_id', workspaceId).eq('id', accountId);
+        await pauseSenderForLimit(supabase, workspaceId, accountId, err.message, until);
         return NextResponse.json({ success: false, error: err.message, senderPausedUntil: until, results: [{ status: 'limit_hit', reason: err.message }] }, { status: 429 });
       }
       if (err.blocked) {

@@ -110,6 +110,16 @@ export type EmailResearchJob = {
 };
 
 
+export type TemplateAttachment = {
+  name: string;
+  filename?: string | null;
+  public_url: string;
+  url?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  storage_path?: string | null;
+};
+
 export type MessageTemplate = {
   id: string;
   workspace_id: string;
@@ -120,6 +130,8 @@ export type MessageTemplate = {
   purpose?: string | null;
   reply_context?: string | null;
   tags?: string[] | null;
+  attachments?: TemplateAttachment[] | null;
+  raw?: Record<string, unknown> | null;
   category_id?: string | null;
   category_name?: string | null;
   message: string;
@@ -177,6 +189,8 @@ export type GmailAccount = {
   sent_today?: number | null;
   paused_until?: string | null;
   last_error?: string | null;
+  is_paused?: boolean | null;
+  paused_reason?: string | null;
   raw?: Record<string, unknown> | null;
   signature_enabled?: boolean | null;
   signature_text?: string | null;

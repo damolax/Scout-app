@@ -268,6 +268,8 @@ function downloadCsv(name: string, rows: Array<Record<string, unknown>>) {
 }
 
 function isPaused(account: GmailAccount) {
+  const status = String(account.status || "").toLowerCase();
+  if ((account as any).is_paused === true || ["limit_hit", "paused", "blocked"].includes(status)) return true;
   if (!account.paused_until) return false;
   return new Date(account.paused_until).getTime() > Date.now();
 }
@@ -290,7 +292,10 @@ function isLimitPayload(json: any, result?: SendResult) {
     code.includes("limit") ||
     message.includes("limit reached") ||
     message.includes("sending limit") ||
-    message.includes("quota")
+    message.includes("quota") ||
+    message.includes("user-rate") ||
+    message.includes("rate limit") ||
+    message.includes("too many")
   );
 }
 
@@ -451,12 +456,23 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     templates[0];
   const selectedAudienceCategory =
     categories.find((c) => c.id === audienceCategoryId) || null;
-  const connectedAccounts = accounts.filter(
-    (a) =>
-      ["connected", "ready"].includes(String(a.status || "")) &&
-      !isPaused(a) &&
-      (a.access_token || a.refresh_token),
-  );
+  function senderDailyLimit(account: GmailAccount) {
+    const limit = Number(account.daily_limit || 0);
+    return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : Number.POSITIVE_INFINITY;
+  }
+  function senderRemainingToday(account: GmailAccount) {
+    const daily = senderDailyLimit(account);
+    if (!Number.isFinite(daily)) return Number.POSITIVE_INFINITY;
+    const used = Number(senderLast24h[account.id] || account.sent_today || 0);
+    return Math.max(0, daily - Math.max(0, used));
+  }
+  function senderAvailable(account: GmailAccount) {
+    return ["connected", "ready"].includes(String(account.status || "")) &&
+      !isPaused(account) &&
+      Boolean(account.access_token || account.refresh_token) &&
+      senderRemainingToday(account) > 0;
+  }
+  const connectedAccounts = accounts.filter(senderAvailable);
   const dueSchedules = schedules.filter((schedule) => {
     const statusText = String(schedule.status || "");
     if (!["scheduled", "due"].includes(statusText)) return false;
@@ -939,18 +955,16 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
   function senderCap(account: GmailAccount) {
     const raw = senderRunLimits[account.id];
+    let runCap = Number.POSITIVE_INFINITY;
     if (raw === undefined || raw === null || String(raw).trim() === "") {
-      const defaultLimit = Number(
-        account.default_run_limit || account.daily_limit || 0,
-      );
-      return Number.isFinite(defaultLimit) && defaultLimit > 0
-        ? Math.floor(defaultLimit)
-        : Number.POSITIVE_INFINITY;
+      const defaultLimit = Number(account.default_run_limit || account.daily_limit || 0);
+      runCap = Number.isFinite(defaultLimit) && defaultLimit > 0 ? Math.floor(defaultLimit) : Number.POSITIVE_INFINITY;
+    } else {
+      const parsed = Number(raw);
+      runCap = !Number.isFinite(parsed) || parsed <= 0 ? Number.POSITIVE_INFINITY : Math.floor(parsed);
     }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed <= 0)
-      return Number.POSITIVE_INFINITY;
-    return Math.floor(parsed);
+    const remaining = senderRemainingToday(account);
+    return Math.max(0, Math.min(runCap, remaining));
   }
 
   function describeSenderCaps(accountsToUse: GmailAccount[]) {
@@ -1087,6 +1101,12 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     }
   }
 
+  function templateAttachments(template: MessageTemplate) {
+    const direct = Array.isArray((template as any).attachments) ? ((template as any).attachments as any[]) : [];
+    const raw = (template as any).raw && Array.isArray((template as any).raw.attachments) ? ((template as any).raw.attachments as any[]) : [];
+    return direct.length ? direct : raw;
+  }
+
   function buildContactPayload(
     business: Business,
     template: MessageTemplate,
@@ -1108,6 +1128,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       templateName: template.name,
       categoryId: template.category_id || "",
       categoryName: template.category_name || "",
+      attachments: templateAttachments(template),
       website: business.website || "",
       domain: business.domain || getDomain(business),
       source: business.source || "scout_v818",
@@ -1120,11 +1141,20 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     pausedUntil?: string,
   ) {
     const until = pausedUntil || toDateTomorrow();
-    await supabase
+    const rich = await supabase
       .from("gmail_accounts")
-      .update({ status: "limit_hit", paused_until: until, last_error: reason })
+      .update({ status: "limit_hit", paused_until: until, is_paused: true, paused_reason: reason, last_error: reason, updated_at: new Date().toISOString() } as any)
       .eq("workspace_id", workspace.id)
       .eq("id", account.id);
+    if (rich.error) {
+      await supabase
+        .from("gmail_accounts")
+        .update({ status: "limit_hit", paused_until: until, last_error: reason, updated_at: new Date().toISOString() } as any)
+        .eq("workspace_id", workspace.id)
+        .eq("id", account.id);
+    }
+    setSelectedAccounts((current) => ({ ...current, [account.id]: false }));
+    setAccounts((current) => current.map((row) => row.id === account.id ? { ...row, status: "limit_hit", paused_until: until, last_error: reason, is_paused: true, paused_reason: reason } as GmailAccount : row));
   }
 
   async function logOutreachEvent(payload: Record<string, unknown>) {
@@ -1141,6 +1171,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     batchId: string;
     subject: string;
     body: string;
+    attachments?: any[];
     dryRun: boolean;
     isFollowUp?: boolean;
   }) {
@@ -1152,6 +1183,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       batchId,
       subject: sentSubject,
       body,
+      attachments,
       dryRun: isDryRun,
       isFollowUp,
     } = params;
@@ -1175,7 +1207,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       error_code: result.code || null,
       sent_at: sentAt,
       is_follow_up: !!isFollowUp,
-      raw: { ...result, dry_run: isDryRun, follow_up: !!isFollowUp },
+      raw: { ...result, dry_run: isDryRun, follow_up: !!isFollowUp, attachments: (attachments || []).map((a: any) => ({ name: a.name || a.filename, url: a.public_url || a.url })) },
     };
     const { error: insertError } = await supabase
       .from("sent_messages")
@@ -1537,6 +1569,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             to: payload.email,
             subject: payload.subject,
             body: payload.message,
+            attachments: payload.attachments,
             dryRun,
           }),
         });
@@ -1556,7 +1589,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           account.access_token = json.access_token;
         }
 
-        if (!response.ok && limitHit) {
+        if (limitHit) {
           const reason =
             json?.error ||
             result.reason ||
@@ -1633,6 +1666,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             batchId,
             subject: payload.subject,
             body: payload.message,
+            attachments: payload.attachments,
             dryRun,
             isFollowUp: options?.isFollowUp,
           });
@@ -1675,11 +1709,15 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             batchId,
             subject: payload.subject,
             body: payload.message,
+            attachments: payload.attachments,
             dryRun,
             isFollowUp: options?.isFollowUp,
           });
           if (statusText === "sent") {
             sentBySender[account.id] = (sentBySender[account.id] || 0) + 1;
+            if (senderCap(account) <= 0) {
+              activeAccounts = activeAccounts.filter((a) => a.id !== account.id);
+            }
             setStatus(
               `Message sent ${sent.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`,
             );
@@ -1722,6 +1760,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             batchId,
             subject: payload.subject,
             body: payload.message,
+            attachments: payload.attachments,
             dryRun,
             isFollowUp: options?.isFollowUp,
           });
