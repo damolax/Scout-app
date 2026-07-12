@@ -8,7 +8,81 @@ on:
       - '.github/workflows/build-android-apk.yml'
 
 jobs:
-  build-apk:
+  build-release-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Install Gradle
+        run: |
+          curl -L -o gradle.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
+          unzip -q gradle.zip
+          echo "$PWD/gradle-8.9/bin" >> $GITHUB_PATH
+
+      - name: Prepare release signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/scout-signing"
+          KEYSTORE_PATH="$RUNNER_TEMP/scout-signing/scout-release.jks"
+          STORE_PASSWORD="${{ secrets.SCOUT_ANDROID_KEYSTORE_PASSWORD }}"
+          KEY_PASSWORD="${{ secrets.SCOUT_ANDROID_KEY_PASSWORD }}"
+          KEY_ALIAS="${{ secrets.SCOUT_ANDROID_KEY_ALIAS }}"
+          KEYSTORE_B64="${{ secrets.SCOUT_ANDROID_KEYSTORE_BASE64 }}"
+
+          if [ -z "$STORE_PASSWORD" ]; then STORE_PASSWORD="scout-release-2026"; fi
+          if [ -z "$KEY_PASSWORD" ]; then KEY_PASSWORD="$STORE_PASSWORD"; fi
+          if [ -z "$KEY_ALIAS" ]; then KEY_ALIAS="scout"; fi
+
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
+            echo "Using GitHub secret keystore."
+          else
+            keytool -genkeypair \
+              -v \
+              -keystore "$KEYSTORE_PATH" \
+              -storepass "$STORE_PASSWORD" \
+              -keypass "$KEY_PASSWORD" \
+              -alias "$KEY_ALIAS" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Scout, OU=Oyeola, O=Oyeola, L=Online, S=Online, C=NG"
+            echo "Generated a temporary release keystore for this build. Add GitHub secrets later for a permanent update key."
+          fi
+
+          echo "SCOUT_ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> $GITHUB_ENV
+          echo "SCOUT_ANDROID_KEYSTORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
+          echo "SCOUT_ANDROID_KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+          echo "SCOUT_ANDROID_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+
+      - name: Build release APK
+        run: gradle -p mobile/android assembleRelease --stacktrace
+
+      - name: Rename APK
+        run: |
+          mkdir -p mobile/android/release-artifacts
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile/android/release-artifacts/scout-release-v10.3.apk
+
+      - name: Upload release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scout-android-release-apk
+          path: mobile/android/release-artifacts/scout-release-v10.3.apk
+
+  build-debug-apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,10 +100,10 @@ jobs:
           curl -L -o gradle.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
           unzip -q gradle.zip
           echo "$PWD/gradle-8.9/bin" >> $GITHUB_PATH
-      - name: Build debug APK
+      - name: Build debug APK backup
         run: gradle -p mobile/android assembleDebug --stacktrace
-      - name: Upload APK artifact
+      - name: Upload debug APK backup artifact
         uses: actions/upload-artifact@v4
         with:
-          name: scout-android-debug-apk
+          name: scout-android-debug-apk-backup
           path: mobile/android/app/build/outputs/apk/debug/app-debug.apk

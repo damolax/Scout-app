@@ -8,7 +8,35 @@ android {
         applicationId 'com.oyeola.scout'
         minSdk 23
         targetSdk 35
-        versionCode 101
-        versionName '10.1'
+        versionCode 103
+        versionName '10.3'
+    }
+
+    signingConfigs {
+        release {
+            def storeFilePath = System.getenv('SCOUT_ANDROID_KEYSTORE_PATH') ?: project.findProperty('SCOUT_ANDROID_KEYSTORE_PATH')
+            def storePasswordValue = System.getenv('SCOUT_ANDROID_KEYSTORE_PASSWORD') ?: project.findProperty('SCOUT_ANDROID_KEYSTORE_PASSWORD')
+            def keyAliasValue = System.getenv('SCOUT_ANDROID_KEY_ALIAS') ?: project.findProperty('SCOUT_ANDROID_KEY_ALIAS') ?: 'scout'
+            def keyPasswordValue = System.getenv('SCOUT_ANDROID_KEY_PASSWORD') ?: project.findProperty('SCOUT_ANDROID_KEY_PASSWORD')
+
+            if (storeFilePath != null && storePasswordValue != null && keyPasswordValue != null) {
+                storeFile file(storeFilePath)
+                storePassword storePasswordValue
+                keyAlias keyAliasValue
+                keyPassword keyPasswordValue
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.release
+        }
     }
 }
