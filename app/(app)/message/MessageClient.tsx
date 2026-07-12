@@ -556,21 +556,24 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (!specificSenderId && rows[0]?.id) setSpecificSenderId(rows[0].id);
 
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const countsByEmail: Record<string, number> = {};
+    const senderEmails = rows.map((account) => normalizeEmail(account.email)).filter(Boolean);
+    if (senderEmails.length) {
+      const { data: sentRows } = await supabase
+        .from("sent_messages")
+        .select("from_email")
+        .eq("workspace_id", workspace.id)
+        .eq("status", "sent")
+        .gte("sent_at", since)
+        .in("from_email", senderEmails)
+        .range(0, 99999);
+      for (const row of sentRows || []) {
+        const key = normalizeEmail((row as any).from_email);
+        if (key) countsByEmail[key] = (countsByEmail[key] || 0) + 1;
+      }
+    }
     const counts: Record<string, number> = {};
-    await Promise.all(
-      rows.map(async (account) => {
-        const email = normalizeEmail(account.email);
-        if (!email) return;
-        const { count } = await supabase
-          .from("sent_messages")
-          .select("id", { count: "exact", head: true })
-          .eq("workspace_id", workspace.id)
-          .eq("status", "sent")
-          .eq("from_email", account.email)
-          .gte("sent_at", since);
-        counts[account.id] = count || 0;
-      }),
-    );
+    for (const account of rows) counts[account.id] = countsByEmail[normalizeEmail(account.email)] || 0;
     setSenderLast24h(counts);
   }
 
@@ -767,11 +770,17 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
   useEffect(() => {
     if (!workspace.id) return;
+    let accountTick = 0;
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       loadSchedules().catch(() => undefined);
       loadRecentSent().catch(() => undefined);
-      loadAccounts().catch(() => undefined);
-    }, 12000);
+      accountTick += 1;
+      if (accountTick >= 3) {
+        accountTick = 0;
+        loadAccounts().catch(() => undefined);
+      }
+    }, 20000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id]);
@@ -955,6 +964,59 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           `${account.email}: ${Number.isFinite(senderCap(account)) ? senderCap(account).toLocaleString() : "auto"}`,
       )
       .join(" · ");
+  }
+
+
+  async function buildNoContactDiagnostic(messageKind: MessageKind) {
+    try {
+      const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
+      const cleanCountry = countryFilter.trim().replace(/[%_]/g, "");
+      const cleanSearch = readySearch.trim().replace(/[%_]/g, "");
+      const [{ count: totalWithEmail }, { count: contactableWithEmail }] = await Promise.all([
+        supabase
+          .from("businesses")
+          .select("id", { count: "exact", head: true })
+          .eq("workspace_id", workspace.id)
+          .not("email", "is", null)
+          .neq("email", ""),
+        contactableStatusQuery(
+          supabase
+            .from("businesses")
+            .select("id", { count: "exact", head: true })
+            .eq("workspace_id", workspace.id)
+            .not("email", "is", null)
+            .neq("email", ""),
+        ),
+      ]);
+
+      let filteredQuery = contactableStatusQuery(
+        supabase
+          .from("businesses")
+          .select("id,location,raw,email,status,category,category_id,name,domain,website", { count: "exact" })
+          .eq("workspace_id", workspace.id)
+          .not("email", "is", null)
+          .neq("email", "")
+          .limit(cleanCountry ? 10000 : 1),
+      );
+      if (cleanSearch) filteredQuery = filteredQuery.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
+      if (audienceCategoryId) filteredQuery = filteredQuery.eq("category_id", audienceCategoryId);
+      else if (cleanCategory) filteredQuery = filteredQuery.ilike("category", `%${cleanCategory}%`);
+      const { data: filteredRows, count: filteredBeforeLocation } = await filteredQuery;
+      const locationMatched = cleanCountry ? applyLocationFilter((filteredRows || []) as Business[], cleanCountry).length : Number(filteredBeforeLocation || 0);
+      const pieces = [
+        messageKind === "follow_up" ? "No due follow-up contacts found." : "No contactable leads found for this send.",
+        `${Number(totalWithEmail || 0).toLocaleString()} total lead(s) have an email.`,
+        `${Number(contactableWithEmail || 0).toLocaleString()} have a contactable status: ${CONTACTABLE_BUSINESS_STATUSES.join(", ")}.`,
+      ];
+      if (audienceCategoryId || cleanCategory || cleanSearch) pieces.push(`${Number(filteredBeforeLocation || 0).toLocaleString()} match your audience/category/search filters before location.`);
+      if (cleanCountry) pieces.push(`${locationMatched.toLocaleString()} match the selected uploaded location: ${cleanCountry}.`);
+      pieces.push("Use All available locations, clear search/category filters, or run Auto Scout/Repair Ready Contacts if the email exists but is not marked contactable.");
+      return pieces.join(" ");
+    } catch {
+      return messageKind === "follow_up"
+        ? "No due follow-up contacts with email found."
+        : "No contactable leads with email found. Clear filters or run Auto Scout/Repair Ready Contacts.";
+    }
   }
 
   async function getContactsForSend(
@@ -1265,7 +1327,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     });
     setSelectedContacts({});
     setStatus(
-      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). Keep Scout open and the in-app runner will continue it. Job: ${scheduleId}`,
+      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). Keep Scout open; the app-wide runner will continue it. Job: ${scheduleId}`,
     );
     await Promise.all([
       loadSchedules(),
@@ -1363,12 +1425,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         effectiveLimit,
         contactsOverride,
       );
-      if (!contacts.length)
-        throw new Error(
-          messageKind === "follow_up"
-            ? "No still-due follow-up contacts with email found. Scout re-checked the segment before sending."
-            : "No Ready contacts with email found.",
-        );
+      if (!contacts.length) {
+        const diagnostic = await buildNoContactDiagnostic(messageKind);
+        throw new Error(diagnostic);
+      }
 
       const batchId = `scout_v830_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const { error: batchError } = await supabase
@@ -1416,7 +1476,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       let stopped = false;
       const requested = contacts.length;
       setStatus(
-        `Sending now: 0 / ${requested.toLocaleString()} started. Keep this page open until it finishes.`,
+        `Sending now: 0 / ${requested.toLocaleString()} started. Keep Scout open until it finishes.`,
       );
       emitLiveActivity({
         kind: "send",
@@ -1789,7 +1849,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         .single();
       if (insertError) throw insertError;
       if (insertedSchedule) setLastSavedSchedule(insertedSchedule as MessageSchedule);
-      setStatus("Schedule saved. Keep Scout open on this page; the in-app schedule runner will start it when the time arrives. Add a phone reminder if you want a top-of-phone alert.");
+      setStatus("Schedule saved. Keep Scout open; the app-wide runner will start it when the time arrives. Add a phone reminder if you want a top-of-phone alert.");
       await loadSchedules();
     } catch (err) {
       setError(formatError(err));
@@ -1938,7 +1998,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       if (Number(json.ran || 0) > 0 || !options?.silent) {
         setStatus(
           Number(json.ran || 0) > 0
-            ? `Open-app schedule runner processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. It will continue while this page stays open.`
+            ? `Open-app schedule runner processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. It will continue while Scout stays open.`
             : "No due schedules right now.",
         );
       }
@@ -2714,11 +2774,11 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedule Email</h3>
-          <p className="muted">Pick a time and count. Schedules run from the open app. Add a phone/calendar reminder if you want your phone to alert you when the schedule is due.</p>
+          <p className="muted">Pick a time and count. Schedules run while Scout is open. Add a phone/calendar reminder if you want your phone to alert you when the schedule is due.</p>
           {dueSchedules.length ? (
             <div className="notice" style={{ marginBottom: 12 }}>
               <strong>{dueSchedules.length.toLocaleString()} schedule(s) due now.</strong>{" "}
-              Keep this page open and auto-run will continue, or click <strong>Run Due Sends Now</strong>.
+              Keep Scout open and auto-run will continue, or click <strong>Run Due Sends Now</strong>.
             </div>
           ) : null}
           {lastSavedSchedule ? (
@@ -2770,7 +2830,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               checked={autoRunSchedules}
               onChange={(e) => setAutoRunSchedules(e.target.checked)}
             />{" "}
-            Auto-run due schedules while this page is open
+            Auto-run due schedules while Scout is open
           </label>
           <div className="notice" style={{ marginTop: 12 }}>
             <strong>Due notifier</strong><br />
@@ -2803,7 +2863,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             </button>
           </div>
           <div className="notice" style={{ marginTop: 10 }}>
-            No cron is needed. A saved schedule starts automatically only while Scout is open, or when you click Run Due Sends Now.
+            No cron is needed. A saved schedule starts automatically while Scout is open anywhere in the app, or when you click Run Due Sends Now.
           </div>
           <div className="table-wrap" style={{ marginTop: 12 }}>
             <table>

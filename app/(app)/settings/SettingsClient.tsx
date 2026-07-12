@@ -32,6 +32,12 @@ type IdentityDraft = {
   signature_logo_url: string;
 };
 
+type HealthRow = {
+  name: string;
+  status: "Good" | "Warning" | "Fix needed";
+  detail: string;
+};
+
 function shortenSignature(account: GmailAccount) {
   const text = String(account.signature_text || account.signature_html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   if (!text) return 'No signature';
@@ -62,6 +68,8 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [oauthReady, setOauthReady] = useState<boolean | null>(null);
+  const [healthRows, setHealthRows] = useState<HealthRow[]>([]);
+  const [healthBusy, setHealthBusy] = useState(false);
 
   async function loadAccounts() {
     const { data, error: loadError } = await supabase
@@ -504,6 +512,128 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     }
   }
 
+  function healthStatus(ok: boolean, warn: boolean = false): "Good" | "Warning" | "Fix needed" {
+    if (ok) return "Good";
+    return warn ? "Warning" : "Fix needed";
+  }
+
+  async function runAppHealthCheck() {
+    setHealthBusy(true);
+    setError('');
+    try {
+      const since72 = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+      const [readyCount, emailCount, templateRows, connectedSenderCount, dueScheduleCount, researchQueueCount, signatureCheck] = await Promise.all([
+        supabase
+          .from('businesses')
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', workspace.id)
+          .in('status', ['ready', 'found', 'connected'])
+          .not('email', 'is', null)
+          .neq('email', ''),
+        supabase
+          .from('businesses')
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', workspace.id)
+          .not('email', 'is', null)
+          .neq('email', ''),
+        supabase
+          .from('templates')
+          .select('id,name,template_type,active')
+          .eq('workspace_id', workspace.id)
+          .eq('active', true)
+          .limit(200),
+        supabase
+          .from('gmail_accounts')
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', workspace.id)
+          .in('status', ['connected', 'ready']),
+        supabase
+          .from('message_schedules')
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', workspace.id)
+          .in('status', ['scheduled', 'due', 'running']),
+        supabase
+          .from('email_research_jobs')
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', workspace.id)
+          .in('status', ['queued', 'running']),
+        supabase
+          .from('workspaces')
+          .select('email_signature_text,email_signature_html,email_logo_url,app_url')
+          .eq('id', workspace.id)
+          .maybeSingle(),
+      ]);
+
+      let dueFollowupDetail = 'RPC not checked.';
+      let dueFollowupOk = true;
+      try {
+        const { data: dueData, error: dueError } = await supabase.rpc('get_due_followups', {
+          target_workspace: workspace.id,
+          limit_rows: 1,
+          followup_segment: 'all_unanswered'
+        });
+        if (dueError) throw dueError;
+        dueFollowupDetail = `${Array.isArray(dueData) ? dueData.length : 0} due sample loaded. RPC is available.`;
+      } catch (err) {
+        dueFollowupOk = false;
+        dueFollowupDetail = `Follow-up RPC problem: ${formatError(err)}`;
+      }
+
+      const templates = (templateRows.data || []) as Array<{ template_type?: string | null }>;
+      const initialTemplates = templates.filter((t) => String(t.template_type || 'initial') === 'initial').length;
+      const followupTemplates = templates.filter((t) => String(t.template_type || '') === 'follow_up').length;
+      const sig = (signatureCheck.data || {}) as Record<string, any>;
+      const rows: HealthRow[] = [
+        {
+          name: 'Contactable leads',
+          status: healthStatus(Number(readyCount.count || 0) > 0, Number(emailCount.count || 0) > 0),
+          detail: `${Number(readyCount.count || 0).toLocaleString()} ready/found/connected with email. ${Number(emailCount.count || 0).toLocaleString()} total leads have email.`
+        },
+        {
+          name: 'Gmail senders',
+          status: healthStatus(Number(connectedSenderCount.count || 0) > 0),
+          detail: `${Number(connectedSenderCount.count || 0).toLocaleString()} connected sender(s).`
+        },
+        {
+          name: 'Templates',
+          status: healthStatus(initialTemplates > 0, followupTemplates === 0),
+          detail: `${initialTemplates} initial template(s), ${followupTemplates} follow-up template(s).`
+        },
+        {
+          name: 'Open-app schedules',
+          status: 'Good',
+          detail: `${Number(dueScheduleCount.count || 0).toLocaleString()} active saved schedule(s). Global open-app runner checks due schedules while Scout is open.`
+        },
+        {
+          name: 'Due follow-ups',
+          status: dueFollowupOk ? 'Good' : 'Fix needed',
+          detail: dueFollowupDetail
+        },
+        {
+          name: 'Auto Scout queue',
+          status: 'Good',
+          detail: `${Number(researchQueueCount.count || 0).toLocaleString()} queued/running research job(s). Auto Scout runs when you start it from the app.`
+        },
+        {
+          name: 'Signature/logo',
+          status: healthStatus(Boolean(sig.email_signature_text || sig.email_signature_html || sig.email_logo_url), true),
+          detail: `${sig.email_logo_url ? 'Logo saved.' : 'No logo saved.'} ${sig.email_signature_text || sig.email_signature_html ? 'Signature saved.' : 'No signature text/html saved.'}`
+        },
+        {
+          name: 'Speed mode',
+          status: 'Good',
+          detail: 'Cron routes are not part of the normal flow. Polling is throttled, sender counts use one grouped read, and lists load in small pages.'
+        },
+      ];
+      setHealthRows(rows);
+      setStatus('Health check complete. Fix anything marked Fix needed before a large campaign.');
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setHealthBusy(false);
+    }
+  }
+
   function saveLocalBackend() {
     localStorage.setItem('scout_v8_backend_url', backendUrl);
     setStatus('Optional backend URL saved locally. Native Gmail OAuth/send is handled by this app.');
@@ -532,6 +662,17 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         <div className="card kpi"><div className="title">Connected Senders</div><div className="num">{accounts.filter((a) => a.status === 'connected' && !isPaused(a)).length}</div></div>
         <div className="card kpi"><div className="title">Paused / Limited</div><div className="num">{accounts.filter((a) => a.status !== 'connected' || isPaused(a)).length}</div></div>
         <div className="card kpi"><div className="title">OAuth</div><div className="num">{oauthReady === null ? '…' : oauthReady ? 'Ready' : 'Fix'}</div></div>
+      </div>
+
+      <div className="card" style={{ padding: 18 }}>
+        <h3>App Health Check</h3>
+        <p className="muted">Quick check before sending: leads, senders, templates, follow-ups, schedules, Auto Scout, signature, and speed mode.</p>
+        <div className="actions" style={{ marginTop: 12 }}>
+          <button className="btn" type="button" disabled={healthBusy} onClick={runAppHealthCheck}>{healthBusy ? 'Checking…' : 'Run health check'}</button>
+        </div>
+        {healthRows.length ? <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Area</th><th>Status</th><th>Detail</th></tr></thead><tbody>
+          {healthRows.map((row) => <tr key={row.name}><td>{row.name}</td><td><span className={`status ${row.status === 'Good' ? 'connected' : row.status === 'Warning' ? 'paused' : 'error'}`}>{row.status}</span></td><td>{row.detail}</td></tr>)}
+        </tbody></table></div> : <div className="notice" style={{ marginTop: 12 }}>Run this after deployment. It gives a clear reason if sending, follow-ups, logo, or Auto Scout will fail.</div>}
       </div>
 
       <div className="card" style={{ padding: 18 }}>

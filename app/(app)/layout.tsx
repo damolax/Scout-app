@@ -2,6 +2,7 @@ import { AppNav } from '@/components/AppNav';
 import { SignOutButton } from '@/components/SignOutButton';
 import { NotificationBell } from '@/components/NotificationBell';
 import { LiveActivityWindow } from '@/components/LiveActivityWindow';
+import { AppOpenRunner } from '@/components/AppOpenRunner';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
 
@@ -37,6 +38,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NotificationBell workspaceId={workspace?.id} />
         </div>
         <div className="container">{children}</div>
+        <AppOpenRunner workspaceId={workspace?.id} />
         <LiveActivityWindow workspaceId={workspace?.id} />
       </main>
     </div>

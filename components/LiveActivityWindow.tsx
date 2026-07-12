@@ -208,7 +208,7 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
 
   useEffect(() => {
     load();
-    const timer = window.setInterval(load, open || hasWork ? 2000 : 7000);
+    const timer = window.setInterval(load, open || hasWork ? 1500 : 15000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, open, hasWork]);
