@@ -4,6 +4,7 @@ export const maxDuration = 300;
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { createClient as createServerSupabaseClient } from '@/lib/supabase-server';
+import { hasUsableWebsiteTarget } from '@/lib/auto-scout-target';
 
 function errorMessage(error: unknown) {
   if (!error) return 'Unknown error';
@@ -38,12 +39,6 @@ async function signedInMemberCanRun(workspaceId: string) {
   }
 }
 
-function hasUsableResearchInput(row: any) {
-  const raw = row?.raw && typeof row.raw === 'object' ? row.raw : {};
-  const values = [row?.website, row?.domain, row?.name, raw.website, raw.domain, raw.url, raw.company_url, raw.business_url, raw.linkedin, raw.source_url];
-  return values.some((value) => String(value || '').trim());
-}
-
 function canAutoScoutStatus(status: unknown) {
   const blocked = new Set(['contacted', 'responded', 'bad_inbox', 'bounced', 'no_inbox', 'blocked', 'invalid', 'duplicate', 'archived', 'unsubscribed', 'do_not_contact', 'sent']);
   const value = String(status || '').trim().toLowerCase();
@@ -61,7 +56,7 @@ async function enqueuePendingNoEmail(workspaceId: string, limit: number) {
     .limit(limit);
   if (error) throw error;
   const ids = (businesses || [])
-    .filter((row: any) => canAutoScoutStatus(row.status) && hasUsableResearchInput(row))
+    .filter((row: any) => canAutoScoutStatus(row.status) && hasUsableWebsiteTarget(row))
     .map((row) => row.id)
     .filter(Boolean);
   if (!ids.length) return { checked: 0, enqueued: 0 };
@@ -75,7 +70,7 @@ async function enqueuePendingNoEmail(workspaceId: string, limit: number) {
   }));
   const { data: jobs, error: jobError } = await supabase
     .from('email_research_jobs')
-    .upsert(payload, { onConflict: 'workspace_id,business_id', ignoreDuplicates: true })
+    .upsert(payload, { onConflict: 'workspace_id,business_id' })
     .select('id');
   if (jobError) throw jobError;
   return { checked: ids.length, enqueued: jobs?.length || 0 };
@@ -86,7 +81,7 @@ async function resetStaleRunning(workspaceId?: string) {
   const staleSince = new Date(Date.now() - 12 * 60 * 1000).toISOString();
   let query = supabase
     .from('email_research_jobs')
-    .update({ status: 'queued', last_error: 'Worker reset stale running job.', updated_at: new Date().toISOString() })
+    .update({ status: 'queued', last_error: null, started_at: null, updated_at: new Date().toISOString() })
     .eq('status', 'running')
     .lt('updated_at', staleSince);
   if (workspaceId) query = query.eq('workspace_id', workspaceId);
@@ -109,9 +104,9 @@ async function runWorker(request: NextRequest) {
     }
   }
 
-  const cycles = Math.max(1, Math.min(25, Number(body.cycles || request.nextUrl.searchParams.get('cycles') || 8)));
-  const batchSize = Math.max(1, Math.min(500, Number(body.batchSize || request.nextUrl.searchParams.get('batchSize') || 100)));
-  const concurrency = Math.max(1, Math.min(50, Number(body.concurrency || request.nextUrl.searchParams.get('concurrency') || 15)));
+  const cycles = Math.max(1, Math.min(12, Number(body.cycles || request.nextUrl.searchParams.get('cycles') || 1)));
+  const batchSize = Math.max(1, Math.min(40, Number(body.batchSize || request.nextUrl.searchParams.get('batchSize') || 4)));
+  const concurrency = Math.max(1, Math.min(5, Number(body.concurrency || request.nextUrl.searchParams.get('concurrency') || 2)));
   const enqueueLimit = Math.max(0, Math.min(50000, Number(body.enqueueLimit || request.nextUrl.searchParams.get('enqueueLimit') || 5000)));
   const autoEnqueue = body.autoEnqueue !== false && request.nextUrl.searchParams.get('autoEnqueue') !== 'false';
 

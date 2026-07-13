@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
+import { hasUsableWebsiteTarget } from '@/lib/auto-scout-target';
 
 function errorMessage(error: unknown) {
   if (!error) return 'Unknown error';
@@ -51,16 +52,11 @@ export async function POST(request: NextRequest) {
     if (businessError) throw businessError;
 
     const blockedStatuses = new Set(['contacted', 'responded', 'bad_inbox', 'bounced', 'no_inbox', 'blocked', 'invalid', 'duplicate', 'archived', 'unsubscribed', 'do_not_contact', 'sent']);
-    function hasUsableResearchInput(row: any) {
-      const raw = row?.raw && typeof row.raw === 'object' ? row.raw : {};
-      const values = [row?.website, row?.domain, row?.name, raw.website, raw.domain, raw.url, raw.company_url, raw.business_url, raw.linkedin, raw.source_url];
-      return values.some((value) => String(value || '').trim());
-    }
-
     const ids = (businesses || [])
       .filter((b: any) => !blockedStatuses.has(String(b.status || '').trim().toLowerCase()))
       .filter((b: any) => !noEmailOnly || !String(b.email || '').trim())
-      .filter((b: any) => hasUsableResearchInput(b))
+      // Auto Scout is website-first. Do not queue rows that only have a business name, Yelp/Google page, or IP address.
+      .filter((b: any) => hasUsableWebsiteTarget(b))
       .map((b) => b.id);
     if (!ids.length) return NextResponse.json({ success: true, enqueued: 0, message: 'No pending businesses found to enqueue.' });
 
@@ -75,7 +71,7 @@ export async function POST(request: NextRequest) {
 
     const { data: jobs, error: jobError } = await supabase
       .from('email_research_jobs')
-      .upsert(payload, { onConflict: 'workspace_id,business_id', ignoreDuplicates: true })
+      .upsert(payload, { onConflict: 'workspace_id,business_id' })
       .select('id');
     if (jobError) throw jobError;
 

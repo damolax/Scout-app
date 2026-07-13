@@ -7,6 +7,7 @@ import { createClient as createServerSupabaseClient } from '@/lib/supabase-serve
 import { chooseBestEmailCandidate, type EmailCandidateDecision } from '@/lib/email-candidate-rules';
 import { findEmailsDeepFromWebsite, type DeepWebsiteFinderResult } from '@/lib/website-email-finder';
 import { duplicateEmailRisk } from '@/lib/repeated-email-guard';
+import { normalizeAutoScoutWebsite } from '@/lib/auto-scout-target';
 
 
 async function logAutoScoutActivity(supabase: ReturnType<typeof createAdminClient>, workspaceId: string, type: string, message: string, raw: Record<string, unknown> = {}) {
@@ -76,7 +77,7 @@ async function resetStaleRunningJobs(supabase: ReturnType<typeof createAdminClie
   const staleSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   let query = supabase
     .from('email_research_jobs')
-    .update({ status: 'queued', last_error: 'Auto Scout reset stale running job.', updated_at: new Date().toISOString() })
+    .update({ status: 'queued', last_error: null, started_at: null, updated_at: new Date().toISOString() })
     .eq('status', 'running')
     .lt('updated_at', staleSince);
   if (workspaceId) query = query.eq('workspace_id', workspaceId);
@@ -177,35 +178,59 @@ function mergeResearchDecision(backendResult: any, backendDecision: EmailCandida
 }
 
 
+function fetchJsonWithTimeout(url: URL, payload: any, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: controller.signal,
+    cache: 'no-store'
+  }).then(async (response) => {
+    const text = await response.text();
+    let json: any = null;
+    try { json = text ? JSON.parse(text) : {}; } catch { json = { rawText: text }; }
+    if (!response.ok) throw new Error(json?.error || json?.message || `HTTP ${response.status}`);
+    return json;
+  }).finally(() => clearTimeout(timer));
+}
+
 async function callBackendFindEmail(business: any) {
   const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (!backend) throw new Error('NEXT_PUBLIC_BACKEND_URL is not configured. Built-in website finder will still run.');
+  if (!backend) throw new Error('Backend not configured.');
   const base = backend.endsWith('/') ? backend : `${backend}/`;
-  const paths = ['/find-email', '/api/find-email', '/email-finder/find', '/api/email/find', '/research/find-email', '/api/research/find-email', '/find', '/api/find'];
+  const website = normalizeAutoScoutWebsite(business);
+  if (!website) throw new Error('No valid business website URL for backend finder.');
+
   const payload = {
     name: business.name,
     businessName: business.name,
-    website: business.website,
+    website,
     domain: business.domain,
     location: business.location,
     category: business.category,
-    raw: business.raw
+    raw: business.raw,
+    websiteOnly: true,
+    directWebsiteOnly: true,
+    skipBusinessNameSearch: true
   };
+
   const errors: string[] = [];
-  for (const path of paths) {
+  for (const path of ['/find-email', '/batch-find-emails']) {
     const target = new URL(path, base);
     try {
-      const response = await fetch(target, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
-      const text = await response.text();
-      let json: any = null;
-      try { json = text ? JSON.parse(text) : {}; } catch { json = { rawText: text }; }
-      if (response.ok) return json;
-      errors.push(`${path}: ${json?.error || json?.message || response.status}`);
+      const json = await fetchJsonWithTimeout(target, path.includes('batch') ? { businesses: [payload] } : payload, 6500);
+      if (path.includes('batch')) {
+        const first = Array.isArray(json?.results) ? json.results[0] : Array.isArray(json?.data) ? json.data[0] : json;
+        return first || json;
+      }
+      return json;
     } catch (error) {
       errors.push(`${path}: ${errorMessage(error)}`);
     }
   }
-  throw new Error(`No backend email-finder endpoint succeeded. ${errors.join(' | ')}`);
+  throw new Error(`Email finder backend did not return quickly. ${errors.join(' | ')}`);
 }
 
 async function runOnce(request: NextRequest) {
@@ -243,34 +268,41 @@ async function runOnce(request: NextRequest) {
       return;
     }
 
+    const websiteTarget = normalizeAutoScoutWebsite(business);
+    if (!websiteTarget) {
+      const result = { method: 'invalid_or_missing_website', reason: 'No usable business website URL. Auto Scout does not search by business name.', website: business.website || business.domain || '' };
+      await supabase.from('businesses').update({ status: 'review', raw: { ...(business.raw || {}), backend_email_research: result } }).eq('id', business.id);
+      await supabase.from('email_research_jobs').update({ status: 'done', result, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
+      results.push({ job: job.id, business: business.id, businessName: business.name, status: 'skipped_no_website', reason: result.reason });
+      await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_skipped', `Skipped ${business.name || 'business'}: no usable website`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '' });
+      return;
+    }
+
+    const websiteBusiness = { ...business, website: websiteTarget };
     await supabase.from('email_research_jobs').update({ status: 'running', started_at: new Date().toISOString(), updated_at: new Date().toISOString(), attempts: (job.attempts || 0) + 1 }).eq('id', job.id);
-    await supabase.from('businesses').update({ status: 'scanning' }).eq('id', business.id).neq('status', 'contacted');
-    await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_checking', `Checking ${business.name || 'business'} for email`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '' });
+    await supabase.from('businesses').update({ status: 'scanning', website: business.website || websiteTarget }).eq('id', business.id).neq('status', 'contacted');
+    await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_checking', `Checking ${business.name || 'business'} website`, { job_id: job.id, business_id: business.id, website: websiteTarget, business_name: business.name || '' });
 
     try {
+      let deepResult: DeepWebsiteFinderResult | null = null;
       let backendResult: any = {};
       let backendError = '';
-      try {
-        backendResult = await callBackendFindEmail(business);
-      } catch (error) {
-        backendError = errorMessage(error);
-        backendResult = { success: false, error: backendError, method: 'backend_unavailable' };
+
+      // Best process: check the real website first. Render/backend is a fallback, not something that can freeze the page.
+      await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_deep_check', `Checking website pages for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: websiteTarget, business_name: business.name || '' });
+      deepResult = await findEmailsDeepFromWebsite(websiteBusiness, { maxPages: 6, timeoutMs: 4500 });
+      await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_pages_checked', `Checked ${deepResult.pagesChecked} page(s) for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: websiteTarget, business_name: business.name || '', pages_checked: deepResult.pagesChecked, pages_attempted: deepResult.pagesAttempted, source_url: deepResult.sourceUrl || '', email: deepResult.email || '' });
+
+      if (!deepResult.decision?.promote) {
+        try {
+          backendResult = await callBackendFindEmail(websiteBusiness);
+        } catch (error) {
+          backendError = errorMessage(error);
+          backendResult = { success: false, error: backendError, method: 'backend_unavailable_or_slow' };
+        }
       }
 
-      const backendDecision = bestEmailDecisionFromPayload(backendResult, business);
-      let deepResult: DeepWebsiteFinderResult | null = null;
-      const hasWebsite = Boolean(String(business.website || business.domain || '').trim());
-      // Auto Scout must prove emails from the real website whenever a website/domain exists.
-      // Render is still used first when configured, but the built-in website finder now always checks
-      // homepage/contact/about/support/impressum pages instead of trusting only a backend guess.
-      if (hasWebsite) {
-        await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_deep_check', `Checking website pages for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '' });
-        deepResult = await findEmailsDeepFromWebsite(business, { maxPages: 10, timeoutMs: 8000 });
-        await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_pages_checked', `Checked ${deepResult.pagesChecked} page(s) for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '', pages_checked: deepResult.pagesChecked, pages_attempted: deepResult.pagesAttempted, source_url: deepResult.sourceUrl || '', email: deepResult.email || '' });
-      } else if (shouldDeepSearch(backendDecision)) {
-        await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_no_website', `No website available for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, business_name: business.name || '' });
-      }
-
+      const backendDecision = bestEmailDecisionFromPayload(backendResult, websiteBusiness);
       const merged = mergeResearchDecision(backendResult, backendDecision, deepResult);
       const decision = merged.decision;
       const email = decision.email;
@@ -285,7 +317,7 @@ async function runOnce(request: NextRequest) {
           .neq('id', business.id)
           .limit(20);
         if (sameEmailError) throw sameEmailError;
-        const duplicateRisk = duplicateEmailRisk(email, business, (sameEmailRows || []) as any[]);
+        const duplicateRisk = duplicateEmailRisk(email, websiteBusiness, (sameEmailRows || []) as any[]);
         if (duplicateRisk.risky) {
           const guardedResult = { ...enrichedResult, duplicateEmailGuard: duplicateRisk };
           await supabase.from('email_candidates').upsert({
