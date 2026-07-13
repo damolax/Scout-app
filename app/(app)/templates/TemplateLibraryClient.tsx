@@ -184,11 +184,11 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     }
   }
 
-  function templatePayload(category: MessageCategory | null, userId?: string | null, extraRaw: Record<string, unknown> = {}) {
+  function templatePayload(category: MessageCategory | null, userId?: string | null, extraRaw: Record<string, unknown> = {}, includeRaw = true) {
     const cleanSubject = subject.trim();
     const cleanMessage = message.trim();
     if (!cleanSubject || !cleanMessage) throw new Error('Subject and message are required.');
-    return {
+    const payload: Record<string, unknown> = {
       workspace_id: workspace.id,
       category_id: category?.id || null,
       category_name: category?.name || categoryName.trim() || null,
@@ -199,11 +199,46 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       template_type: templateType,
       purpose: purpose.trim() || null,
       reply_context: templateType === 'reply' ? (replyContext.trim() || null) : null,
-      // Store files in raw.attachments so saving works even if the older database has no templates.attachments column.
-      raw: { attachments, ...extraRaw },
       active: true,
       created_by: userId || null
     };
+    if (includeRaw) payload.raw = { attachments, ...extraRaw };
+    return payload;
+  }
+
+  function isMissingColumn(error: unknown, column: string) {
+    const text = formatError(error).toLowerCase();
+    return text.includes('pgrst204') && text.includes(`'${column.toLowerCase()}'`) || text.includes(`column "${column.toLowerCase()}" does not exist`);
+  }
+
+  async function insertTemplateWithSchemaFallback(category: MessageCategory | null, userId?: string | null, extraRaw: Record<string, unknown> = {}) {
+    const payload = templatePayload(category, userId, extraRaw, true);
+    const first = await supabase.from('templates').insert(payload).select('*').single();
+    if (!first.error) return { data: first.data, savedRaw: true };
+    if (!isMissingColumn(first.error, 'raw')) throw first.error;
+
+    // Older Scout databases may not have templates.raw yet. Save the template without raw
+    // instead of blocking the user. Run SUPABASE_V10_27_FAST_LOAD_INDEXES.sql to keep attachments/version metadata.
+    const fallbackPayload = templatePayload(category, userId, {}, false);
+    const second = await supabase.from('templates').insert(fallbackPayload).select('*').single();
+    if (second.error) throw second.error;
+    return { data: second.data, savedRaw: false };
+  }
+
+  async function archiveTemplateVersion(id: string) {
+    const first = await supabase
+      .from('templates')
+      .update({ active: false, updated_at: new Date().toISOString() })
+      .eq('workspace_id', workspace.id)
+      .eq('id', id);
+    if (!first.error) return;
+    if (!isMissingColumn(first.error, 'updated_at')) throw first.error;
+    const second = await supabase
+      .from('templates')
+      .update({ active: false })
+      .eq('workspace_id', workspace.id)
+      .eq('id', id);
+    if (second.error) throw second.error;
   }
 
   async function uploadAttachment(file: File | null | undefined) {
@@ -243,10 +278,9 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not signed in.');
       const category = await ensureCategory();
-      const { data, error: insertError } = await supabase.from('templates').insert(templatePayload(category, user.id)).select('*').single();
-      if (insertError) throw insertError;
+      const { data, savedRaw } = await insertTemplateWithSchemaFallback(category, user.id);
       setTemplateId(data.id);
-      setStatus(`${typeLabel(templateType)} saved.`);
+      setStatus(savedRaw ? `${typeLabel(templateType)} saved.` : `${typeLabel(templateType)} saved. Run SUPABASE_V10_27_FAST_LOAD_INDEXES.sql once to enable template attachments/version metadata.`);
       await loadAll();
     } catch (err) {
       setError(formatError(err));
@@ -266,22 +300,15 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
 
       // Updating a template creates a fresh version with a fresh id.
       // This makes performance start from zero for the updated version and hides the old version.
-      const { error: archiveError } = await supabase
-        .from('templates')
-        .update({ active: false, updated_at: new Date().toISOString() })
-        .eq('workspace_id', workspace.id)
-        .eq('id', oldTemplateId);
-      if (archiveError) throw archiveError;
+      await archiveTemplateVersion(oldTemplateId);
 
-      const payload = templatePayload(category, user?.id || null, {
+      const { data, savedRaw } = await insertTemplateWithSchemaFallback(category, user?.id || null, {
         versioned_from_template_id: oldTemplateId,
         version_created_at: new Date().toISOString(),
         version_note: 'Updated template saved as a new performance version.'
       });
-      const { data, error: insertError } = await supabase.from('templates').insert(payload).select('*').single();
-      if (insertError) throw insertError;
       setTemplateId(data.id);
-      setStatus(`${typeLabel(templateType)} updated as a new template version. Its performance starts from zero. The old version is hidden from performance.`);
+      setStatus(savedRaw ? `${typeLabel(templateType)} updated as a new template version. Its performance starts from zero. The old version is hidden from performance.` : `${typeLabel(templateType)} updated as a new template version. Performance starts from zero. Run SUPABASE_V10_27_FAST_LOAD_INDEXES.sql once to enable template attachments/version metadata.`);
       await loadAll();
     } catch (err) {
       setError(formatError(err));
@@ -294,8 +321,7 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setBusy(true);
     setError('');
     try {
-      const { error: updateError } = await supabase.from('templates').update({ active: false, updated_at: new Date().toISOString() }).eq('workspace_id', workspace.id).eq('id', id);
-      if (updateError) throw updateError;
+      await archiveTemplateVersion(id);
       if (templateId === id) setTemplateId('');
       setStatus('Template archived.');
       await loadAll();

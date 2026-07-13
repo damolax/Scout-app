@@ -1,5 +1,5 @@
 export const runtime = 'nodejs';
-export const maxDuration = 30;
+export const maxDuration = 15;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
@@ -47,11 +47,11 @@ export async function POST(request: NextRequest) {
     if (!workspaceId) throw new Error('workspaceId is required.');
 
     // App-open sync must be tiny and new-only. Full sync stays on Replies page.
-    const maxResults = Math.max(1, Math.min(num(input.max_results || input.maxResults, 6), 12));
-    const bounceMaxResults = Math.max(0, Math.min(num(input.bounce_max_results || input.bounceMaxResults, 2), 5));
-    const days = Math.max(1, Math.min(num(input.days, 3), 7));
-    const accountLimit = Math.max(1, Math.min(num(input.account_limit || input.accountLimit, 5), 8));
-    const deadlineMs = Math.max(4000, Math.min(num(input.deadlineMs || input.deadline_ms, 18000), 22000));
+    const maxResults = Math.max(1, Math.min(num(input.max_results || input.maxResults, 3), 5));
+    const bounceMaxResults = Math.max(0, Math.min(num(input.bounce_max_results || input.bounceMaxResults, 0), 2));
+    const days = Math.max(1, Math.min(num(input.days, 2), 3));
+    const accountLimit = Math.max(1, Math.min(num(input.account_limit || input.accountLimit, 2), 3));
+    const deadlineMs = Math.max(3500, Math.min(num(input.deadlineMs || input.deadline_ms, 8000), 10000));
 
     const supabase = createAdminClient();
     const { data: accounts, error: accountsError } = await supabase
@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      source: 'app_open_new_only_reply_check',
+      source: 'app_open_tiny_new_reply_pulse',
       newOnly: true,
       accountsChecked: results.length,
       totals,
@@ -145,6 +145,10 @@ export async function POST(request: NextRequest) {
       durationMs: Date.now() - startedAt
     });
   } catch (err) {
-    return NextResponse.json({ success: false, error: formatInboundError(err) }, { status: 400 });
+    const message = formatInboundError(err);
+    // v10.27: if Supabase is temporarily out of connections, do not make app load feel broken.
+    // The next tiny pulse or manual full sync can retry.
+    const poolTimeout = message.includes('PGRST003') || /connection pool/i.test(message);
+    return NextResponse.json({ success: !poolTimeout, skipped: poolTimeout, retryLater: poolTimeout, error: message }, { status: poolTimeout ? 200 : 400 });
   }
 }

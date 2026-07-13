@@ -5,13 +5,13 @@ import { emitLiveActivity } from "@/lib/live-activity-client";
 
 const LOCK_KEY = "scout_v10_open_app_runner_lock";
 const LAST_RUN_KEY = "scout_v10_open_app_runner_last_run";
-const RUN_INTERVAL_MS = 20_000;
-const LOCK_TTL_MS = 45_000;
+const RUN_INTERVAL_MS = 90_000;
+const LOCK_TTL_MS = 60_000;
 
 const INBOUND_LOCK_KEY = "scout_v10_25_inbound_sync_lock";
 const INBOUND_LAST_RUN_KEY = "scout_v10_25_inbound_sync_last_run";
-const INBOUND_INTERVAL_MS = 90_000;
-const INBOUND_LOCK_TTL_MS = 45_000;
+const INBOUND_INTERVAL_MS = 150_000;
+const INBOUND_LOCK_TTL_MS = 35_000;
 
 type RunnerResponse = {
   success?: boolean;
@@ -148,13 +148,13 @@ export function AppOpenRunner({ workspaceId }: { workspaceId?: string | null }) 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workspaceId,
-          maxResults: 6,
-          bounceMaxResults: 2,
-          days: 3,
-          accountLimit: 5,
-          deadlineMs: 18000,
+          maxResults: 3,
+          bounceMaxResults: 0,
+          days: 2,
+          accountLimit: 2,
+          deadlineMs: 8000,
           newOnly: true,
-          source: "v10_26_app_open_new_only_inbound_check",
+          source: "v10_27_app_open_tiny_new_reply_pulse",
         }),
       });
       const json = (await response.json().catch(() => ({}))) as InboundSyncResponse;
@@ -186,8 +186,8 @@ export function AppOpenRunner({ workspaceId }: { workspaceId?: string | null }) 
     if (!workspaceId || typeof window === "undefined") return;
     const tick = () => runDueSchedulesSilently().catch(() => undefined);
     const inboundTick = () => syncInboundSilently().catch(() => undefined);
-    const first = window.setTimeout(tick, 5000);
-    const firstInbound = window.setTimeout(() => syncInboundSilently(true).catch(() => undefined), 2500);
+    const first = window.setTimeout(tick, 15000);
+    const firstInbound = window.setTimeout(() => syncInboundSilently().catch(() => undefined), 8000);
     const timer = window.setInterval(tick, RUN_INTERVAL_MS);
     const inboundTimer = window.setInterval(inboundTick, INBOUND_INTERVAL_MS);
     return () => {
@@ -203,7 +203,7 @@ export function AppOpenRunner({ workspaceId }: { workspaceId?: string | null }) 
     if (!workspaceId || typeof window === "undefined") return;
     const onFocus = () => {
       runDueSchedulesSilently().catch(() => undefined);
-      if (typeof document === "undefined" || document.visibilityState === "visible") syncInboundSilently(true).catch(() => undefined);
+      if (typeof document === "undefined" || document.visibilityState === "visible") syncInboundSilently().catch(() => undefined);
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);

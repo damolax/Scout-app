@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-26-new-only-reply-sync-template-versioning",
-  "version": "10.26.0",
+  "name": "scout-app-v10-27-fast-load-safe-sync",
+  "version": "10.27.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.26: new-only app-open reply sync, clean in-app notifications, template saves without attachments schema errors, and template updates as new performance versions."
+  "description": "Scout App v10.27: faster app load, reduced Supabase connection pressure, tiny app-open reply checks, quieter notifications, and safe retry handling for PGRST003 pool timeouts."
 }

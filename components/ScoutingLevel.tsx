@@ -30,9 +30,9 @@ export function ScoutingLevel({ workspaceId }: { workspaceId?: string | null }) 
       const json = await response.json().catch(() => ({}));
       if (alive) setData(json);
     }
-    load().catch(() => {});
-    const timer = window.setInterval(() => load().catch(() => {}), 60_000);
-    return () => { alive = false; window.clearInterval(timer); };
+    const initial = window.setTimeout(() => load().catch(() => {}), 18000);
+    const timer = window.setInterval(() => load().catch(() => {}), 300_000);
+    return () => { alive = false; window.clearTimeout(initial); window.clearInterval(timer); };
   }, [workspaceId]);
 
   if (!workspaceId) return null;

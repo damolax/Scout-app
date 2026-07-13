@@ -90,6 +90,7 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
   const [stopId, setStopId] = useState('');
   const [notificationPermission, setNotificationPermission] = useState<string>('unsupported');
   const lastNotifiedEventId = useRef<string>('');
+  const loadingRef = useRef(false);
 
   const runningSchedules = useMemo(() => {
     const now = Date.now();
@@ -126,7 +127,8 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
   const hasWork = runningSchedules.length > 0 || runningResearch.some((row) => row.status === 'running') || hasActiveLiveEvent;
 
   async function load() {
-    if (!workspaceId) return;
+    if (!workspaceId || loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
     try {
       const response = await fetch(`/api/activity/live?workspaceId=${encodeURIComponent(workspaceId)}`, { cache: 'no-store' });
@@ -137,6 +139,7 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      loadingRef.current = false;
       setLoading(false);
     }
   }
@@ -207,9 +210,9 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
   }, [liveEvents]);
 
   useEffect(() => {
-    load();
-    const timer = window.setInterval(load, open || hasWork ? 1500 : 15000);
-    return () => window.clearInterval(timer);
+    const initial = window.setTimeout(() => load(), open ? 1200 : 12000);
+    const timer = window.setInterval(load, open ? 5000 : hasWork ? 10000 : 45000);
+    return () => { window.clearTimeout(initial); window.clearInterval(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, open, hasWork]);
 

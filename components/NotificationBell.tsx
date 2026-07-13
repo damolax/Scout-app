@@ -44,47 +44,51 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const loadingRef = useRef(false);
+  const lastLoadRef = useRef(0);
 
-  async function load() {
+  async function load(force = false) {
     if (!workspaceId) return;
+    if (loadingRef.current) return;
+    const now = Date.now();
+    if (!force && lastLoadRef.current && now - lastLoadRef.current < 45_000) return;
+    loadingRef.current = true;
+    lastLoadRef.current = now;
     setLoading(true);
     setError('');
     try {
-      const [items, unreadCount] = await Promise.all([
-        supabase
-          .from('app_notifications')
-          .select('id,type,title,message,business_id,read_at,created_at')
-          .eq('workspace_id', workspaceId)
-          .order('created_at', { ascending: false })
-          .limit(12),
-        supabase
-          .from('app_notifications')
-          .select('id', { count: 'exact', head: true })
-          .eq('workspace_id', workspaceId)
-          .is('read_at', null)
-      ]);
+      // v10.27: one lightweight query only. The previous bell made two Supabase
+      // requests on every load/focus, which could contribute to PGRST003 pool timeouts.
+      const items = await supabase
+        .from('app_notifications')
+        .select('id,type,title,message,business_id,read_at,created_at')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false })
+        .limit(20);
       if (items.error) throw items.error;
-      if (unreadCount.error) throw unreadCount.error;
-      setRows((items.data || []) as NotificationRow[]);
-      setUnread(unreadCount.count || 0);
+      const nextRows = (items.data || []) as NotificationRow[];
+      setRows(nextRows);
+      setUnread(nextRows.filter((row) => !row.read_at).length);
     } catch (err) {
       setRows([]);
       setUnread(0);
       setError(formatError(err).includes('app_notifications') ? 'Run the v8.42 Supabase repair SQL once to enable notifications.' : formatError(err));
     } finally {
+      loadingRef.current = false;
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
-    const onRefresh = () => load();
-    const onFocus = () => load();
+    const initial = window.setTimeout(() => load(true), 2500);
+    const onRefresh = () => load(true);
+    const onFocus = () => load(false);
     window.addEventListener('scout-notifications-refresh', onRefresh);
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
-    const timer = window.setInterval(load, 15000);
+    const timer = window.setInterval(() => load(false), 60000);
     return () => {
+      window.clearTimeout(initial);
       window.removeEventListener('scout-notifications-refresh', onRefresh);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
@@ -119,7 +123,7 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json?.success === false) throw new Error(json?.error || `Mark-read failed with HTTP ${response.status}`);
-      await load();
+      await load(true);
     } catch (err) {
       setError(formatError(err).includes('app_notifications') ? 'Run the v8.42 Supabase repair SQL once to enable notifications.' : formatError(err));
     }
@@ -138,7 +142,7 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok || json?.success === false) throw new Error(json?.error || `Delete failed with HTTP ${response.status}`);
-      await load();
+      await load(true);
     } catch (err) {
       setError(formatError(err));
     }
@@ -159,7 +163,7 @@ export function NotificationBell({ workspaceId }: { workspaceId?: string | null 
               <p className="muted">Replies, bounces, app updates</p>
             </div>
             <div className="actions compact">
-              <button className="icon-btn" type="button" onClick={load} title="Refresh" disabled={loading}><RefreshCw size={15} /></button>
+              <button className="icon-btn" type="button" onClick={() => load(true)} title="Refresh" disabled={loading}><RefreshCw size={15} /></button>
               <button className="icon-btn" type="button" onClick={() => markRead()} title="Mark all read" disabled={!unread}><CheckCheck size={15} /></button>
               <button className="icon-btn" type="button" onClick={() => deleteNotification()} title="Delete all" disabled={!rows.length}><Trash2 size={15} /></button>
               <button className="icon-btn" type="button" onClick={() => setOpen(false)} title="Close"><X size={15} /></button>
