@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-24-autoscout-simple-one-button",
-  "version": "10.24.0",
+  "name": "scout-app-v10-25-auto-in-app-reply-sync",
+  "version": "10.25.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.24: simplified website-first Auto Scout page with one main action, fewer buttons, faster checks, and clearer saved-email results."
+  "description": "Scout App v10.25: automatically sync Gmail replies and delivery signals when the app opens, refreshes, or becomes active, then updates Scout bell notifications."
 }

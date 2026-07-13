@@ -73,8 +73,18 @@ export default function NotificationsClient({ workspace }: { workspace: Workspac
 
   useEffect(() => {
     load();
+    const onRefresh = () => load();
+    const onFocus = () => load();
+    window.addEventListener('scout-notifications-refresh', onRefresh);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
     const timer = window.setInterval(load, 15000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.removeEventListener('scout-notifications-refresh', onRefresh);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+      window.clearInterval(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id]);
 
