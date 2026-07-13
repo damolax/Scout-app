@@ -43,8 +43,8 @@ export function ScoutingLevel({ workspaceId }: { workspaceId?: string | null }) 
     'Novice', 'Rookie', 'Apprentice', 'Scout', 'Pro Scout', 'Strategist', 'Operator', 'Rainmaker', 'Commander', 'Master Scout', 'Grandmaster', 'Ultimate'
   ].map((name, index) => ({ name, stageNumber: index + 1, unlocked: index === 0 }));
   const hints = data?.hints?.length ? data.hints : [
-    'Keep finding trusted emails, sending clean messages, and earning real replies.',
-    'Real prospect replies and replies sent from Scout move your mastery fastest.'
+    'Keep finding trusted emails, sending clean messages, and earning replies.',
+    'Prospect replies and replies sent from Scout move your mastery fastest.'
   ];
 
   return (
@@ -87,10 +87,10 @@ export function ScoutingLevel({ workspaceId }: { workspaceId?: string | null }) 
           <div className="level-mini-grid">
             <span>Messages <strong>{Number(highlights.deliveredMessages || 0).toLocaleString()}</strong></span>
             <span>Trusted emails <strong>{Number(highlights.trustedEmails || 0).toLocaleString()}</strong></span>
-            <span>Real replies <strong>{Number(highlights.realReplies || 0).toLocaleString()}</strong></span>
+            <span>Replies <strong>{Number(highlights.realReplies || 0).toLocaleString()}</strong></span>
             <span>Your replies <strong>{Number(highlights.manualReplies || 0).toLocaleString()}</strong></span>
           </div>
-          <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>Easy actions help. Real replies and thoughtful replies from Scout help the most. Later stages are intentionally very hard.</p>
+          <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>Easy actions help. Replies and thoughtful replies from Scout help the most. Later stages are intentionally very hard.</p>
         </div>
       ) : null}
     </div>

@@ -303,8 +303,7 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
   const hasAutoBodySignal = autoTerms.some((term) => text.includes(term));
   if (isSelf) return { classification: 'self_message_ignored', replyBucket: 'ignored', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
   if (!sentMatch) return { classification: 'unmatched_inbound', replyBucket: 'unmatched', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
-  if (hasHumanReplySignal) return { classification: 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
-  if (hasAutoHeaderSignal || hasAutoBodySignal) return { classification: 'auto_reply', replyBucket: 'auto_reply', isRealReply: false, isAutoReply: true, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false };
+  // v10.15: protect the user from losing replies. If the inbound message matches a sent outreach and is not a bounce/limit notice, count it as a reply.
   return { classification: 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
 }
 async function findSentMatch(supabase: SupabaseClient<any, any, any>, workspaceId: string, message: NormalizedInbound) {

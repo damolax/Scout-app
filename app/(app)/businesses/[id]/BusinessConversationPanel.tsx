@@ -214,7 +214,7 @@ export default function BusinessConversationPanel({ workspace, business, account
     <div className="grid grid-2">
       <div className="card" style={{ padding: 18 }}>
         <h3>Conversation Timeline</h3>
-        <p className="muted">Real replies, auto replies, delivery failures, blocked notices, and your manual replies are shown separately so the business history is not mixed up.</p>
+        <p className="muted">Replies, delivery failures, blocked notices, and your manual replies are shown clearly so the business history is not mixed up.</p>
         <div className="grid grid-3" style={{ marginBottom: 12 }}>
           <div className="notice"><strong>Last sent:</strong><br />{lastSent ? `${formatDate(lastSent.sent_at)} · ${nice(lastSent.subject)}` : 'No sent message yet.'}</div>
           <div className="notice"><strong>Latest inbound:</strong><br />{latestInbound ? `${formatDate(latestInbound.received_at)} · ${classifyLabel(latestInbound)}` : 'No inbound reply yet.'}</div>
@@ -258,7 +258,7 @@ export default function BusinessConversationPanel({ workspace, business, account
           <tr><th>Reply state</th><td>{nice(business.reply_state || business.last_reply_classification)}</td></tr>
           <tr><th>Last inbound</th><td>{formatDate(business.last_inbound_at)}</td></tr>
           <tr><th>Last auto reply</th><td>{formatDate(business.last_auto_reply_at)}</td></tr>
-          <tr><th>Last real reply</th><td>{formatDate(business.last_real_reply_at)}</td></tr>
+          <tr><th>Last reply</th><td>{formatDate(business.last_real_reply_at)}</td></tr>
           <tr><th>Last manual reply</th><td>{formatDate(business.last_manual_reply_at)}</td></tr>
           <tr><th>Social/profile links</th><td>{socialLinks.length}</td></tr>
         </tbody></table>

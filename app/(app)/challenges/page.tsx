@@ -74,11 +74,11 @@ const trustedEmailSteps = [
 const challenges: Challenge[] = [
   // Only a few quick wins. The rest are meant to stretch users for days, weeks, or months.
   ...milestones('starter-sent', 'First delivery goal', '📨', 'deliveredMessages', [250, 1000], sendSteps, { easy: 250, growth: 1000, boss: 1000 }),
-  ...milestones('starter-replies', 'First real reply goal', '💬', 'realReplies', [1, 5], [
+  ...milestones('starter-replies', 'First reply goal', '💬', 'realReplies', [1, 5], [
     'Send useful emails to the right leads.',
     'Go to Replies later.',
     'Sync replies.',
-    'Only human replies count here. Auto replies do not count.'
+    'Every non-bounce reply counts here so you do not miss useful messages.'
   ], { easy: 1, growth: 5, boss: 5 }),
   ...milestones('starter-trusted', 'First trusted emails', '🔎', 'trustedEmails', [500, 1000], trustedEmailSteps, { easy: 500, growth: 1000, boss: 1000 }),
   ...milestones('starter-gmail', 'Connect Gmail accounts', '📮', 'gmailAccounts', [1, 5], [
@@ -102,18 +102,18 @@ const challenges: Challenge[] = [
     'Keep Scout open while sending.'
   ], { easy: 0, growth: 10000, boss: 50000 }),
 
-  // Real replies. Auto replies are removed from challenges.
-  ...milestones('real-replies-today', 'Get real replies in one day', '🔥', 'realRepliesToday', [10, 20, 30, 50, 100], [
+  // Replies. Auto replies are removed from challenges.
+  ...milestones('real-replies-today', 'Get replies in one day', '🔥', 'realRepliesToday', [10, 20, 30, 50, 100], [
     'Send useful messages to a clean list.',
     'Check Replies after sending.',
     'Sync replies.',
-    'Only human replies count here.'
+    'Every non-bounce reply counts here.'
   ], { easy: 0, growth: 30, boss: 100 }),
-  ...milestones('real-replies', 'Get real replies', '🏆', 'realReplies', [10, 20, 30, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000], [
+  ...milestones('real-replies', 'Get replies', '🏆', 'realReplies', [10, 20, 30, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000], [
     'Send useful emails to the right leads.',
     'Keep your message simple and specific.',
     'Go to Replies and sync replies.',
-    'Auto replies do not count here.'
+    'Bounces and no-inbox messages do not count here.'
   ], { easy: 0, growth: 100, boss: 2500 }),
 
   // Auto Scout and email quality.
@@ -136,7 +136,7 @@ const challenges: Challenge[] = [
     'Go to Templates.',
     'Create clear first-message templates.',
     'Create follow-up templates.',
-    'Create reply templates for real replies.'
+    'Create reply templates for prospect replies.'
   ], { easy: 0, growth: 50, boss: 250 }),
 
   // Follow-up and response workflow.
@@ -148,7 +148,7 @@ const challenges: Challenge[] = [
   ], { easy: 0, growth: 5000, boss: 25000 }),
   ...milestones('manual-replies', 'Reply to prospects from Scout', '✉️', 'manualReplies', [1, 5, 10, 20, 50, 100, 250, 500, 1000, 5000], [
     'Go to Replies.',
-    'Open a real prospect reply.',
+    'Open a prospect reply.',
     'Choose or write a reply message.',
     'Send the reply from Scout.'
   ], { easy: 1, growth: 50, boss: 500 }),

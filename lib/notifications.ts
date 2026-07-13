@@ -47,7 +47,7 @@ export async function createAppNotification(supabase: SupabaseClient<any, any, a
 
 export function notificationTitleForInbound(classification: string, fromEmail: string, businessName?: string | null) {
   const name = businessName || fromEmail || 'A lead';
-  if (classification === 'real_reply') return `New real reply from ${name}`;
+  if (classification === 'real_reply') return `New reply from ${name}`;
   if (classification === 'auto_reply') return `Auto reply from ${name}`;
   if (classification === 'no_inbox') return `No inbox detected for ${name}`;
   if (classification === 'message_blocked') return `Message blocked for ${name}`;

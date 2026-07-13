@@ -2716,9 +2716,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <h3>Due Follow-ups — 72h no real response</h3>
+          <h3>Due Follow-ups — 72h no reply</h3>
           <p className="muted">
-            These are people you emailed more than 72 hours ago who did not send a real human reply. Send them now when you are ready.
+            These are people you emailed more than 72 hours ago who did not send a reply. Send them now when you are ready.
           </p>
           <div className="notice" style={{ marginBottom: 12 }}>
             Due now: <strong>{dueFollowUps.length.toLocaleString()}</strong> contact(s). Choose the follow-up template here, then send once.

@@ -65,7 +65,7 @@ export default function ChallengeBoard({ challenges, metrics }: Props) {
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Delivered messages</div><div className="num">{Number(metrics.deliveredMessages || 0).toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Trusted emails</div><div className="num">{Number(metrics.trustedEmails || 0).toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Real replies</div><div className="num">{Number(metrics.realReplies || 0).toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Replies</div><div className="num">{Number(metrics.realReplies || 0).toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Replies you sent</div><div className="num">{Number(metrics.manualReplies || 0).toLocaleString()}</div></div>
       </div>
 

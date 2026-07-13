@@ -110,7 +110,7 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setMessage(defaultBody(type));
     setAttachments([]);
     setAttachmentStatus('');
-    setPurpose(type === 'reply' ? 'Use only when replying from a business conversation.' : type === 'follow_up' ? 'Use for businesses with inbox but no real reply yet.' : 'Use only for first outreach messages.');
+    setPurpose(type === 'reply' ? 'Use only when replying from a business conversation.' : type === 'follow_up' ? 'Use for businesses with inbox but no reply yet.' : 'Use only for first outreach messages.');
     setReplyContext(type === 'reply' ? 'Useful after a real buyer reply or an auto-responder follow-up.' : '');
   }
 

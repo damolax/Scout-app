@@ -72,20 +72,20 @@ export default async function DeliverabilityPage() {
     <div className="stack">
       <div>
         <h2>Deliverability Dashboard</h2>
-        <p className="muted">v8.28 separates human replies, auto replies, no-inbox/bounce results, blocked messages, Gmail limit notices, and seed inbox placement. Use this page to know which sender should be paused or reduced before a large run.</p>
+        <p className="muted">Use this page to see inbox problems, blocked messages, Gmail limit notices, and sender risk before a large run.</p>
       </div>
 
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Sent · 7 days</div><div className="num">{totalSent.toLocaleString()}</div><p className="muted">Tracked sent messages.</p></div>
         <div className="card kpi"><div className="title">No Inbox / Bounce</div><div className="num">{totalNoInbox.toLocaleString()}</div><p className="muted">Bounce rate: {pct(totalNoInbox, totalSent)}</p></div>
-        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{totalRealReplies.toLocaleString()}</div><p className="muted">Human reply rate: {pct(totalRealReplies, totalSent)}</p></div>
+        <div className="card kpi"><div className="title">Replies</div><div className="num">{totalRealReplies.toLocaleString()}</div><p className="muted">Reply rate: {pct(totalRealReplies, totalSent)}</p></div>
         <div className="card kpi"><div className="title">Seed Spam Hits</div><div className="num">{totalSpamSeeds.toLocaleString()}</div><p className="muted">Blocked notices: {totalBlocked.toLocaleString()}</p></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Sender Risk</h3>
         <p className="muted">No-inbox and blocked messages do not count as replies. Auto replies are tracked separately. A sender is risky if it gets Gmail limit notices, blocked messages, seed inbox spam placement, or high no-inbox/bounce rate.</p>
-        <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Status</th><th>Risk</th><th>Sent 7d</th><th>Sent 24h</th><th>No Inbox</th><th>Blocked</th><th>Real Replies</th><th>Auto Replies</th><th>Seed Spam</th><th>Action</th></tr></thead><tbody>
+        <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Status</th><th>Risk</th><th>Sent 7d</th><th>Sent 24h</th><th>No Inbox</th><th>Blocked</th><th>Replies</th><th>Auto-Like</th><th>Seed Spam</th><th>Action</th></tr></thead><tbody>
           {bySender.map((row) => <tr key={row.account.id}>
             <td><strong>{row.email}</strong><br /><span className="muted">Run cap: {row.account.default_run_limit || row.account.daily_limit || '-'}</span></td>
             <td>{row.account.status || '-'}</td>

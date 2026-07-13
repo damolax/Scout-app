@@ -89,12 +89,12 @@ export async function GET(request: NextRequest) {
   const unifiedRealReplies = replyMetricsAll.realReplies;
   const unifiedRealRepliesToday = replyMetricsToday.realReplies;
 
-  // v10.14: level, dashboard, challenges, and replies all use the same unified real-reply metric.
+  // v10.15: level, dashboard, challenges, and replies all use the same one reply metric.
 
   // v10.11: Make levels genuinely hard. Scouting/import volume alone should
   // not push someone into higher mastery. Rough rule: 3,000 scouted leads with
   // little/no reply activity should feel like Rookie, not Strategist.
-  // Real human replies and replies sent from Scout still matter the most,
+  // Replies and replies sent from Scout still matter the most,
   // but later stages require sustained volume and pipeline activity.
   const points = Math.round(
     deliveredMessages * 0.25 +
@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
       unlocked: points >= stage.min
     })),
     hints: [
-      unifiedRealReplies < 10 ? 'Get more human replies. Real replies move your level the most.' : null,
+      unifiedRealReplies < 10 ? 'Get more prospect replies. Replies move your level the most.' : null,
       manualReplies < Math.max(3, Math.floor(unifiedRealReplies * 0.25)) ? 'Reply to prospects from inside Scout. That shows real pipeline work.' : null,
       trustedEmails < 25_000 ? 'Use Auto Scout to build more trusted contact emails, but volume alone will not unlock high stages.' : null,
       deliveredMessages < 25_000 ? 'Send more clean messages from healthy Gmail accounts.' : null,

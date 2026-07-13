@@ -2135,7 +2135,7 @@ export default function EmailScoutClient({
           <h3>Follow-ups</h3>
           <p className="muted">
             Contacts become due 72 hours after a sent message when there is no
-            real reply and no no-inbox/bounce record.
+            reply and no no-inbox/bounce record.
           </p>
           <div className="grid grid-2">
             <div>

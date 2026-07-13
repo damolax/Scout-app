@@ -202,8 +202,7 @@ function classify(message: NormalizedMessage) {
   ];
   if (limitTerms.some((term) => text.includes(term))) return { classification: 'gmail_limit_notice', isReal: false, noInbox: false };
   if (bounceTerms.some((term) => text.includes(term))) return { classification: 'no_inbox_or_bounce', isReal: false, noInbox: true };
-  if (humanReplyTerms.some((term) => text.includes(term))) return { classification: 'real_reply', isReal: true, noInbox: false };
-  if (autoTerms.some((term) => text.includes(term))) return { classification: 'auto_reply_ignored', isReal: false, noInbox: false };
+  // v10.15: do not risk hiding useful replies. Everything inbound that is not a bounce/limit notice counts as a reply.
   return { classification: 'real_reply', isReal: true, noInbox: false };
 }
 
@@ -302,7 +301,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, boolean>>({});
   const [syncLimit, setSyncLimit] = useState(500);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('Native Gmail reply sync is ready. It separates real replies, auto replies, no-inbox failures, message-blocked notices, and Gmail limit notices so response analytics stay clean.');
+  const [status, setStatus] = useState('Reply sync is ready. Scout will save every non-bounce inbound message as a reply so you do not miss anything.');
   const [error, setError] = useState('');
   const [lastStats, setLastStats] = useState<SyncStats>({ scanned: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, ignored: 0, inserted: 0, errors: [] });
   const [openedReply, setOpenedReply] = useState<ReplyRow | null>(null);
@@ -471,7 +470,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
         }
       }
       setLastStats(stats);
-      setStatus(`Native Gmail sync finished. Scanned ${stats.scanned}, saved ${stats.inserted}, real replies ${stats.realReplies}, auto replies ${stats.autoReplies}, no-inbox ${stats.noInbox}, blocked ${stats.blocked}, bounces ${stats.bounced}, Gmail limit notices ${stats.limitNotices}, ignored/unmatched ${stats.ignored}.`);
+      setStatus(`Reply sync finished. Scanned ${stats.scanned}, saved ${stats.inserted}, replies ${stats.realReplies + stats.autoReplies}, no-inbox ${stats.noInbox}, blocked ${stats.blocked}, bounces ${stats.bounced}, Gmail limit notices ${stats.limitNotices}.`);
       if (stats.errors.length) setError(stats.errors.join('\n'));
       await loadAll();
     } catch (err) {
@@ -510,18 +509,17 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
 
   return (
     <div className="stack">
-      <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Sent Tracked</div><div className="num">{sentCount.toLocaleString()}</div><p className="muted">All Gmail-accepted sent rows in the database. The table below only shows recent rows.</p></div>
-        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{trackingCounts.realReplies.toLocaleString()}</div><p className="muted">One official total used across Dashboard, Replies, and Scouting Level.</p></div>
-        <div className="card kpi"><div className="title">Auto Replies</div><div className="num">{autoReplies.length.toLocaleString()}</div><p className="muted">Tickets, confirmations, out-of-office, and automated replies.</p></div>
-        <div className="card kpi"><div className="title">No Inbox / Blocked</div><div className="num">{trackingCounts.noInboxBlocked.toLocaleString()}</div><p className="muted">Bounced, address-not-found, and blocked notices.</p></div>
+      <div className="grid grid-3">
+        <div className="card kpi"><div className="title">Sent Tracked</div><div className="num">{sentCount.toLocaleString()}</div><p className="muted">Messages Scout knows were accepted by Gmail.</p></div>
+        <div className="card kpi"><div className="title">Replies</div><div className="num">{trackingCounts.realReplies.toLocaleString()}</div><p className="muted">Every non-bounce inbound reply. This same number is used everywhere.</p></div>
+        <div className="card kpi"><div className="title">Inbox Problems</div><div className="num">{trackingCounts.noInboxBlocked.toLocaleString()}</div><p className="muted">Bounced, address-not-found, and blocked notices.</p></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <div className="actions" style={{ justifyContent: 'space-between' }}>
           <div>
             <h3 style={{ margin: 0 }}>Reply Sync</h3>
-            <p className="muted" style={{ marginBottom: 0 }}>Native Gmail sync runs from the app runner and can also be triggered here. Real human replies move businesses to Responded. Auto replies, bounces, blocked messages, and Gmail limit notices are tracked separately and do not count as real replies.</p>
+            <p className="muted" style={{ marginBottom: 0 }}>Click sync to check Gmail. Scout saves every non-bounce inbound message as a reply, so useful messages are not hidden by strict classification.</p>
           </div>
           <button className="btn secondary" onClick={() => loadAll().catch((err) => setError(formatError(err)))} disabled={busy}>Refresh</button>
         </div>
@@ -543,7 +541,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
             <input className="input" type="number" min={1} max={500} value={syncLimit} onChange={(event) => setSyncLimit(Number(event.target.value || 100))} />
             <div className="actions" style={{ marginTop: 12 }}>
               <button className="btn" disabled={busy} onClick={syncReplies}>{busy ? 'Syncing...' : 'Sync replies + bounces'}</button>
-              {replyRows.length ? <button className="btn secondary" type="button" onClick={() => downloadCsv('scout-real-replies.csv', realReplies as unknown as Array<Record<string, unknown>>)}>Export real replies</button> : null}
+              {replyRows.length ? <button className="btn secondary" type="button" onClick={() => downloadCsv('scout-replies.csv', realReplies as unknown as Array<Record<string, unknown>>)}>Export replies</button> : null}
               {noInboxRows.length ? <button className="btn secondary" type="button" onClick={() => downloadCsv('scout-no-inbox.csv', noInboxRows as unknown as Array<Record<string, unknown>>)}>Export no inbox</button> : null}
             </div>
           </div>
@@ -553,49 +551,49 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
 
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Last Sync Scanned</div><div className="num">{lastStats.scanned.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Last Sync Real</div><div className="num">{lastStats.realReplies.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Last Sync Auto</div><div className="num">{lastStats.autoReplies.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Last Sync Replies</div><div className="num">{lastStats.realReplies.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Last Sync Auto-Like</div><div className="num">{lastStats.autoReplies.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Failures / Limits</div><div className="num">{(lastStats.noInbox + lastStats.blocked + lastStats.bounced + lastStats.limitNotices).toLocaleString()}</div></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Template Response Tracking</h3>
-        <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Real Replies</th><th>Auto Replies</th><th>Failures</th><th>Emails Per Reply</th></tr></thead><tbody>
+        <h3>Template Reply Tracking</h3>
+        <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Replies</th><th>Auto-Like</th><th>Failures</th><th>Emails Per Reply</th></tr></thead><tbody>
           {templatePerformance().map((row) => <tr key={row.template.id}><td>{row.template.name}</td><td>{row.sent}</td><td>{row.realReplies}</td><td>{row.auto}</td><td>{row.failures}</td><td>{row.perReply}</td></tr>)}
           {!templates.length ? <tr><td colSpan={6} className="muted">No templates yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Sender Response Tracking</h3>
-        <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Status</th><th>Sent</th><th>Real Replies</th><th>Auto Replies</th><th>No Inbox</th><th>Emails Per Reply</th></tr></thead><tbody>
+        <h3>Sender Reply Tracking</h3>
+        <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Status</th><th>Sent</th><th>Replies</th><th>Auto-Like</th><th>No Inbox</th><th>Emails Per Reply</th></tr></thead><tbody>
           {senderPerformance().map((row) => <tr key={row.account.id}><td>{row.account.email}</td><td>{row.account.status}</td><td>{row.sent}</td><td>{row.realReplies}</td><td>{row.auto}</td><td>{row.noInbox}</td><td>{row.perReply}</td></tr>)}
           {!accounts.length ? <tr><td colSpan={7} className="muted">No senders yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Real Replies</h3>
-        <p className="muted">Showing {realReplies.length.toLocaleString()} recent real replies on this page. Official total: {trackingCounts.realReplies.toLocaleString()}.</p>
+        <h3>Replies</h3>
+        <p className="muted">Showing {realReplies.length.toLocaleString()} recent replies on this page. Official total: {trackingCounts.realReplies.toLocaleString()}.</p>
         <p className="muted">Click Read to see the exact message the prospect sent. Click Open to reply from the business page.</p>
         <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Template</th><th>Received</th><th>Message</th></tr></thead><tbody>
           {realReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{templates.find((t) => t.id === r.template_id)?.name || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td><td><button className="btn secondary mini" type="button" onClick={() => setOpenedReply(r)}>Read</button></td></tr>)}
-          {!realReplies.length ? <tr><td colSpan={7} className="muted">No real replies yet.</td></tr> : null}
+          {!realReplies.length ? <tr><td colSpan={7} className="muted">No replies yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Auto Replies</h3>
-        <p className="muted">Auto replies are real inbound messages, but they are not human responses. If the same business later sends a human reply, Scout moves it to Real Reply automatically.</p>
+        <h3>Auto-Like Messages</h3>
+        <p className="muted">These messages look automated. They still count in the main Replies number, but they are shown here so you can understand what came in.</p>
         <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Received</th></tr></thead><tbody>
           {autoReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
-          {!autoReplies.length ? <tr><td colSpan={5} className="muted">No auto replies yet.</td></tr> : null}
+          {!autoReplies.length ? <tr><td colSpan={5} className="muted">No auto-like messages yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Delivery / Limit Signals</h3>
-        <p className="muted">No-inbox, bounces, message-blocked, and limit notices are not counted as real replies.</p>
+        <p className="muted">No-inbox, bounces, message-blocked, and limit notices are not counted as replies.</p>
         <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Classification</th><th>Received</th></tr></thead><tbody>
           {[...deliverySignals, ...limitSignals].slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.classification || r.reply_bucket || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
           {![...deliverySignals, ...limitSignals].length ? <tr><td colSpan={5} className="muted">No delivery or limit signals yet.</td></tr> : null}

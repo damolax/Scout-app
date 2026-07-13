@@ -61,7 +61,7 @@ export async function GET() {
   const rows = [
     { metric: 'People scouted', today: scoutedToday, yesterday: scoutedYesterday, change: pct(scoutedToday, scoutedYesterday) },
     { metric: 'Messages sent', today: sentToday, yesterday: sentYesterday, change: pct(sentToday, sentYesterday) },
-    { metric: 'Real replies', today: realRepliesToday, yesterday: realRepliesYesterday, change: pct(realRepliesToday, realRepliesYesterday) },
+    { metric: 'Replies', today: realRepliesToday, yesterday: realRepliesYesterday, change: pct(realRepliesToday, realRepliesYesterday) },
     { metric: 'Auto replies', today: autoRepliesToday, yesterday: autoRepliesYesterday, change: pct(autoRepliesToday, autoRepliesYesterday) },
     { metric: 'No inbox / blocked', today: badToday, yesterday: badYesterday, change: pct(badToday, badYesterday) },
     { metric: 'Reply rate', today: sentToday ? `${((realRepliesToday / sentToday) * 100).toFixed(2)}%` : '0%', yesterday: sentYesterday ? `${((realRepliesYesterday / sentYesterday) * 100).toFixed(2)}%` : '0%', change: pct(sentToday ? realRepliesToday / sentToday : 0, sentYesterday ? realRepliesYesterday / sentYesterday : 0) }

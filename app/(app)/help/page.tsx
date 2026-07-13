@@ -26,7 +26,7 @@ const pages = [
     items: [
       ["Ready to send", "Number of leads Scout can contact now."],
       ["Connected senders", "How many Gmail accounts are ready to send."],
-      ["Due follow-ups", "People you emailed more than 72 hours ago who did not send a real human reply."],
+      ["Due follow-ups", "People you emailed more than 72 hours ago who did not send a reply."],
       ["Audience", "Choose the group of leads you want to email."],
       ["Location from uploaded list", "Choose a country from the leads you uploaded. This helps you send by country."],
       ["Template category", "Choose the type of email you want to send."],
@@ -50,7 +50,7 @@ const pages = [
   {
     title: "Replies",
     items: [
-      ["Real replies", "Messages from real people."],
+      ["Replies", "Messages Scout detected from prospects. Bounces and no-inbox notices do not count."],
       ["Auto replies", "Automatic messages like out-of-office, ticket created, or mailbox not monitored."],
       ["No inbox / blocked", "Emails that failed or should not be contacted again."],
       ["Conversation", "Open a lead to see what was sent and what they replied."],
@@ -60,8 +60,8 @@ const pages = [
     title: "Templates",
     items: [
       ["Initial template", "Used for first emails only."],
-      ["Follow-up template", "Used for people who already got your first email but did not send a real reply."],
-      ["Reply template", "Used only when replying to a real response."],
+      ["Follow-up template", "Used for people who already got your first email but did not send a reply."],
+      ["Reply template", "Used only when replying to a reply."],
       ["Subject", "The email title."],
       ["Body", "The email message."],
       ["Fields like {name}", "Scout replaces these with the lead name, company, website, and other details."],
@@ -143,7 +143,7 @@ export default function HelpPage() {
           <li>Pick audience, country, template, sender, and count.</li>
           <li>Click Send Now.</li>
           <li>Check Replies later.</li>
-          <li>When a real person replies, open the reply and answer from Scout.</li>
+          <li>When a prospect replies, open the reply and answer from Scout.</li>
           <li>After 72 hours, go to Due Follow-ups, choose the follow-up template, and click Send Due Follow-ups Now.</li>
         </ol>
       </div>

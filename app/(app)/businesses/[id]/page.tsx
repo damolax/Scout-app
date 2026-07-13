@@ -123,7 +123,7 @@ export default async function BusinessDetailPage({ params }: { params: Promise<{
           <p className="muted">Compact record of sent messages and classified inbound messages. Use the full conversation panel above to respond.</p>
           <div className="table-wrap"><table><thead><tr><th>Type</th><th>Email</th><th>Subject</th><th>Date</th></tr></thead><tbody>
             {(sentRes.data || []).map((row: any) => <tr key={`s-${row.id}`}><td>Sent</td><td>{row.to_email}</td><td>{row.subject}</td><td>{new Date(row.sent_at).toLocaleString()}</td></tr>)}
-            {(repliesRes.data || []).map((row: any) => <tr key={`r-${row.id}`}><td>{row.is_real_reply ? 'Real reply' : row.is_auto_reply ? 'Auto reply' : row.classification || 'Other inbound'}</td><td>{row.from_email}</td><td>{row.subject}</td><td>{new Date(row.received_at).toLocaleString()}</td></tr>)}
+            {(repliesRes.data || []).map((row: any) => <tr key={`r-${row.id}`}><td>{row.is_real_reply ? 'Reply' : row.is_auto_reply ? 'Auto reply' : row.classification || 'Other inbound'}</td><td>{row.from_email}</td><td>{row.subject}</td><td>{new Date(row.received_at).toLocaleString()}</td></tr>)}
             {!(sentRes.data || []).length && !(repliesRes.data || []).length ? <tr><td colSpan={4} className="muted">No messages or replies recorded yet.</td></tr> : null}
           </tbody></table></div>
         </div>

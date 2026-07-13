@@ -100,7 +100,7 @@ export default function NotificationsClient({ workspace }: { workspace: Workspac
         <div>
           <div className="eyebrow">Scout v8.33</div>
           <h1>Notifications</h1>
-          <p>Persistent list of real replies, auto replies, bounces, blocked-message notices, Gmail limits, and important app run signals. This is not just a popup; it stays here until you read it.</p>
+          <p>Persistent list of replies, auto-like messages, bounces, blocked-message notices, Gmail limits, and important app run signals. This is not just a popup; it stays here until you read it.</p>
         </div>
         <div className="actions">
           <button className="btn secondary" type="button" onClick={load} disabled={loading}><RefreshCw size={16} /> Refresh</button>
@@ -112,7 +112,7 @@ export default function NotificationsClient({ workspace }: { workspace: Workspac
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Unread</div><div className="num">{unread.toLocaleString()}</div><p>Needs attention</p></div>
         <div className="card kpi"><div className="title">Recent</div><div className="num">{rows.length.toLocaleString()}</div><p>Last 200 notifications</p></div>
-        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{rows.filter((r) => r.type === 'real_reply').length.toLocaleString()}</div><p>In this list</p></div>
+        <div className="card kpi"><div className="title">Replies</div><div className="num">{rows.filter((r) => r.type === 'real_reply').length.toLocaleString()}</div><p>In this list</p></div>
         <div className="card kpi"><div className="title">Delivery Issues</div><div className="num">{rows.filter((r) => /(no_inbox|blocked|bounce)/i.test(r.type)).length.toLocaleString()}</div><p>Clean before more sends</p></div>
       </div>
 
