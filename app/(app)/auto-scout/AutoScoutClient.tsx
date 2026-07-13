@@ -95,17 +95,19 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+const AUTO_SCOUT_QUEUE_MAX = 10000;
+const AUTO_SCOUT_BATCH_SIZE = 20;
+const AUTO_SCOUT_SPEED = 4;
+const AUTO_SCOUT_ROUNDS = 3;
+
 export default function AutoScoutClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const stopRef = useRef(false);
-  const [queueLimit, setQueueLimit] = useState(5000);
-  const [batchSize, setBatchSize] = useState(100);
-  const [concurrency, setConcurrency] = useState(20);
+  const [queueLimit, setQueueLimit] = useState(500);
   const [stats, setStats] = useState<ScoutStats>({});
   const [recentJobs, setRecentJobs] = useState<JobRow[]>([]);
   const [results, setResults] = useState<Array<Record<string, unknown>>>([]);
   const [message, setMessage] = useState('Ready. Click Start Auto Scout to find missing emails.');
-  const [workerCycles, setWorkerCycles] = useState(8);
   const [workerResult, setWorkerResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
@@ -129,10 +131,11 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
         return { id, email, businessName, evidence, quality, trustTone: trust.tone, status, pagesChecked, reason };
       })
       .filter((row) => row.email || row.status === 'failed' || row.status === 'no_email_found' || row.reason)
-      .slice(0, 120);
+      .slice(0, 60);
   }, [recentJobs, results]);
 
   async function loadStats() {
+    try {
     const next: ScoutStats = {};
     await Promise.all(['queued', 'running', 'done', 'failed', 'cancelled'].map(async (status) => {
       const { count } = await supabase.from('email_research_jobs').select('id', { count: 'exact', head: true }).eq('workspace_id', workspace.id).eq('status', status);
@@ -169,8 +172,12 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       .select('id,status,attempts,last_error,result,created_at,updated_at,started_at,finished_at,businesses(id,name,email,website,domain,category,location,status)')
       .eq('workspace_id', workspace.id)
       .order('updated_at', { ascending: false })
-      .limit(80);
+      .limit(40);
     setRecentJobs((data || []) as JobRow[]);
+    } catch (error) {
+      console.warn('Auto Scout refresh failed', error);
+      setMessage((current) => current.toLowerCase().includes('failed') ? current : 'Auto Scout page is still open. Refresh had a small problem, but you can continue.');
+    }
   }
 
   useEffect(() => {
@@ -203,16 +210,16 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   }
 
   async function runOneBatch() {
-    const safeBatch = Math.max(1, Math.min(500, batchSize));
-    const safeConcurrency = Math.max(1, Math.min(50, concurrency));
+    const safeBatch = AUTO_SCOUT_BATCH_SIZE;
+    const safeConcurrency = AUTO_SCOUT_SPEED;
     emitLiveActivity({ kind: 'auto_scout', status: 'checking', title: 'Auto Scout checking', message: `Checking up to ${safeBatch.toLocaleString()} queued website(s) for emails.` });
     const res = await fetch(`/api/research/run-once?limit=${safeBatch}&concurrency=${safeConcurrency}&workspaceId=${encodeURIComponent(workspace.id)}`, { method: 'POST' });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.success) throw new Error(json.error || 'Run request failed.');
     const newResults = Array.isArray(json.results) ? json.results : [];
-    setResults((current) => [...newResults, ...current].slice(0, 300));
+    setResults((current) => [...newResults, ...current].slice(0, 80));
     const found = newResults.filter((r: any) => r.status === 'found' || r.email).length;
-    for (const item of newResults.slice(0, 8)) {
+    for (const item of newResults.slice(0, 5)) {
       emitLiveActivity({
         kind: 'auto_scout',
         status: item.email ? 'found' : String(item.status || 'checked'),
@@ -228,6 +235,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   }
 
   async function startAutoScout() {
+    if (busy || running) return;
     stopRef.current = false;
     setBusy(true);
     setRunning(true);
@@ -252,7 +260,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       setMessage(`Auto Scout queued ${totalQueued.toLocaleString()} new job(s). Starting live checks now...`);
       emitLiveActivity({ kind: 'auto_scout', status: 'queued', title: 'Auto Scout queued', message: `Queued ${totalQueued.toLocaleString()} new job(s).` });
 
-      const maxCycles = Math.max(1, Math.min(50, workerCycles));
+      const maxCycles = AUTO_SCOUT_ROUNDS;
       for (let cycle = 1; cycle <= maxCycles; cycle += 1) {
         if (stopRef.current) break;
         setMessage(`Auto Scout running live batch ${cycle.toLocaleString()} of ${maxCycles.toLocaleString()}...`);
@@ -290,7 +298,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   async function runBatchManually() {
     setBusy(true);
     try {
-      setMessage(`Running one backend batch of up to ${batchSize.toLocaleString()} queued job(s)...`);
+      setMessage(`Checking one safe group of up to ${AUTO_SCOUT_BATCH_SIZE.toLocaleString()} queued website(s)...`);
       const batch = await runOneBatch();
       setMessage(`One batch complete. Processed ${batch.processed.toLocaleString()} job(s); found ${batch.found.toLocaleString()} email candidate(s).`);
       await loadStats();
@@ -349,8 +357,8 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     setBusy(true);
     setWorkerResult(null);
     try {
-      setMessage(`Running extra Auto Scout batches for up to ${workerCycles} cycle(s). Keep this page open while it works.`);
-      emitLiveActivity({ kind: 'auto_scout', status: 'worker_running', title: 'Auto Scout running', message: `Running up to ${workerCycles} live cycle(s).` });
+      setMessage(`Running extra Auto Scout batches. Keep this page open while it works.`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'worker_running', title: 'Auto Scout running', message: `Running safe live cycles.` });
       const res = await fetch('/api/research/run-worker', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -358,9 +366,9 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
           workspaceId: workspace.id,
           autoEnqueue: true,
           enqueueLimit: queueLimit,
-          cycles: workerCycles,
-          batchSize,
-          concurrency
+          cycles: AUTO_SCOUT_ROUNDS,
+          batchSize: AUTO_SCOUT_BATCH_SIZE,
+          concurrency: AUTO_SCOUT_SPEED
         })
       });
       const json = await res.json().catch(() => ({}));
@@ -414,7 +422,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
         <div className="actions" style={{ justifyContent: 'space-between', gap: 12 }}>
           <div>
             <h3 style={{ margin: 0 }}>Find missing emails</h3>
-            <p className="muted" style={{ margin: '6px 0 0' }}>Click Start. Stop appears only while Scout is working. Results appear below and trusted emails are saved to your leads.</p>
+            <p className="muted" style={{ margin: '6px 0 0' }}>Choose how many leads to queue, then click Start. Scout uses the safest speed automatically. Results appear below and trusted emails are saved to your leads.</p>
           </div>
           <div className="actions">
             {running ? <button className="btn secondary" disabled={!running} onClick={stopAutoScout}>Stop</button> : null}
@@ -423,19 +431,12 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
         </div>
 
         <div className="choice-row" style={{ marginTop: 14 }}>
-          <label className="label" style={{ margin: 0 }}>How many to queue</label>
-          <input className="input" style={{ width: 150 }} type="number" min={1} max={50000} value={queueLimit} onChange={(e) => setQueueLimit(Math.max(1, Math.min(50000, Number(e.target.value) || 5000)))} />
-          <label className="label" style={{ margin: 0 }}>Check per batch</label>
-          <input className="input" style={{ width: 120 }} type="number" min={1} max={500} value={batchSize} onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))} />
-          <label className="label" style={{ margin: 0 }}>Speed</label>
-          <input className="input" style={{ width: 95 }} type="number" min={1} max={50} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(50, Number(e.target.value) || 20)))} />
-          <label className="label" style={{ margin: 0 }}>Rounds</label>
-          <input className="input" style={{ width: 95 }} type="number" min={1} max={25} value={workerCycles} onChange={(e) => setWorkerCycles(Math.max(1, Math.min(25, Number(e.target.value) || 8)))} />
+          <label className="label" style={{ margin: 0 }}>How many leads should Scout queue?</label>
+          <input className="input" style={{ width: 160 }} type="number" min={1} max={AUTO_SCOUT_QUEUE_MAX} value={queueLimit} onChange={(e) => setQueueLimit(Math.max(1, Math.min(AUTO_SCOUT_QUEUE_MAX, Number(e.target.value) || 500)))} />
+          <span className="muted">Max {AUTO_SCOUT_QUEUE_MAX.toLocaleString()} per start. Scout handles speed automatically.</span>
         </div>
 
         <div className="actions" style={{ marginTop: 14 }}>
-          <button className="btn secondary" disabled={busy} onClick={enqueuePendingNoEmail}>Prepare missing-email leads</button>
-          <button className="btn secondary" disabled={busy || running} onClick={runBatchManually}>Check one group</button>
           <button className="btn secondary" disabled={busy || running} onClick={loadStats}>Refresh</button>
           <button className="btn secondary" disabled={busy || running} onClick={quarantineFalsePositiveEmails}>Move bad emails to review</button>
           <button className="btn danger" disabled={busy || running} onClick={deleteInvalidEmailValues}>Delete invalid emails</button>

@@ -3,6 +3,8 @@
 import { Trophy } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+type LevelStage = { name: string; stageNumber: number; unlocked: boolean };
+
 type LevelData = {
   success?: boolean;
   points?: number;
@@ -11,6 +13,8 @@ type LevelData = {
   progress?: number;
   current?: { name: string; min: number };
   next?: { name: string; min: number } | null;
+  stages?: LevelStage[];
+  hints?: string[];
   highlights?: Record<string, number>;
 };
 
@@ -34,8 +38,14 @@ export function ScoutingLevel({ workspaceId }: { workspaceId?: string | null }) 
   if (!workspaceId) return null;
   const stageName = data?.current?.name || 'Novice';
   const progress = Number(data?.progress || 0);
-  const points = Number(data?.points || 0);
   const highlights = data?.highlights || {};
+  const stages = data?.stages || [
+    'Novice', 'Rookie', 'Apprentice', 'Scout', 'Pro Scout', 'Strategist', 'Operator', 'Rainmaker', 'Commander', 'Master Scout', 'Grandmaster', 'Ultimate'
+  ].map((name, index) => ({ name, stageNumber: index + 1, unlocked: index === 0 }));
+  const hints = data?.hints?.length ? data.hints : [
+    'Keep finding trusted emails, sending clean messages, and earning real replies.',
+    'Real prospect replies and replies sent from Scout move your mastery fastest.'
+  ];
 
   return (
     <div className="scouting-level-wrap">
@@ -56,14 +66,31 @@ export function ScoutingLevel({ workspaceId }: { workspaceId?: string | null }) 
             <button className="btn secondary mini" type="button" onClick={() => setOpen(false)}>Close</button>
           </div>
           <div className="progress-track" style={{ marginTop: 12 }}><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
-          <p className="muted" style={{ fontSize: 12 }}>Points grow when you find trusted emails, send messages, get real replies, reply to prospects, connect senders, create templates, and keep working inside Scout. The next stage is hidden so it stays fun.</p>
+          <p className="muted" style={{ fontSize: 12 }}>You can see the level ladder, but the exact score needed for the next stage is hidden. Use the hints below and keep doing real scouting work.</p>
+
+          <div className="level-stage-list" aria-label="Scouting level ladder">
+            {stages.map((stage) => (
+              <span key={stage.name} className={`level-stage-pill ${stage.unlocked ? 'unlocked' : 'locked'} ${stage.name === stageName ? 'current' : ''}`}>
+                <strong>{stage.stageNumber}</strong>
+                {stage.unlocked ? '✓' : '🔒'} {stage.name}
+              </span>
+            ))}
+          </div>
+
+          <div className="level-hint-box">
+            <strong>Hints to grow faster</strong>
+            <ul>
+              {hints.slice(0, 4).map((hint) => <li key={hint}>{hint}</li>)}
+            </ul>
+          </div>
+
           <div className="level-mini-grid">
             <span>Messages <strong>{Number(highlights.deliveredMessages || 0).toLocaleString()}</strong></span>
             <span>Trusted emails <strong>{Number(highlights.trustedEmails || 0).toLocaleString()}</strong></span>
             <span>Real replies <strong>{Number(highlights.realReplies || 0).toLocaleString()}</strong></span>
             <span>Your replies <strong>{Number(highlights.manualReplies || 0).toLocaleString()}</strong></span>
           </div>
-          <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>Total points: {points.toLocaleString()}</p>
+          <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>Easy actions help. Real replies and thoughtful replies from Scout help the most. Later stages are intentionally very hard.</p>
         </div>
       ) : null}
     </div>
