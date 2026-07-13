@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-17-multilingual-real-replies",
-  "version": "10.17.0",
+  "name": "scout-app-v10-20-autoscout-queue-clarity",
+  "version": "10.20.0",
   "private": true,
   "scripts": {
     "dev": "next dev",

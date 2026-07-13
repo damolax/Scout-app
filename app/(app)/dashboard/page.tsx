@@ -289,6 +289,23 @@ async function fetchPeriodMessages(workspaceId: string, period: PeriodDefinition
   };
 }
 
+
+async function safeMissingEmailCount(workspaceId: string) {
+  try {
+    const supabase = await createClient();
+    const { count, error } = await supabase
+      .from('businesses')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
+      .or('email.is.null,email.eq.')
+      .not('status', 'in', '(contacted,responded,bad_inbox,bounced,no_inbox,blocked,invalid,duplicate,archived,unsubscribed,do_not_contact,sent)');
+    if (error) throw error;
+    return count || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default async function DashboardPage({ searchParams }: { searchParams?: DashboardSearchParams }) {
   const params = await Promise.resolve(searchParams || {});
   const period = periodFor((params as any).range);
@@ -325,7 +342,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     manualRepliesAll
   ] = await Promise.all([
     safeCount('businesses', workspace.id),
-    safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'pending' }] }),
+    safeMissingEmailCount(workspace.id),
     safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'ready' }] }),
     safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'contacted' }] }),
     safeCount('businesses', workspace.id, { filters: [{ column: 'status', value: 'responded' }] }),
@@ -442,7 +459,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
 
       <div className="grid grid-4">
         <KpiCard title="Total Businesses" value={totalBusinesses} helper="Every business or lead saved in this workspace." />
-        <KpiCard title="Needs Email" value={currentPending} helper="Leads that still need Auto Scout to find an email." />
+        <KpiCard title="Needs Email" value={currentPending} helper="Same as Missing emails on Find Missing Emails: leads with no usable email yet." />
         <KpiCard title="Ready To Email" value={currentReady} helper="These are leads you can send messages to right now." />
         <KpiCard title={`Real Replies (${period.shortLabel})`} value={periodReplies} previous={previous ? prevReplies : undefined} compareLabel={period.compareLabel} helper="Human-looking replies only. Auto replies, tickets, receipts, bounces, and no-inbox messages are not counted here." />
       </div>
