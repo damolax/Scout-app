@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
 import SendTimeStrip from '@/components/SendTimeStrip';
+import { REPLY_METRIC_SELECT, fetchUnifiedReplyMetrics, isUnifiedRealReply } from '@/lib/reply-metrics';
 
 type RangeKey = 'today' | 'yesterday' | 'last7' | 'last30' | 'last90' | 'all';
 
@@ -235,12 +236,12 @@ async function fetchPeriodMessages(workspaceId: string, period: PeriodDefinition
 
   let replyQuery: any = supabase
     .from('reply_history')
-    .select('id, template_id, gmail_account_id')
+    .select(REPLY_METRIC_SELECT)
     .eq('workspace_id', workspaceId)
-    .eq('is_real_reply', true)
     .limit(10000);
   replyQuery = applyDateRange(replyQuery, 'received_at', period.current);
-  const { data: replyRows } = await replyQuery;
+  const { data: rawReplyRows } = await replyQuery;
+  const replyRows = (rawReplyRows || []).filter(isUnifiedRealReply);
 
   const templateIds = Array.from(new Set([...(sentRows || []).map((row: any) => row.template_id), ...(replyRows || []).map((row: any) => row.template_id)].filter(Boolean)));
   const senderIds = Array.from(new Set([...(sentRows || []).map((row: any) => row.gmail_account_id), ...(replyRows || []).map((row: any) => row.gmail_account_id)].filter(Boolean)));
@@ -310,8 +311,8 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     prevResearchDone,
     periodSent,
     prevSent,
-    periodReplies,
-    prevReplies,
+    periodRepliesRaw,
+    prevRepliesRaw,
     periodNoInbox,
     prevNoInbox,
     scheduled,
@@ -349,6 +350,15 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     safeCount('email_research_jobs', workspace.id, { filters: [{ column: 'status', value: 'done' }] }),
     safeCount('sent_messages', workspace.id, { filters: [{ column: 'delivery_status', value: 'manual_reply_sent' }] })
   ]);
+
+  const [allReplyMetrics, periodReplyMetrics, previousReplyMetrics] = await Promise.all([
+    fetchUnifiedReplyMetrics(supabase, workspace.id),
+    fetchUnifiedReplyMetrics(supabase, workspace.id, { start: period.current.start, end: period.current.end }),
+    previous ? fetchUnifiedReplyMetrics(supabase, workspace.id, { start: previous.start, end: previous.end }) : Promise.resolve({ realReplies: 0, autoReplies: 0, deliveryFailures: 0, limitNotices: 0, totalInbound: 0, recentRowsChecked: 0 })
+  ]);
+  const officialRealReplies = allReplyMetrics.realReplies;
+  const periodReplies = periodReplyMetrics.realReplies;
+  const prevReplies = previousReplyMetrics.realReplies;
 
   let dueFollowups = 0;
   try {
@@ -435,14 +445,14 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
         <KpiCard title="Total Businesses" value={totalBusinesses} helper="All records currently in this workspace." />
         <KpiCard title="Pending No Email" value={currentPending} helper="Needs Auto Scout or cleanup." />
         <KpiCard title="Ready To Message" value={currentReady} helper="Can be used in Message." />
-        <KpiCard title="Responded" value={currentResponded} helper="Businesses with real replies." />
+        <KpiCard title="Real Replies" value={officialRealReplies} helper="Official human reply count used everywhere in Scout." />
       </div>
 
       <div className="grid grid-4">
         <KpiCard title={`Imported / Added (${period.shortLabel})`} value={periodImported} previous={previous ? prevImported : undefined} compareLabel={period.compareLabel} />
         <KpiCard title={`Auto Scout Found Emails (${period.shortLabel})`} value={periodFoundEmails} previous={previous ? prevFoundEmails : undefined} compareLabel={period.compareLabel} />
         <KpiCard title={`Auto Scout Completed (${period.shortLabel})`} value={periodResearchDone} previous={previous ? prevResearchDone : undefined} compareLabel={period.compareLabel} />
-        <KpiCard title="Currently Contacted" value={currentContacted} helper="Current businesses already messaged and waiting/replied/no-inbox cleanup." />
+        <KpiCard title="Responded Businesses" value={currentResponded} helper="Unique businesses marked responded. This can differ from total real reply messages." />
       </div>
 
       <div className="grid grid-4">

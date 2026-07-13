@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
+import { fetchUnifiedReplyMetrics } from '@/lib/reply-metrics';
 
 function startOfDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -39,18 +40,23 @@ export async function GET() {
   const yesterdayStart = addDays(todayStart, -1);
   const todayEnd = addDays(todayStart, 1);
 
-  const [scoutedToday, scoutedYesterday, sentToday, sentYesterday, realRepliesToday, realRepliesYesterday, autoRepliesToday, autoRepliesYesterday, badToday, badYesterday] = await Promise.all([
+  const supabase = await createClient();
+  const [scoutedToday, scoutedYesterday, sentToday, sentYesterday, todayReplyMetrics, yesterdayReplyMetrics, autoRepliesTodayRaw, autoRepliesYesterdayRaw, badToday, badYesterday] = await Promise.all([
     count('businesses', workspace.id, 'created_at', todayStart, todayEnd),
     count('businesses', workspace.id, 'created_at', yesterdayStart, todayStart),
     count('sent_messages', workspace.id, 'sent_at', todayStart, todayEnd, [{ column: 'status', value: 'sent' }]),
     count('sent_messages', workspace.id, 'sent_at', yesterdayStart, todayStart, [{ column: 'status', value: 'sent' }]),
-    count('reply_history', workspace.id, 'received_at', todayStart, todayEnd, [{ column: 'is_real_reply', value: true }]),
-    count('reply_history', workspace.id, 'received_at', yesterdayStart, todayStart, [{ column: 'is_real_reply', value: true }]),
+    fetchUnifiedReplyMetrics(supabase, workspace.id, { start: todayStart, end: todayEnd }),
+    fetchUnifiedReplyMetrics(supabase, workspace.id, { start: yesterdayStart, end: todayStart }),
     count('reply_history', workspace.id, 'received_at', todayStart, todayEnd, [{ column: 'is_auto_reply', value: true }]),
     count('reply_history', workspace.id, 'received_at', yesterdayStart, todayStart, [{ column: 'is_auto_reply', value: true }]),
     count('no_inbox_records', workspace.id, 'created_at', todayStart, todayEnd),
     count('no_inbox_records', workspace.id, 'created_at', yesterdayStart, todayStart)
   ]);
+  const realRepliesToday = todayReplyMetrics.realReplies;
+  const realRepliesYesterday = yesterdayReplyMetrics.realReplies;
+  const autoRepliesToday = todayReplyMetrics.autoReplies || autoRepliesTodayRaw;
+  const autoRepliesYesterday = yesterdayReplyMetrics.autoReplies || autoRepliesYesterdayRaw;
 
   const rows = [
     { metric: 'People scouted', today: scoutedToday, yesterday: scoutedYesterday, change: pct(scoutedToday, scoutedYesterday) },

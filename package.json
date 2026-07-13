@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-13-simple-autoscout-guide",
-  "version": "10.13.0",
+  "name": "scout-app-v10-14-unified-counts-fast-replies",
+  "version": "10.14.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.13: simple Auto Scout queue-only controls and full PDF user guide."
+  "description": "Scout App v10.14: unified reply counts across pages and faster Replies page."
 }

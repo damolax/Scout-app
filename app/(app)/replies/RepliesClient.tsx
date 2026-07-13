@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { GmailAccount, MessageTemplate, Workspace } from '@/lib/types';
+import { compactReplyRows as compactUnifiedReplyRows, isUnifiedAutoReply, isUnifiedRealReply } from '@/lib/reply-metrics';
 
 const SYNC_ENDPOINTS = [
   '/api/backend/email-scout/check-replies',
@@ -308,16 +309,17 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
 
   async function loadAll() {
     setError('');
-    const [acct, tmpl, sent, replies, noInbox, sentCount, realReplyCount, autoReplyCount, noInboxCount] = await Promise.all([
+    const [acct, tmpl, sent, replies, noInbox, sentCount, realReplyCount, autoReplyCount, noInboxCount, unifiedMetrics] = await Promise.all([
       supabase.from('gmail_accounts').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }),
       supabase.from('templates').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }),
       supabase.from('sent_messages').select('id,business_id,to_email,from_email,subject,template_id,gmail_account_id,batch_id,provider_message_id,gmail_thread_id,delivery_status,sent_at').eq('workspace_id', workspace.id).eq('status', 'sent').order('sent_at', { ascending: false }).limit(1000),
-      supabase.from('reply_history').select('*').eq('workspace_id', workspace.id).order('received_at', { ascending: false }).limit(500),
+      supabase.from('reply_history').select('id,business_id,from_email,to_email,subject,snippet,body,classification,is_real_reply,is_auto_reply,is_delivery_failure,is_blocked,is_limit_notice,is_temporary,reply_bucket,received_at,template_id,gmail_account_id,batch_id,gmail_message_id,gmail_thread_id').eq('workspace_id', workspace.id).order('received_at', { ascending: false }).limit(150),
       supabase.from('no_inbox_records').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }).limit(500),
       supabase.from('sent_messages').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id).eq('status', 'sent'),
       supabase.from('reply_history').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id).eq('is_real_reply', true),
       supabase.from('reply_history').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id).or('is_auto_reply.eq.true,reply_bucket.eq.auto_reply,classification.eq.auto_reply'),
-      supabase.from('no_inbox_records').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id)
+      supabase.from('no_inbox_records').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id),
+      fetch(`/api/replies/metrics?workspaceId=${encodeURIComponent(workspace.id)}`, { cache: 'no-store' }).then((r) => r.json()).catch(() => null)
     ]);
     const firstError = acct.error || tmpl.error || sent.error || replies.error || noInbox.error || sentCount.error || realReplyCount.error || autoReplyCount.error || noInboxCount.error;
     if (firstError) throw firstError;
@@ -329,8 +331,8 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     setNoInboxRows((noInbox.data || []) as NoInboxRow[]);
     setTrackingCounts({
       sentTracked: sentCount.count || 0,
-      realReplies: realReplyCount.count || 0,
-      autoReplies: autoReplyCount.count || 0,
+      realReplies: Number(unifiedMetrics?.realReplies ?? realReplyCount.count ?? 0),
+      autoReplies: Number(unifiedMetrics?.autoReplies ?? autoReplyCount.count ?? 0),
       noInboxBlocked: noInboxCount.count || 0
     });
     setSelectedAccounts((current) => {
@@ -499,8 +501,8 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     });
   }
 
-  const realReplies = compactReplyRows(replyRows.filter((row) => (row.is_real_reply === true || row.reply_bucket === 'real_reply' || row.classification === 'real_reply') && !looksAutoLikeReply(row) && row.is_auto_reply !== true && row.reply_bucket !== 'auto_reply'));
-  const autoReplies = compactReplyRows(replyRows.filter((row) => row.is_auto_reply === true || row.reply_bucket === 'auto_reply' || row.classification === 'auto_reply' || looksAutoLikeReply(row)));
+  const realReplies = compactUnifiedReplyRows(replyRows.filter(isUnifiedRealReply));
+  const autoReplies = compactUnifiedReplyRows(replyRows.filter(isUnifiedAutoReply));
   const deliverySignals = replyRows.filter((row) => row.is_delivery_failure === true || ['no_inbox', 'message_blocked', 'bounce_notice'].includes(String(row.classification || row.reply_bucket || '')));
   const limitSignals = replyRows.filter((row) => row.is_limit_notice === true || row.classification === 'gmail_limit_notice');
   const ignoredReplies = replyRows.filter((row) => row.is_real_reply !== true && row.is_auto_reply !== true && row.is_delivery_failure !== true && row.is_limit_notice !== true && !['real_reply','auto_reply','no_inbox','message_blocked','bounce_notice','gmail_limit_notice'].includes(String(row.classification || row.reply_bucket || '')));
@@ -510,7 +512,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     <div className="stack">
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Sent Tracked</div><div className="num">{sentCount.toLocaleString()}</div><p className="muted">All Gmail-accepted sent rows in the database. The table below only shows recent rows.</p></div>
-        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{realReplies.length.toLocaleString()}</div><p className="muted">Human replies in the loaded list. Auto replies are filtered out.</p></div>
+        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{trackingCounts.realReplies.toLocaleString()}</div><p className="muted">One official total used across Dashboard, Replies, and Scouting Level.</p></div>
         <div className="card kpi"><div className="title">Auto Replies</div><div className="num">{autoReplies.length.toLocaleString()}</div><p className="muted">Tickets, confirmations, out-of-office, and automated replies.</p></div>
         <div className="card kpi"><div className="title">No Inbox / Blocked</div><div className="num">{trackingCounts.noInboxBlocked.toLocaleString()}</div><p className="muted">Bounced, address-not-found, and blocked notices.</p></div>
       </div>
@@ -574,6 +576,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Real Replies</h3>
+        <p className="muted">Showing {realReplies.length.toLocaleString()} recent real replies on this page. Official total: {trackingCounts.realReplies.toLocaleString()}.</p>
         <p className="muted">Click Read to see the exact message the prospect sent. Click Open to reply from the business page.</p>
         <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Template</th><th>Received</th><th>Message</th></tr></thead><tbody>
           {realReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{templates.find((t) => t.id === r.template_id)?.name || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td><td><button className="btn secondary mini" type="button" onClick={() => setOpenedReply(r)}>Read</button></td></tr>)}

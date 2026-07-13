@@ -1,6 +1,7 @@
 import ChallengeBoard from '@/components/ChallengeBoard';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
+import { fetchUnifiedReplyMetrics } from '@/lib/reply-metrics';
 
 export const dynamic = 'force-dynamic';
 
@@ -177,7 +178,10 @@ async function loadMetrics(workspaceId: string): Promise<Record<MetricKey, numbe
   today.setHours(0, 0, 0, 0);
   const deliveredMessages = await safeCount('sent_messages', workspaceId, (q) => q.in('status', ['sent', 'delivered']));
   const sentToday = await safeCount('sent_messages', workspaceId, (q) => q.in('status', ['sent', 'delivered']).gte('sent_at', today.toISOString()));
-  const realReplies = await safeCount('reply_history', workspaceId, (q) => q.or('is_real_reply.eq.true,reply_bucket.eq.real_reply,classification.eq.real_reply').neq('is_auto_reply', true));
+  const supabaseForReplies = await createClient();
+  const replyMetricsAll = await fetchUnifiedReplyMetrics(supabaseForReplies, workspaceId);
+  const replyMetricsToday = await fetchUnifiedReplyMetrics(supabaseForReplies, workspaceId, { start: today });
+  const realReplies = replyMetricsAll.realReplies;
   const trustedEmails = await safeCount('businesses', workspaceId, (q) => q.not('email', 'is', null).neq('email', '').in('status', ['ready', 'found', 'connected']));
   const gmailAccounts = await safeCount('gmail_accounts', workspaceId, (q) => q.or('status.eq.connected,status.eq.active,status.is.null'));
   const templates = await safeCount('templates', workspaceId, (q) => q.or('active.eq.true,is_active.eq.true,active.is.null,is_active.is.null'));
@@ -198,7 +202,7 @@ async function loadMetrics(workspaceId: string): Promise<Record<MetricKey, numbe
     dueFollowups = 0;
   }
 
-  const realRepliesToday = await safeCount('reply_history', workspaceId, (q) => q.or('is_real_reply.eq.true,reply_bucket.eq.real_reply,classification.eq.real_reply').gte('received_at', today.toISOString()).neq('is_auto_reply', true));
+  const realRepliesToday = replyMetricsToday.realReplies;
 
   return { deliveredMessages, realReplies, realRepliesToday, trustedEmails, gmailAccounts, templates, sentToday, dueFollowups, schedules, autoScoutJobs, manualReplies };
 }
