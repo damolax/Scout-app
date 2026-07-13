@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-15-one-reply-clean-dashboard",
-  "version": "10.15.0",
+  "name": "scout-app-v10-16-real-replies-only",
+  "version": "10.16.0",
   "private": true,
   "scripts": {
     "dev": "next dev",

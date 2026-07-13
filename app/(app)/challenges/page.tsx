@@ -78,7 +78,7 @@ const challenges: Challenge[] = [
     'Send useful emails to the right leads.',
     'Go to Replies later.',
     'Sync replies.',
-    'Every non-bounce reply counts here so you do not miss useful messages.'
+    'Only human-looking replies count here. Ticket receipts and auto messages do not count.'
   ], { easy: 1, growth: 5, boss: 5 }),
   ...milestones('starter-trusted', 'First trusted emails', '🔎', 'trustedEmails', [500, 1000], trustedEmailSteps, { easy: 500, growth: 1000, boss: 1000 }),
   ...milestones('starter-gmail', 'Connect Gmail accounts', '📮', 'gmailAccounts', [1, 5], [
@@ -113,7 +113,7 @@ const challenges: Challenge[] = [
     'Send useful emails to the right leads.',
     'Keep your message simple and specific.',
     'Go to Replies and sync replies.',
-    'Bounces and no-inbox messages do not count here.'
+    'Auto messages, bounces, and no-inbox messages do not count here.'
   ], { easy: 0, growth: 100, boss: 2500 }),
 
   // Auto Scout and email quality.

@@ -140,10 +140,11 @@ export function hasAutoReplySignal(row: ReplyMetricRow) {
 }
 
 export function isUnifiedRealReply(row: ReplyMetricRow) {
-  // v10.15: count every non-delivery inbound message as a reply.
-  // The app no longer tries to hide replies just because a message looks like an auto/ticket response.
-  // This protects users from losing useful prospect responses when classification is uncertain.
-  return !isDeliveryOrLimitSignal(row);
+  if (isDeliveryOrLimitSignal(row)) return false;
+  const bucket = String(row.reply_bucket || row.classification || '').toLowerCase();
+  if (bucket === 'real_reply' && !hasAutoReplySignal(row)) return true;
+  if (row.is_real_reply === true && row.is_auto_reply !== true && !hasAutoReplySignal(row)) return true;
+  return hasHumanReplySignal(row) && !hasAutoReplySignal(row);
 }
 
 export function isUnifiedAutoReply(row: ReplyMetricRow) {

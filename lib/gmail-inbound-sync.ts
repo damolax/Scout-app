@@ -301,10 +301,14 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
   const hasHumanReplySignal = Boolean(sentMatch) && humanReplyTerms.some((term) => text.includes(term));
   const hasAutoHeaderSignal = autoHeaderTerms.some((term) => autoHeaderText.includes(term));
   const hasAutoBodySignal = autoTerms.some((term) => text.includes(term));
+  const hasReplySubjectSignal = /^\s*(re|aw|sv|antw|ré|fw|fwd)\s*[:：]/i.test(String(message.subject || ''));
   if (isSelf) return { classification: 'self_message_ignored', replyBucket: 'ignored', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
   if (!sentMatch) return { classification: 'unmatched_inbound', replyBucket: 'unmatched', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
-  // v10.15: protect the user from losing replies. If the inbound message matches a sent outreach and is not a bounce/limit notice, count it as a reply.
-  return { classification: 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
+  if (hasHumanReplySignal) return { classification: 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
+  if (hasAutoHeaderSignal || hasAutoBodySignal) return { classification: 'auto_reply', replyBucket: 'auto_reply', isRealReply: false, isAutoReply: true, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false };
+  // v10.16: matched inbound messages that are not bounces and not clear auto replies count as real.
+  // Re/AW/FW subjects are a useful signal, but Scout also accepts clean matched inbound messages without them.
+  return { classification: hasReplySubjectSignal ? 'real_reply' : 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
 }
 async function findSentMatch(supabase: SupabaseClient<any, any, any>, workspaceId: string, message: NormalizedInbound) {
   if (message.gmailThreadId) {

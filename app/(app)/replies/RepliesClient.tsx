@@ -470,7 +470,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
         }
       }
       setLastStats(stats);
-      setStatus(`Reply sync finished. Scanned ${stats.scanned}, saved ${stats.inserted}, replies ${stats.realReplies + stats.autoReplies}, no-inbox ${stats.noInbox}, blocked ${stats.blocked}, bounces ${stats.bounced}, Gmail limit notices ${stats.limitNotices}.`);
+      setStatus(`Reply sync finished. Scanned ${stats.scanned}, saved ${stats.inserted}, real replies ${stats.realReplies}, auto messages ${stats.autoReplies}, no-inbox ${stats.noInbox}, blocked ${stats.blocked}, bounces ${stats.bounced}, Gmail limit notices ${stats.limitNotices}.`);
       if (stats.errors.length) setError(stats.errors.join('\n'));
       await loadAll();
     } catch (err) {
@@ -511,7 +511,7 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
     <div className="stack">
       <div className="grid grid-3">
         <div className="card kpi"><div className="title">Sent Tracked</div><div className="num">{sentCount.toLocaleString()}</div><p className="muted">Messages Scout knows were accepted by Gmail.</p></div>
-        <div className="card kpi"><div className="title">Replies</div><div className="num">{trackingCounts.realReplies.toLocaleString()}</div><p className="muted">Every non-bounce inbound reply. This same number is used everywhere.</p></div>
+        <div className="card kpi"><div className="title">Real Replies</div><div className="num">{trackingCounts.realReplies.toLocaleString()}</div><p className="muted">Human-looking replies only. Auto tickets and receipt messages are not counted here.</p></div>
         <div className="card kpi"><div className="title">Inbox Problems</div><div className="num">{trackingCounts.noInboxBlocked.toLocaleString()}</div><p className="muted">Bounced, address-not-found, and blocked notices.</p></div>
       </div>
 
@@ -551,14 +551,14 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
 
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Last Sync Scanned</div><div className="num">{lastStats.scanned.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Last Sync Replies</div><div className="num">{lastStats.realReplies.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Last Sync Auto-Like</div><div className="num">{lastStats.autoReplies.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Last Sync Real Replies</div><div className="num">{lastStats.realReplies.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Last Sync Auto Messages</div><div className="num">{lastStats.autoReplies.toLocaleString()}</div></div>
         <div className="card kpi"><div className="title">Failures / Limits</div><div className="num">{(lastStats.noInbox + lastStats.blocked + lastStats.bounced + lastStats.limitNotices).toLocaleString()}</div></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Template Reply Tracking</h3>
-        <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Replies</th><th>Auto-Like</th><th>Failures</th><th>Emails Per Reply</th></tr></thead><tbody>
+        <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Real Replies</th><th>Auto Messages</th><th>Failures</th><th>Emails Per Reply</th></tr></thead><tbody>
           {templatePerformance().map((row) => <tr key={row.template.id}><td>{row.template.name}</td><td>{row.sent}</td><td>{row.realReplies}</td><td>{row.auto}</td><td>{row.failures}</td><td>{row.perReply}</td></tr>)}
           {!templates.length ? <tr><td colSpan={6} className="muted">No templates yet.</td></tr> : null}
         </tbody></table></div>
@@ -566,15 +566,15 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
 
       <div className="card" style={{ padding: 18 }}>
         <h3>Sender Reply Tracking</h3>
-        <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Status</th><th>Sent</th><th>Replies</th><th>Auto-Like</th><th>No Inbox</th><th>Emails Per Reply</th></tr></thead><tbody>
+        <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Status</th><th>Sent</th><th>Real Replies</th><th>Auto Messages</th><th>No Inbox</th><th>Emails Per Reply</th></tr></thead><tbody>
           {senderPerformance().map((row) => <tr key={row.account.id}><td>{row.account.email}</td><td>{row.account.status}</td><td>{row.sent}</td><td>{row.realReplies}</td><td>{row.auto}</td><td>{row.noInbox}</td><td>{row.perReply}</td></tr>)}
           {!accounts.length ? <tr><td colSpan={7} className="muted">No senders yet.</td></tr> : null}
         </tbody></table></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Replies</h3>
-        <p className="muted">Showing {realReplies.length.toLocaleString()} recent replies on this page. Official total: {trackingCounts.realReplies.toLocaleString()}.</p>
+        <h3>Real Replies</h3>
+        <p className="muted">Showing {realReplies.length.toLocaleString()} recent human-looking replies on this page. Official total: {trackingCounts.realReplies.toLocaleString()}.</p>
         <p className="muted">Click Read to see the exact message the prospect sent. Click Open to reply from the business page.</p>
         <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Template</th><th>Received</th><th>Message</th></tr></thead><tbody>
           {realReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{templates.find((t) => t.id === r.template_id)?.name || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td><td><button className="btn secondary mini" type="button" onClick={() => setOpenedReply(r)}>Read</button></td></tr>)}
@@ -583,8 +583,8 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Auto-Like Messages</h3>
-        <p className="muted">These messages look automated. They still count in the main Replies number, but they are shown here so you can understand what came in.</p>
+        <h3>Auto Messages</h3>
+        <p className="muted">These messages look automated, like ticket receipts, feedback requests, or out-of-office replies. They do not count as Real Replies.</p>
         <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Received</th></tr></thead><tbody>
           {autoReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
           {!autoReplies.length ? <tr><td colSpan={5} className="muted">No auto-like messages yet.</td></tr> : null}

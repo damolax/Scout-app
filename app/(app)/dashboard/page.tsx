@@ -356,8 +356,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     fetchUnifiedReplyMetrics(supabase, workspace.id, { start: period.current.start, end: period.current.end }),
     previous ? fetchUnifiedReplyMetrics(supabase, workspace.id, { start: previous.start, end: previous.end }) : Promise.resolve({ realReplies: 0, autoReplies: 0, deliveryFailures: 0, limitNotices: 0, totalInbound: 0, recentRowsChecked: 0 })
   ]);
-  const officialRealReplies = allReplyMetrics.realReplies;
-  const periodReplies = periodReplyMetrics.realReplies;
+    const periodReplies = periodReplyMetrics.realReplies;
   const prevReplies = previousReplyMetrics.realReplies;
 
   let dueFollowups = 0;
@@ -392,7 +391,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     { title: 'Find emails with Auto Scout', href: '/auto-scout', done: totalResearchDoneAll > 0, hint: 'Scout checks websites for missing emails.' },
     { title: 'Get trusted emails ready', href: '/verify', done: currentReady > 0, hint: 'Trusted leads are the safe list for sending.' },
     { title: 'Send your first message', href: '/message', done: totalSentAll > 0, hint: 'Send Now works while Scout is open.' },
-    { title: 'Check replies', href: '/replies', done: periodReplies > 0 || autoRepliesAll > 0, hint: 'Scout shows every non-bounce reply so you do not miss anything.' },
+    { title: 'Check real replies', href: '/replies', done: periodReplies > 0, hint: 'Scout shows human-looking replies separately from auto messages.' },
     { title: 'Respond to a prospect from Scout', href: '/replies', done: manualRepliesAll > 0, hint: 'Open a reply and send your answer from Scout.' },
     { title: 'Send due follow-ups', href: '/message', done: dueFollowups === 0 && totalSentAll > 0, hint: 'After 72 hours, choose a follow-up template and send due follow-ups.' },
     { title: 'Save one send for later', href: '/message', done: scheduled > 0, hint: 'Use this when timing matters by country.' }
@@ -445,13 +444,13 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
         <KpiCard title="Total Businesses" value={totalBusinesses} helper="Every business or lead saved in this workspace." />
         <KpiCard title="Needs Email" value={currentPending} helper="Leads that still need Auto Scout to find an email." />
         <KpiCard title="Ready To Email" value={currentReady} helper="These are leads you can send messages to right now." />
-        <KpiCard title="Replies" value={officialRealReplies} helper="Every non-bounce reply Scout detected. This is the one reply count used everywhere." />
+        <KpiCard title={`Real Replies (${period.shortLabel})`} value={periodReplies} previous={previous ? prevReplies : undefined} compareLabel={period.compareLabel} helper="Human-looking replies only. Auto replies, tickets, receipts, bounces, and no-inbox messages are not counted here." />
       </div>
 
       <div className="grid grid-4">
         <KpiCard title={`Messages Sent (${period.shortLabel})`} value={periodSent} previous={previous ? prevSent : undefined} compareLabel={period.compareLabel} />
-        <KpiCard title="Response Rate" value={periodResponseRate} helper={`${periodReplies.toLocaleString()} replies from ${periodSent.toLocaleString()} sent messages.`} />
-        <KpiCard title="Emails / Reply" value={periodEmailsPerReply} helper="How many emails you send to get one reply. Lower is better." />
+        <KpiCard title="Real Reply Rate" value={periodResponseRate} helper={`${periodReplies.toLocaleString()} real replies from ${periodSent.toLocaleString()} sent messages.`} />
+        <KpiCard title="Emails / Real Reply" value={periodEmailsPerReply} helper="How many emails you send to get one real reply. Lower is better." />
         <KpiCard title={`No Inbox / Bounces (${period.shortLabel})`} value={periodNoInbox} previous={previous ? prevNoInbox : undefined} compareLabel={period.compareLabel} />
       </div>
 
@@ -468,7 +467,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
         <div className="card" style={{ padding: 18 }}>
           <h3>Template Performance — {period.label}</h3>
           <p className="muted" style={{ marginTop: -4 }}>Filtered by sent/reply dates in the selected period.</p>
-          <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Replies</th><th>Response Rate</th><th>Emails / Reply</th></tr></thead><tbody>
+          <div className="table-wrap"><table><thead><tr><th>Template</th><th>Sent</th><th>Real Replies</th><th>Real Reply Rate</th><th>Emails / Real Reply</th></tr></thead><tbody>
             {(periodPerformance.templates || []).map((row) => <tr key={row.id}><td>{row.name}</td><td>{row.sent.toLocaleString()}</td><td>{row.replies.toLocaleString()}</td><td>{ratio(row.replies, row.sent)}</td><td>{emailsPerReply(row.sent, row.replies)}</td></tr>)}
             {!(periodPerformance.templates || []).length ? <tr><td colSpan={5} className="muted">No template performance in this period yet.</td></tr> : null}
           </tbody></table></div>
@@ -477,7 +476,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
         <div className="card" style={{ padding: 18 }}>
           <h3>Sender Performance — {period.label}</h3>
           <p className="muted" style={{ marginTop: -4 }}>Filtered by sent/reply dates in the selected period.</p>
-          <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Sent</th><th>Replies</th><th>Response Rate</th><th>Emails / Reply</th></tr></thead><tbody>
+          <div className="table-wrap"><table><thead><tr><th>Sender</th><th>Sent</th><th>Real Replies</th><th>Real Reply Rate</th><th>Emails / Real Reply</th></tr></thead><tbody>
             {(periodPerformance.senders || []).map((row) => <tr key={row.id}><td>{row.email}</td><td>{row.sent.toLocaleString()}</td><td>{row.replies.toLocaleString()}</td><td>{ratio(row.replies, row.sent)}</td><td>{emailsPerReply(row.sent, row.replies)}</td></tr>)}
             {!(periodPerformance.senders || []).length ? <tr><td colSpan={5} className="muted">No sender performance in this period yet.</td></tr> : null}
           </tbody></table></div>
