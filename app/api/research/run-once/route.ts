@@ -1,3 +1,6 @@
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { createClient as createServerSupabaseClient } from '@/lib/supabase-server';
@@ -176,9 +179,9 @@ function mergeResearchDecision(backendResult: any, backendDecision: EmailCandida
 
 async function callBackendFindEmail(business: any) {
   const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (!backend) throw new Error('NEXT_PUBLIC_BACKEND_URL is not configured.');
+  if (!backend) throw new Error('NEXT_PUBLIC_BACKEND_URL is not configured. Built-in website finder will still run.');
   const base = backend.endsWith('/') ? backend : `${backend}/`;
-  const paths = ['/find-email', '/email-finder/find', '/api/find-email', '/research/find-email'];
+  const paths = ['/find-email', '/api/find-email', '/email-finder/find', '/api/email/find', '/research/find-email', '/api/research/find-email', '/find', '/api/find'];
   const payload = {
     name: business.name,
     businessName: business.name,
@@ -256,9 +259,16 @@ async function runOnce(request: NextRequest) {
 
       const backendDecision = bestEmailDecisionFromPayload(backendResult, business);
       let deepResult: DeepWebsiteFinderResult | null = null;
-      if (shouldDeepSearch(backendDecision)) {
+      const hasWebsite = Boolean(String(business.website || business.domain || '').trim());
+      // Auto Scout must prove emails from the real website whenever a website/domain exists.
+      // Render is still used first when configured, but the built-in website finder now always checks
+      // homepage/contact/about/support/impressum pages instead of trusting only a backend guess.
+      if (hasWebsite) {
         await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_deep_check', `Checking website pages for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '' });
-        deepResult = await findEmailsDeepFromWebsite(business, { maxPages: 7, timeoutMs: 6500 });
+        deepResult = await findEmailsDeepFromWebsite(business, { maxPages: 10, timeoutMs: 8000 });
+        await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_pages_checked', `Checked ${deepResult.pagesChecked} page(s) for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '', pages_checked: deepResult.pagesChecked, pages_attempted: deepResult.pagesAttempted, source_url: deepResult.sourceUrl || '', email: deepResult.email || '' });
+      } else if (shouldDeepSearch(backendDecision)) {
+        await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_no_website', `No website available for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, business_name: business.name || '' });
       }
 
       const merged = mergeResearchDecision(backendResult, backendDecision, deepResult);
@@ -322,7 +332,7 @@ async function runOnce(request: NextRequest) {
       } else {
         await supabase.from('businesses').update({ status: 'review', raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
         await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
-        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'no_trusted_email_found', method: merged.method, pagesChecked: deepResult?.pagesChecked || 0, rejected: decision.rejected, reason: merged.reason });
+        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'no_trusted_email_found', method: merged.method, rejected: decision.rejected, reason: merged.reason, backendUsed: Boolean(process.env.NEXT_PUBLIC_BACKEND_URL), pagesChecked: deepResult?.pagesChecked || 0, pagesAttempted: deepResult?.pagesAttempted || 0 });
         await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_no_email', `No trusted email found for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '', pages_checked: deepResult?.pagesChecked || 0, reason: merged.reason || '' });
       }
     } catch (error) {

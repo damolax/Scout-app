@@ -41,9 +41,10 @@ export type DeepWebsiteFinderResult = {
 };
 
 const CONTACT_KEYWORDS = [
-  'contact', 'contact-us', 'contactus', 'kontakt', 'about', 'about-us', 'team', 'staff', 'people', 'support', 'help',
-  'customer-service', 'service', 'impressum', 'imprint', 'privacy', 'legal', 'terms', 'locations', 'store', 'stores',
-  'booking', 'book', 'enquiry', 'enquiries', 'inquiry', 'inquiries'
+  'contact', 'contact-us', 'contactus', 'contactez', 'nous-contacter', 'kontakt', 'kontaktieren', 'contacto', 'contatti',
+  'about', 'about-us', 'team', 'staff', 'people', 'support', 'help', 'customer-service', 'customerservice', 'service',
+  'impressum', 'imprint', 'privacy', 'legal', 'terms', 'locations', 'store', 'stores', 'booking', 'book', 'enquiry',
+  'enquiries', 'inquiry', 'inquiries', 'wholesale', 'b2b', 'retailers', 'stockists', 'faq', 'shipping', 'returns', 'order'
 ];
 
 const LOW_VALUE_LINK_RE = /\.(png|jpe?g|webp|gif|svg|pdf|zip|css|js|ico|woff2?|ttf|eot|mp4|mov|avi|webm)(\?|#|$)/i;
@@ -84,6 +85,8 @@ function cleanUrl(value: string, base?: string) {
 
 function decodeEntities(input: string) {
   return input
+    .replace(/\\u([0-9a-f]{4})/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/\\x([0-9a-f]{2})/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
     .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
     .replace(/&commat;/gi, '@')
@@ -131,6 +134,8 @@ function extractTitle(html: string) {
 function htmlToText(html: string) {
   const keepMailto = Array.from(html.matchAll(/mailto:([^"'<>\s?#]+)/gi)).map((m) => ` ${m[1]} `).join(' ');
   const cfEmails = extractCloudflareEmails(html).join(' ');
+  const schemaOrgEmails = Array.from(html.matchAll(/"email"\s*:\s*"([^"]+@[^"]+)"/gi)).map((m) => ` ${m[1]} `).join(' ');
+  const dataEmails = Array.from(html.matchAll(/data-[a-z0-9_-]*email=["']([^"']+@[^"']+)["']/gi)).map((m) => ` ${m[1]} `).join(' ');
   const noScripts = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -140,7 +145,7 @@ function htmlToText(html: string) {
     .replace(/<\/p\s*>/gi, '\n')
     .replace(/<\/div\s*>/gi, '\n')
     .replace(/<[^>]+>/g, ' ');
-  return decodeEntities(`${keepMailto} ${cfEmails} ${visible}`)
+  return decodeEntities(`${keepMailto} ${cfEmails} ${schemaOrgEmails} ${dataEmails} ${visible}`)
     .replace(/\s+/g, ' ')
     .slice(0, 260000);
 }
@@ -175,9 +180,13 @@ function extractLinks(html: string, pageUrl: string, siteRoot: string) {
 
 function likelyContactUrlCandidates(homepage: string) {
   const paths = [
-    '/contact', '/contact-us', '/contactus', '/about', '/about-us', '/team', '/staff', '/support', '/help',
-    '/customer-service', '/service', '/services', '/impressum', '/imprint', '/privacy', '/legal', '/terms',
-    '/pages/contact', '/pages/contact-us', '/pages/about-us'
+    '/contact', '/contact-us', '/contactus', '/contact-us/', '/contact/', '/kontakt', '/kontakt/', '/kontaktieren',
+    '/contacto', '/contactez-nous', '/nous-contacter', '/contatti', '/about', '/about-us', '/about-us/', '/team', '/staff',
+    '/support', '/help', '/customer-service', '/customerservice', '/service', '/services', '/impressum', '/impressum/',
+    '/imprint', '/privacy', '/legal', '/terms', '/faq', '/shipping', '/returns', '/wholesale', '/b2b', '/retailers',
+    '/pages/contact', '/pages/contact-us', '/pages/contact-us/', '/pages/about', '/pages/about-us', '/pages/customer-service',
+    '/pages/support', '/pages/help', '/pages/faq', '/pages/wholesale', '/pages/stockists', '/a/contact', '/apps/contact-form',
+    '/en/contact', '/en/contact-us', '/de/kontakt', '/de/impressum', '/fr/contact', '/fr/contactez-nous', '/es/contacto'
   ];
   try {
     const base = new URL(homepage);
@@ -223,10 +232,31 @@ function sourceTypeFromUrl(url: string) {
   return 'website_page';
 }
 
+
+function contactPageScore(url: string) {
+  const lower = String(url || '').toLowerCase();
+  if (/mailto:/.test(lower)) return 60;
+  if (/contact|kontakt|contacto|contactez|contatti|nous-contacter/.test(lower)) return 55;
+  if (/customer-service|support|help|service|impressum|imprint/.test(lower)) return 42;
+  if (/about|team|staff|people|wholesale|b2b/.test(lower)) return 28;
+  return 0;
+}
+
+function roleMailboxScore(email: string) {
+  const local = String(email || '').split('@')[0]?.toLowerCase() || '';
+  if (/^(info|hello|contact|support|sales|service|customerservice|customer\.service|orders|order|care|help|team|office|admin|shop|store|b2b|wholesale)$/.test(local)) return 35;
+  if (/^(marketing|press|media|business|partners|partnerships)$/.test(local)) return 18;
+  return 0;
+}
+
+function bestMainInboxRank(item: EmailCandidateDecision & { pageUrl?: string; sourceText?: string }) {
+  return item.score + contactPageScore(item.pageUrl || '') + roleMailboxScore(item.email) + (item.promote ? 100 : 0) + (item.sourceEvidence ? 25 : 0);
+}
+
 export async function findEmailsDeepFromWebsite(business: BusinessLike, options?: { maxPages?: number; timeoutMs?: number }): Promise<DeepWebsiteFinderResult> {
   const website = buildWebsite(business);
   const domain = rootDomain(cleanText(business.domain || displayDomain({ domain: business.domain, website: business.website, email: business.email }) || website));
-  const maxPages = Math.max(1, Math.min(12, options?.maxPages || 7));
+  const maxPages = Math.max(1, Math.min(18, options?.maxPages || 10));
   const timeoutMs = Math.max(2500, Math.min(12000, options?.timeoutMs || 6500));
   const pages: PageResult[] = [];
   const errors: string[] = [];
@@ -243,6 +273,10 @@ export async function findEmailsDeepFromWebsite(business: BusinessLike, options?
 
   const queue = new Map<string, number>();
   queue.set(website, 100);
+  try {
+    const u = new URL(website);
+    if (u.protocol === 'https:') { u.protocol = 'http:'; queue.set(u.toString(), 30); }
+  } catch {}
   for (const candidate of likelyContactUrlCandidates(website)) queue.set(candidate, Math.max(queue.get(candidate) || 0, 50));
 
   const visited = new Set<string>();
@@ -304,7 +338,7 @@ export async function findEmailsDeepFromWebsite(business: BusinessLike, options?
   }
 
   const deduped = Array.from(new Map(acceptedCandidates.map((item) => [item.email, item])).values())
-    .sort((a, b) => Number(b.promote) - Number(a.promote) || b.score - a.score);
+    .sort((a, b) => bestMainInboxRank(b) - bestMainInboxRank(a));
   const best = deduped[0] || { ...emptyDecision, reasons: ['No valid email found after checking website/contact pages.'] };
   const bestPage = 'pageUrl' in best ? String(best.pageUrl || '') : '';
   const reason = best.email
