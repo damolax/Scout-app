@@ -278,10 +278,59 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
     'teilen sie uns ihr feedback mit', 'zufriedenheit', 'bearbeitung ihrer anfrage', 'bearbeitung deiner anfrage',
     'wir melden uns', 'melden uns schnellstmöglich', 'schnellstmöglich bearbeiten', 'so schnell wie möglich beantworten',
     'wir kümmern uns schnellstmöglich', 'eingegangen und wird', 'bearbeitungszeit',
-    'nous confirmons la réception', 'nous avons reçu votre demande', 'votre demande a été reçue',
-    'merci de nous avoir contactés', 'merci pour votre message',
-    'hemos recibido', 'su solicitud ha sido recibida', 'gracias por contactarnos',
-    'abbiamo ricevuto', 'la tua richiesta è stata ricevuta', 'grazie per averci contattato'
+    'wir haben deine anfrage erhalten', 'wir haben ihre anfrage erhalten', 'wir haben deine e-mail erhalten',
+    'wir haben ihre e-mail erhalten', 'wir haben diese erhalten', 'deine nachricht ist gut angekommen',
+    'ihre nachricht ist gut angekommen', 'deine nachricht hat uns erreicht', 'ihre nachricht hat uns erreicht',
+    'vielen dank für die nachricht', 'vielen dank für ihre e-mail', 'vielen dank für deine e-mail',
+    'danke für ihre e-mail', 'danke für deine e-mail', 'wir bearbeiten deine anfrage', 'wir bearbeiten ihre anfrage',
+    'wird nun von unserem team bearbeitet', 'wird von unserem team bearbeitet', 'wird bearbeitet',
+    'du liest gerade eine automatisch verschickte email', 'automatisch verschickte email', 'automatisch erzeugte bestätigung',
+    'automatisch erzeugte bestaetigung', 'automatische bestätigung', 'automatische bestaetigung',
+    'dies ist eine automatisch erzeugte', 'dies ist eine automatische', 'bitte antworten sie nicht', 'bitte nicht antworten',
+    'nicht beantwortet', 'keine antwort', 'no reply', 'noreply:', 'ticket empfangen', 'ticket received',
+    'ticket wurde erstellt', 'ticket erstellt', 'anliegen erstellt', 'fallnummer', 'vorgangsnummer', 'referenznummer',
+    'bearbeitungsnummer', 'case id', 'request id', 'kundenservice', 'support-team', 'support team',
+    'aktuell ein erhöhtes aufkommen', 'erhöhtes aufkommen', 'hohes aufkommen', 'hohe anzahl', 'bitten um geduld',
+    'bitten wir um geduld', 'bitte haben sie geduld', 'bitte habe geduld', 'bitte etwas geduld',
+    'innerhalb von 24 stunden', 'innerhalb von 48 stunden', 'innerhalb 24 stunden', 'innerhalb 48 stunden',
+    'innerhalb der nächsten', 'innerhalb der naechsten', 'wir melden uns in kürze', 'wir melden uns in kuerze',
+    'wir melden uns schnellstmöglich', 'wir melden uns schnellstmoeglich', 'wir werden uns schnellstmöglich',
+    'wir werden uns schnellstmoeglich', 'wird schnellstmöglich bearbeitet', 'wird schnellstmoeglich bearbeitet',
+    'feedback mit', 'bewerten sie', 'bewerte uns', 'zufriedenheitsumfrage', 'kundenzufriedenheit',
+    // French auto/ticket/receipt patterns for France + Canada.
+    'réponse automatique', 'reponse automatique', 'message automatique', 'absence du bureau',
+    'accusé de réception', 'accuse de reception', 'confirmation de réception', 'confirmation de reception',
+    'nous confirmons la réception', 'nous confirmons la reception', 'nous avons reçu votre demande',
+    'nous avons reçu votre message', 'nous avons bien reçu votre message', 'votre demande a été reçue',
+    'votre demande a ete recue', 'votre message a été reçu', 'votre message a ete recu',
+    'demande reçue', 'demande recue', 'ticket créé', 'ticket cree', 'numéro de ticket', 'numero de ticket',
+    'numéro de dossier', 'numero de dossier', 'service client', 'support client', 'nous vous répondrons',
+    'nous vous repondrons', 'nous reviendrons vers vous', 'dans les plus brefs délais',
+    'dans les plus brefs delais', 'dès que possible', 'des que possible', 'merci de votre patience',
+    'merci de nous avoir contactés', 'merci de nous avoir contactes', 'merci pour votre message',
+    // Spanish auto/ticket/receipt patterns for Spain and Spanish-speaking targets.
+    'respuesta automática', 'respuesta automatica', 'respuesta auto', 'fuera de la oficina',
+    'acuse de recibo', 'confirmación de recepción', 'confirmacion de recepcion',
+    'hemos recibido su mensaje', 'hemos recibido tu mensaje', 'hemos recibido su solicitud',
+    'hemos recibido tu solicitud', 'su solicitud ha sido recibida', 'tu solicitud ha sido recibida',
+    'mensaje recibido', 'solicitud recibida', 'ticket creado', 'caso creado', 'número de ticket',
+    'numero de ticket', 'número de caso', 'numero de caso', 'nos pondremos en contacto',
+    'nos comunicaremos con usted', 'lo antes posible', 'a la brevedad', 'dentro de 24 horas',
+    'dentro de 48 horas', 'gracias por contactarnos', 'gracias por su mensaje', 'no responda a este correo',
+    'correo generado automáticamente', 'correo generado automaticamente',
+    // Italian auto/ticket/receipt patterns.
+    'risposta automatica', 'fuori ufficio', 'conferma di ricezione', 'abbiamo ricevuto il tuo messaggio',
+    'abbiamo ricevuto il suo messaggio', 'abbiamo ricevuto la tua richiesta', 'abbiamo ricevuto la sua richiesta',
+    'richiesta ricevuta', 'ticket creato', 'numero di ticket', 'servizio clienti', 'ti risponderemo',
+    'le risponderemo', 'il prima possibile', 'entro 24 ore', 'entro 48 ore',
+    'abbiamo ricevuto', 'la tua richiesta è stata ricevuta', 'la sua richiesta è stata ricevuta',
+    'grazie per averci contattato', 'grazie per il tuo messaggio', 'grazie per il suo messaggio',
+    // Dutch auto/ticket/receipt patterns.
+    'automatisch antwoord', 'automatische reactie', 'afwezigheidsbericht', 'wij hebben uw bericht ontvangen',
+    'we hebben uw bericht ontvangen', 'wij hebben je bericht ontvangen', 'we hebben je bericht ontvangen',
+    'uw aanvraag is ontvangen', 'je aanvraag is ontvangen', 'ticket aangemaakt', 'ticketnummer',
+    'zaaknummer', 'klantenservice', 'wij nemen contact met u op', 'we nemen contact met je op',
+    'zo snel mogelijk', 'binnen 24 uur', 'binnen 48 uur', 'bedankt voor uw bericht', 'bedankt voor je bericht'
   ];
   const temporaryTerms = ['temporary failure', 'try again later', 'deferred', '4.2.0', '4.4.1', '4.7.0', 'temporarily unavailable', 'greylisted'];
 
@@ -291,12 +340,36 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
   if (bounceTerms.some((term) => text.includes(term))) return { classification: 'bounce_notice', replyBucket: 'bounce_notice', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
   if (temporaryTerms.some((term) => text.includes(term))) return { classification: 'temporary_failure', replyBucket: 'temporary_failure', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: true, ignored: false };
   const humanReplyTerms = [
+    // English human intent. These count even when the subject starts with Re/Fw.
     'we don\'t need', 'we do not need', 'we are not interested', 'not interested', 'not looking to', 'not looking for',
     'we are not looking', 'we\'re not looking', 'we appreciate your', 'appreciate your insight', 'appreciate the insight',
     'thanks for sharing', 'thank you for sharing', 'thank you for reaching out and sharing', 'we value thoughtful',
     'your email itself is', 'highly unprofessional', 'please send', 'can you send', 'could you send', 'send more details',
     'tell me more', 'book a call', 'schedule a call', 'let us talk', 'let\'s talk', 'we would be interested', 'sounds interesting',
-    'we already have', 'we are happy with', 'this is not something', 'no thank you', 'no thanks'
+    'we already have', 'we are happy with', 'this is not something', 'no thank you', 'no thanks', 'unsubscribe us',
+    'remove us', 'remove me', 'please remove', 'stop emailing', 'stop contacting', 'we will pass', 'we are passing',
+    // German human intent. These are translated intent patterns, not just German language.
+    'kein interesse', 'nicht interessiert', 'haben kein interesse', 'wir haben kein interesse', 'kein bedarf',
+    'wir haben keinen bedarf', 'brauchen wir nicht', 'benötigen wir nicht', 'wir brauchen das nicht',
+    'wir benötigen das nicht', 'nicht auf der suche', 'wir sind nicht auf der suche', 'kommt für uns nicht in frage',
+    'bitte senden sie', 'bitte schick', 'schicken sie', 'senden sie', 'können sie uns', 'könnt ihr uns',
+    'bitte um weitere informationen', 'weitere informationen', 'mehr informationen', 'angebot senden',
+    'termin vereinbaren', 'telefonat', 'rufen sie', 'lass uns sprechen', 'lassen sie uns sprechen',
+    'unprofessionell', 'ihre e-mail', 'deine e-mail', 'vorschlag', 'nicht relevant', 'entfernen sie uns',
+    // French human intent.
+    'pas intéressé', 'pas interessee', 'pas interesse', 'nous ne sommes pas intéressés', 'nous ne sommes pas interesses',
+    'nous n’avons pas besoin', "nous n'avons pas besoin", "ce n'est pas nécessaire", 'pas pour nous',
+    'envoyez', 'pouvez-vous envoyer', 'pouvez vous envoyer', 'plus de détails', 'plus de details',
+    'prendre rendez-vous', 'appel téléphonique', 'appel telephonique', 'nous sommes intéressés',
+    'nous sommes interesses', 'quel est le prix', 'tarif', 'merci pour votre proposition',
+    // Spanish/Italian/Dutch human intent.
+    'no estamos interesados', 'no nos interesa', 'no necesitamos', 'no es para nosotros',
+    'puede enviar', 'puedes enviar', 'más detalles', 'mas detalles', 'cuál es el precio', 'cual es el precio',
+    'agendar una llamada', 'programar una llamada', 'nos interesa', 'estamos interesados',
+    'non siamo interessati', 'non ci interessa', 'non ne abbiamo bisogno', 'non fa per noi',
+    'può inviare', 'puoi inviare', 'maggiori dettagli', 'qual è il prezzo', 'fissare una chiamata',
+    'niet geïnteresseerd', 'niet geinteresseerd', 'geen interesse', 'niet nodig', 'niet voor ons',
+    'kunt u sturen', 'kan je sturen', 'meer informatie', 'wat kost het', 'belafspraak'
   ];
   const hasHumanReplySignal = Boolean(sentMatch) && humanReplyTerms.some((term) => text.includes(term));
   const hasAutoHeaderSignal = autoHeaderTerms.some((term) => autoHeaderText.includes(term));

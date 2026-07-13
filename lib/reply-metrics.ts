@@ -133,7 +133,32 @@ export function hasAutoReplySignal(row: ReplyMetricRow) {
     'wir haben ihre e-mail erhalten', 'anliegen wurde erstellt', 'wurde erstellt', 'ticketnummer', 'ticket-nummer',
     'wir melden uns', 'melden uns schnellstmöglich', 'schnellstmöglich bearbeiten', 'so schnell wie möglich beantworten',
     'wir kümmern uns schnellstmöglich', 'bearbeitungszeit', 'nous confirmons la réception', 'votre demande a été reçue',
-    'merci de nous avoir contactés', 'hemos recibido', 'su solicitud ha sido recibida', 'abbiamo ricevuto'
+    'merci de nous avoir contactés', 'hemos recibido', 'su solicitud ha sido recibida', 'abbiamo ricevuto',
+    // v10.18 time-zone language additions: English/Canadian French/German/French/Spanish + Europe extras.
+    'réponse automatique', 'reponse automatique', 'absence du bureau', 'accusé de réception', 'accuse de reception',
+    'confirmation de réception', 'confirmation de reception', 'nous avons reçu votre message', 'nous avons reçu votre demande',
+    'nous avons bien reçu votre message', 'votre message a été reçu', 'votre message a ete recu', 'demande reçue',
+    'demande recue', 'ticket créé', 'ticket cree', 'numéro de ticket', 'numero de ticket', 'numéro de dossier',
+    'numero de dossier', 'nous vous répondrons', 'nous vous repondrons', 'nous reviendrons vers vous',
+    'dans les plus brefs délais', 'dans les plus brefs delais', 'dès que possible', 'des que possible',
+    'merci de votre patience', 'merci de nous avoir contactes', 'merci pour votre message',
+    'respuesta automática', 'respuesta automatica', 'fuera de la oficina', 'acuse de recibo',
+    'confirmación de recepción', 'confirmacion de recepcion', 'hemos recibido su mensaje', 'hemos recibido tu mensaje',
+    'hemos recibido su solicitud', 'hemos recibido tu solicitud', 'tu solicitud ha sido recibida', 'mensaje recibido',
+    'solicitud recibida', 'ticket creado', 'caso creado', 'número de ticket', 'numero de ticket', 'número de caso',
+    'numero de caso', 'nos pondremos en contacto', 'nos comunicaremos con usted', 'lo antes posible', 'a la brevedad',
+    'dentro de 24 horas', 'dentro de 48 horas', 'gracias por contactarnos', 'gracias por su mensaje',
+    'no responda a este correo', 'correo generado automáticamente', 'correo generado automaticamente',
+    'risposta automatica', 'fuori ufficio', 'conferma di ricezione', 'abbiamo ricevuto il tuo messaggio',
+    'abbiamo ricevuto il suo messaggio', 'abbiamo ricevuto la tua richiesta', 'abbiamo ricevuto la sua richiesta',
+    'richiesta ricevuta', 'ticket creato', 'numero di ticket', 'servizio clienti', 'ti risponderemo', 'le risponderemo',
+    'il prima possibile', 'entro 24 ore', 'entro 48 ore', 'la tua richiesta è stata ricevuta',
+    'la sua richiesta è stata ricevuta', 'grazie per averci contattato',
+    'automatisch antwoord', 'automatische reactie', 'afwezigheidsbericht', 'wij hebben uw bericht ontvangen',
+    'we hebben uw bericht ontvangen', 'wij hebben je bericht ontvangen', 'we hebben je bericht ontvangen',
+    'uw aanvraag is ontvangen', 'je aanvraag is ontvangen', 'ticket aangemaakt', 'zaaknummer',
+    'wij nemen contact met u op', 'we nemen contact met je op', 'zo snel mogelijk', 'binnen 24 uur', 'binnen 48 uur',
+    'bedankt voor uw bericht', 'bedankt voor je bericht'
   ];
   if (from.includes('noreply') || from.includes('no-reply') || from.includes('donotreply') || from.includes('do-not-reply')) return true;
   return terms.some((term) => text.includes(term));
