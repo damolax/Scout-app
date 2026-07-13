@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-20-autoscout-queue-clarity",
-  "version": "10.20.0",
+  "name": "scout-app-v10-23-email-finder-test-panel",
+  "version": "10.23.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.17: multilingual real reply classifier for German and other languages."
+  "description": "Scout App v10.23: Auto Scout Email Finder test panel for Render and queued lead diagnostics."
 }

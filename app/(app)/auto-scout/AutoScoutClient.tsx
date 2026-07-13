@@ -101,6 +101,19 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function firstEmailFromTestRow(row: any) {
+  return String(row?.email || row?.result?.email || row?.finalDecision?.email || '').trim();
+}
+
+function pagesText(row: any) {
+  const pages = row?.pagesChecked ?? row?.websitePages?.pagesChecked ?? row?.result?.deepWebsiteFinder?.pagesChecked ?? row?.result?.pagesChecked;
+  return typeof pages === 'number' ? `${pages} page(s)` : '-';
+}
+
+function testRowReason(row: any) {
+  return String(row?.reason || row?.error || row?.finalDecision?.reasons?.[0] || row?.backend?.error || row?.saveNote || '').trim();
+}
+
 export default function AutoScoutClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const stopRef = useRef(false);
@@ -111,6 +124,10 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [workerResult, setWorkerResult] = useState<any>(null);
+  const [testWebsite, setTestWebsite] = useState('');
+  const [testBusy, setTestBusy] = useState(false);
+  const [testMessage, setTestMessage] = useState('Use this when Auto Scout looks broken. It proves whether the email finder can reach Render, check website pages, and return a usable email.');
+  const [testResult, setTestResult] = useState<any>(null);
 
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || '';
   const backendLabel = backendUrl.includes('onrender.com') ? 'Render email finder connected' : backendUrl ? 'Email finder backend connected' : 'Email finder backend not configured';
@@ -343,6 +360,66 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     }
   }
 
+
+  async function runOneWebsiteTest() {
+    if (!testWebsite.trim()) {
+      setTestMessage('Paste one website URL first. The test is website-first.');
+      return;
+    }
+    setTestBusy(true);
+    setTestResult(null);
+    setTestMessage('Testing one website now. Scout will call Render and also check the real website pages. This test will not save automatically.');
+    emitLiveActivity({ kind: 'auto_scout', status: 'testing', title: 'Testing Email Finder', message: `Testing one website: ${testWebsite.trim()}` });
+    try {
+      const res = await fetch('/api/research/test-email-finder', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, mode: 'one', website: testWebsite.trim() })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || 'One-website test failed.');
+      setTestResult(json);
+      const email = String(json.finalDecision?.email || json.websitePages?.email || json.backend?.email || '').trim();
+      const verdict = email ? `Test finished. Best email seen: ${email}.` : 'Test finished. No trusted email was seen on this website.';
+      setTestMessage(verdict);
+      emitLiveActivity({ kind: 'auto_scout', status: email ? 'test_found' : 'test_no_email', title: 'Email Finder test finished', message: verdict });
+    } catch (error) {
+      setTestMessage(`Test failed: ${fmtError(error)}`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'test_failed', title: 'Email Finder test failed', message: fmtError(error) });
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
+  async function runFiveQueuedTest() {
+    if (queueCount <= 0) {
+      setTestMessage('There are no queued leads. Add leads to queue first, then test 5 queued leads.');
+      return;
+    }
+    setTestBusy(true);
+    setTestResult(null);
+    setTestMessage('Testing 5 queued leads now. This uses real queued leads and will save any trusted email it finds.');
+    emitLiveActivity({ kind: 'auto_scout', status: 'testing', title: 'Testing 5 queued leads', message: 'Running the email finder on 5 real queued leads.' });
+    try {
+      const res = await fetch('/api/research/test-email-finder', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, mode: 'queued5' })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || '5-lead queue test failed.');
+      setTestResult(json);
+      setTestMessage(`5-lead test finished. Checked ${Number(json.processed || 0).toLocaleString()} lead(s), found ${Number(json.found || 0).toLocaleString()} email(s).`);
+      await loadStats();
+      emitLiveActivity({ kind: 'auto_scout', status: 'test_complete', title: '5-lead test finished', message: `Checked ${Number(json.processed || 0).toLocaleString()} lead(s), found ${Number(json.found || 0).toLocaleString()} email(s).` });
+    } catch (error) {
+      setTestMessage(`5-lead test failed: ${fmtError(error)}`);
+      emitLiveActivity({ kind: 'auto_scout', status: 'test_failed', title: '5-lead test failed', message: fmtError(error) });
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
   return (
     <div className="stack">
       <div className="grid grid-4">
@@ -392,6 +469,56 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
 
         <div className={message.toLowerCase().includes('failed') || message.toLowerCase().includes('error') ? 'error' : 'notice'} style={{ marginTop: 14 }}>{message}</div>
         {workerResult ? <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>Last run: queued {Number(workerResult.enqueued || 0).toLocaleString()}, checked {Number(workerResult.processed || 0).toLocaleString()}, found {Number(workerResult.found || 0).toLocaleString()}.</div> : null}
+      </div>
+
+      <div className="card" style={{ padding: 18 }}>
+        <div className="actions" style={{ justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Test Email Finder</h3>
+            <p className="muted" style={{ margin: '6px 0 0' }}>Use this before running a large batch. It shows whether Scout can reach Render, check website pages, find an email, and save queued results.</p>
+          </div>
+          <button className="btn secondary mini" disabled={testBusy} onClick={() => { setTestResult(null); setTestMessage('Test cleared. Run one website or 5 queued leads again.'); }}>Clear test</button>
+        </div>
+
+        <div className="grid grid-2" style={{ marginTop: 14 }}>
+          <div className="soft-card">
+            <h4 style={{ marginTop: 0 }}>Test 1 website</h4>
+            <p className="muted">Paste a website from one lead. This test does not save automatically; it proves whether the finder can actually see an email.</p>
+            <input className="input" placeholder="https://example-store.com" value={testWebsite} onChange={(e) => setTestWebsite(e.target.value)} />
+            <button className="btn" disabled={testBusy || !testWebsite.trim()} onClick={runOneWebsiteTest} style={{ marginTop: 12 }}>Test Email Finder</button>
+          </div>
+          <div className="soft-card">
+            <h4 style={{ marginTop: 0 }}>Test 5 queued leads</h4>
+            <p className="muted">This uses real queued leads. If a trusted email is found, Scout saves it to the lead. This proves the full path works.</p>
+            <button className="btn" disabled={testBusy || running || queueCount <= 0} onClick={runFiveQueuedTest}>{queueCount > 0 ? 'Test 5 queued leads' : 'Queue is empty'}</button>
+            <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Full path tested: queue → Render/backend → website pages → email decision → saved lead.</p>
+          </div>
+        </div>
+
+        <div className={testMessage.toLowerCase().includes('failed') || testMessage.toLowerCase().includes('no trusted') ? 'notice' : 'notice'} style={{ marginTop: 14 }}>{testBusy ? 'Testing now...' : testMessage}</div>
+
+        {testResult ? <div className="soft-card" style={{ marginTop: 14 }}>
+          <div className="grid grid-4">
+            <div><strong>Render</strong><br /><span className="muted">{testResult.render?.configured ? (testResult.render?.reachable ? 'Reachable' : 'Not reachable') : 'Not configured'}</span></div>
+            <div><strong>Checked</strong><br /><span className="muted">{testResult.mode === 'five_queued' ? `${Number(testResult.processed || 0).toLocaleString()} lead(s)` : pagesText(testResult)}</span></div>
+            <div><strong>Email</strong><br /><span className="muted">{String(testResult.finalDecision?.email || testResult.websitePages?.email || testResult.backend?.email || firstEmailFromTestRow(testResult) || 'No email')}</span></div>
+            <div><strong>Saved</strong><br /><span className="muted">{testResult.saved ? 'Yes' : 'No, test only'}</span></div>
+          </div>
+
+          {testResult.mode === 'one_website' ? <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Step</th><th>Result</th><th>Details</th></tr></thead><tbody>
+            <tr><td>Render connection</td><td>{testResult.render?.reachable ? 'Connected' : 'Problem'}</td><td><span className="muted">{testResult.render?.url || testResult.render?.error || '-'}</span></td></tr>
+            <tr><td>Render endpoint</td><td>{testResult.backend?.ok ? 'Worked' : 'Failed'}</td><td><span className="muted">{testResult.backend?.endpoint || testResult.backend?.error || '-'}</span></td></tr>
+            <tr><td>Website pages</td><td>{Number(testResult.websitePages?.pagesChecked || 0).toLocaleString()} checked</td><td><span className="muted">{testResult.websitePages?.sourceUrl || testResult.websitePages?.error || '-'}</span></td></tr>
+            <tr><td>Decision</td><td>{testResult.finalDecision?.promoted ? 'Trusted' : testResult.finalDecision?.email ? 'Review' : 'No trusted email'}</td><td><span className="muted">{testRowReason(testResult)}</span></td></tr>
+          </tbody></table></div> : null}
+
+          {testResult.mode === 'five_queued' ? <div className="table-wrap" style={{ marginTop: 12 }}><table><thead><tr><th>Business</th><th>Status</th><th>Email</th><th>Pages</th><th>Why</th></tr></thead><tbody>
+            {(testResult.results || []).map((row: any, index: number) => <tr key={`${row.business || row.job || index}`}><td>{row.businessName || row.business || row.job || '-'}</td><td>{row.status || '-'}</td><td>{row.email || <span className="muted">No email</span>}</td><td>{pagesText(row)}</td><td><span className="muted">{testRowReason(row) || '-'}</span></td></tr>)}
+            {!(testResult.results || []).length ? <tr><td colSpan={5} className="muted">No queued leads were checked. Add leads to the queue first.</td></tr> : null}
+          </tbody></table></div> : null}
+
+          {Array.isArray(testResult.websitePages?.pages) && testResult.websitePages.pages.length ? <div style={{ marginTop: 12 }}><strong>Pages seen</strong><ul className="muted" style={{ marginTop: 6 }}>{testResult.websitePages.pages.slice(0, 8).map((url: string) => <li key={url}>{url}</li>)}</ul></div> : null}
+        </div> : null}
       </div>
 
       <div className="card" style={{ padding: 18 }}>

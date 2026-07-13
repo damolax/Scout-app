@@ -184,16 +184,29 @@ export function validateEmailCandidate(candidate: { email: string; sourceText?: 
   if (reasons.length) return { email, valid: false, promote: false, score: 0, quality: 'rejected', sourceEvidence, sourceField: candidate.sourceField || '', reasons };
 
   score = 35;
-  if (sourceEvidence) { score += 45; reasons.push('Seen with source evidence.'); }
-  if (match) { score += 25; reasons.push('Email domain matches business website/domain.'); }
-  if (freeMailbox) { score += 8; reasons.push('Personal/free mailbox accepted but needs normal bounce tracking.'); }
-  if (GOOD_ROLE_PARTS.has(local)) { score += 10; reasons.push('Useful role mailbox.'); }
+  const sourceEvidenceIsContactSource = Boolean(sourceEvidence && !sourceLooksLikeCode(sourceText));
+
+  if (sourceEvidence) { score += 45; reasons.push('Seen on the business website or source page.'); }
+  if (match) { score += 30; reasons.push('Email domain matches the business website/domain.'); }
+  if (freeMailbox && sourceEvidenceIsContactSource) {
+    score += 28;
+    reasons.push('Gmail/Yahoo/Outlook-style mailbox seen on the business website. Accepted as the business contact email.');
+  } else if (freeMailbox) {
+    score += 8;
+    reasons.push('Gmail/Yahoo/Outlook-style mailbox found, but it needs website/source evidence before it is trusted.');
+  }
+  if (GOOD_ROLE_PARTS.has(local)) { score += 10; reasons.push('Useful contact mailbox.'); }
   if (generated) { score -= 40; reasons.push('Backend marked this as generated/guessed.'); }
 
-  const sourceEvidenceIsContactSource = Boolean(sourceEvidence && !sourceLooksLikeCode(sourceText));
-  const quality: EmailCandidateDecision['quality'] = sourceEvidenceIsContactSource ? 'source_seen' : match ? 'domain_match' : freeMailbox ? 'free_mailbox_seen' : 'unverified_candidate';
-  const promote = Boolean((match && !generated) || (sourceEvidenceIsContactSource && (match || freeMailbox || GOOD_ROLE_PARTS.has(local))));
-  if (!promote) reasons.push('Not promoted because it is not a domain match, trusted role mailbox, or free mailbox seen in contact evidence.');
+  const quality: EmailCandidateDecision['quality'] = match
+    ? 'domain_match'
+    : freeMailbox
+      ? 'free_mailbox_seen'
+      : sourceEvidenceIsContactSource
+        ? 'source_seen'
+        : 'unverified_candidate';
+  const promote = Boolean((match && !generated) || (sourceEvidenceIsContactSource && (freeMailbox || GOOD_ROLE_PARTS.has(local))));
+  if (!promote) reasons.push('Not promoted because Scout did not see it as a business-domain email or a Gmail/Yahoo/Outlook-style email on the business website/contact page.');
 
   return { email, valid: true, promote, score: Math.max(0, Math.min(100, score)), quality, sourceEvidence, sourceField: candidate.sourceField || '', reasons };
 }
@@ -205,7 +218,16 @@ export function isEmailAcceptableForBusiness(email: string, business?: BusinessL
 export function chooseBestEmailCandidate(payload: unknown, business?: BusinessLike, sourceEvidence = '', generated = false): EmailCandidateDecision {
   const candidates = findEmailCandidates(payload);
   const decisions = candidates.map((candidate) => validateEmailCandidate(candidate, business, sourceEvidence, generated));
-  const valid = decisions.filter((item) => item.valid).sort((a, b) => Number(b.promote) - Number(a.promote) || b.score - a.score);
+  const priority = (item: EmailCandidateDecision) => {
+    if (!item.valid) return -1;
+    let value = item.score;
+    if (item.promote) value += 1000;
+    if (item.quality === 'domain_match') value += 500;
+    if (item.quality === 'free_mailbox_seen') value += 420;
+    if (item.quality === 'source_seen') value += 350;
+    return value;
+  };
+  const valid = decisions.filter((item) => item.valid).sort((a, b) => priority(b) - priority(a));
   const rejected = decisions.filter((item) => !item.valid).map((item) => ({ email: item.email, reason: item.reasons.join(' '), sourceField: item.sourceField })).slice(0, 20);
   if (valid[0]) return { ...valid[0], rejected };
   return { email: '', valid: false, promote: false, score: 0, quality: 'rejected', sourceEvidence, sourceField: '', reasons: ['No valid email candidate found after strict filtering.'], rejected };

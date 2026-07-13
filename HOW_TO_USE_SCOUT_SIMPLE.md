@@ -132,3 +132,8 @@ Click **Open business and reply** to answer.
 ## Replying to a prospect
 
 When you reply from Scout, Scout uses the same Gmail account that sent the original message to that business. You cannot change it. This keeps each conversation clean and safe.
+
+
+## Gmail, Yahoo, Hotmail and other free emails
+
+Some small businesses do not use an email on their website domain. They may use Gmail, Yahoo, Hotmail, Outlook, iCloud, Proton, or a local internet-provider email. Scout can use those emails when it sees them on the real business website or contact page. If Scout only sees a free email in code, fake examples, or unrelated places, it will not treat it as ready to email.
