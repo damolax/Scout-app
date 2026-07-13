@@ -1,10 +1,9 @@
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { formatInboundError, syncGmailInbound } from '@/lib/gmail-inbound-sync';
-import { createAppNotification } from '@/lib/notifications';
 
 type AnyRecord = Record<string, any>;
 
@@ -19,12 +18,25 @@ type AccountResult = {
   blocked: number;
   bounced: number;
   limitNotices: number;
+  skippedOld: number;
   error?: string;
 };
 
 function num(value: unknown, fallback: number) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function addStats(row: AccountResult, stats: AnyRecord) {
+  row.scanned += Number(stats.scanned || 0);
+  row.saved += Number(stats.saved || 0);
+  row.realReplies += Number(stats.realReplies || 0);
+  row.autoReplies += Number(stats.autoReplies || 0);
+  row.noInbox += Number(stats.noInbox || 0);
+  row.blocked += Number(stats.blocked || 0);
+  row.bounced += Number(stats.bounced || 0);
+  row.limitNotices += Number(stats.limitNotices || 0);
+  row.skippedOld += Number(stats.ignored || 0);
 }
 
 export async function POST(request: NextRequest) {
@@ -34,10 +46,12 @@ export async function POST(request: NextRequest) {
     const workspaceId = String(input.workspace_id || input.workspaceId || '');
     if (!workspaceId) throw new Error('workspaceId is required.');
 
-    const maxResults = Math.max(5, Math.min(num(input.max_results || input.maxResults, 25), 75));
-    const bounceMaxResults = Math.max(5, Math.min(num(input.bounce_max_results || input.bounceMaxResults, 15), 50));
-    const days = Math.max(1, Math.min(num(input.days, 14), 30));
-    const accountLimit = Math.max(1, Math.min(num(input.account_limit || input.accountLimit, 50), 50));
+    // App-open sync must be tiny and new-only. Full sync stays on Replies page.
+    const maxResults = Math.max(1, Math.min(num(input.max_results || input.maxResults, 6), 12));
+    const bounceMaxResults = Math.max(0, Math.min(num(input.bounce_max_results || input.bounceMaxResults, 2), 5));
+    const days = Math.max(1, Math.min(num(input.days, 3), 7));
+    const accountLimit = Math.max(1, Math.min(num(input.account_limit || input.accountLimit, 5), 8));
+    const deadlineMs = Math.max(4000, Math.min(num(input.deadlineMs || input.deadline_ms, 18000), 22000));
 
     const supabase = createAdminClient();
     const { data: accounts, error: accountsError } = await supabase
@@ -54,6 +68,7 @@ export async function POST(request: NextRequest) {
     const rows = Array.isArray(accounts) ? (accounts as AnyRecord[]) : [];
 
     for (const account of rows) {
+      if (Date.now() - startedAt > deadlineMs) break;
       const accountId = String(account.id || '');
       const email = String(account.email || 'Gmail account');
       if (!accountId) continue;
@@ -68,7 +83,8 @@ export async function POST(request: NextRequest) {
         noInbox: 0,
         blocked: 0,
         bounced: 0,
-        limitNotices: 0
+        limitNotices: 0,
+        skippedOld: 0
       };
 
       try {
@@ -78,44 +94,28 @@ export async function POST(request: NextRequest) {
           accountId,
           maxResults,
           days,
-          mode: 'replies'
+          mode: 'replies',
+          newOnly: true,
+          deadlineMs: Math.max(2500, deadlineMs - (Date.now() - startedAt))
         });
-        row.scanned += Number(replies.scanned || 0);
-        row.saved += Number(replies.saved || 0);
-        row.realReplies += Number(replies.realReplies || 0);
-        row.autoReplies += Number(replies.autoReplies || 0);
-        row.noInbox += Number(replies.noInbox || 0);
-        row.blocked += Number(replies.blocked || 0);
-        row.bounced += Number(replies.bounced || 0);
-        row.limitNotices += Number(replies.limitNotices || 0);
+        addStats(row, replies);
 
-        const bounces = await syncGmailInbound({
-          supabase,
-          workspaceId,
-          accountId,
-          maxResults: bounceMaxResults,
-          days,
-          mode: 'bounces'
-        });
-        row.scanned += Number(bounces.scanned || 0);
-        row.saved += Number(bounces.saved || 0);
-        row.realReplies += Number(bounces.realReplies || 0);
-        row.autoReplies += Number(bounces.autoReplies || 0);
-        row.noInbox += Number(bounces.noInbox || 0);
-        row.blocked += Number(bounces.blocked || 0);
-        row.bounced += Number(bounces.bounced || 0);
-        row.limitNotices += Number(bounces.limitNotices || 0);
+        if (bounceMaxResults > 0 && Date.now() - startedAt < deadlineMs - 2500) {
+          const bounces = await syncGmailInbound({
+            supabase,
+            workspaceId,
+            accountId,
+            maxResults: bounceMaxResults,
+            days,
+            mode: 'bounces',
+            newOnly: true,
+            deadlineMs: Math.max(2000, deadlineMs - (Date.now() - startedAt))
+          });
+          addStats(row, bounces);
+        }
       } catch (err) {
         row.error = formatInboundError(err);
-        await createAppNotification(supabase, {
-          workspaceId,
-          type: 'gmail_sync_failed',
-          title: `Gmail sync issue: ${email}`,
-          message: row.error.slice(0, 320),
-          entityType: 'gmail_account',
-          entityId: accountId,
-          raw: { source: 'app_open_auto_sync', email, error: row.error }
-        });
+        // Do not create a bell notification for quick-check failures. A full manual sync can be run from Replies.
       }
 
       results.push(row);
@@ -130,13 +130,15 @@ export async function POST(request: NextRequest) {
       acc.blocked += row.blocked;
       acc.bounced += row.bounced;
       acc.limitNotices += row.limitNotices;
+      acc.skippedOld += row.skippedOld;
       if (row.error) acc.errors += 1;
       return acc;
-    }, { scanned: 0, saved: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, errors: 0 });
+    }, { scanned: 0, saved: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, skippedOld: 0, errors: 0 });
 
     return NextResponse.json({
       success: true,
-      source: 'app_open_auto_sync',
+      source: 'app_open_new_only_reply_check',
+      newOnly: true,
       accountsChecked: results.length,
       totals,
       results,

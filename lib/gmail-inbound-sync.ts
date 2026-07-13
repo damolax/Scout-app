@@ -42,6 +42,10 @@ type SyncParams = {
   maxResults?: number;
   mode: SyncMode;
   days?: number;
+  /** When true, Scout lists recent Gmail message ids first and only fetches messages not already saved. */
+  newOnly?: boolean;
+  /** Safety guard for automatic app-open checks so Vercel does not hit 504. */
+  deadlineMs?: number;
 };
 
 type InboundStats = {
@@ -413,7 +417,7 @@ async function findSentMatch(supabase: SupabaseClient<any, any, any>, workspaceI
   return null;
 }
 
-async function saveReplyHistory(supabase: SupabaseClient<any, any, any>, payload: AnyRecord) {
+async function saveReplyHistory(supabase: SupabaseClient<any, any, any>, payload: AnyRecord): Promise<'inserted' | 'updated'> {
   const { data, error } = await supabase
     .from('reply_history')
     .select('id')
@@ -430,6 +434,27 @@ async function saveReplyHistory(supabase: SupabaseClient<any, any, any>, payload
   const { error: insertError } = await supabase.from('reply_history').insert(payload);
   if (insertError) throw insertError;
   return 'inserted';
+}
+
+async function existingInboundMessageIds(supabase: SupabaseClient<any, any, any>, workspaceId: string, ids: string[]) {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  if (!unique.length) return new Set<string>();
+  const found = new Set<string>();
+  const chunkSize = 100;
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('reply_history')
+      .select('gmail_message_id')
+      .eq('workspace_id', workspaceId)
+      .in('gmail_message_id', chunk);
+    if (error) throw error;
+    for (const row of data || []) {
+      const id = String((row as AnyRecord).gmail_message_id || '');
+      if (id) found.add(id);
+    }
+  }
+  return found;
 }
 
 async function saveNoInboxRecord(supabase: SupabaseClient<any, any, any>, payload: AnyRecord) {
@@ -481,7 +506,7 @@ async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any
   const targetEmail = classification.noInbox || classification.blocked || classification.classification === 'bounce_notice'
     ? findFailureTargetEmail(message, sentMatch, accountEmail)
     : (sentMatch?.to_email || message.fromEmail || null);
-  await saveReplyHistory(supabase, {
+  const saveStatus = await saveReplyHistory(supabase, {
     workspace_id: workspaceId,
     business_id: sentMatch?.business_id || null,
     sent_message_id: sentMatch?.id || null,
@@ -538,12 +563,15 @@ async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any
   }
 
 
-  if (classification.isRealReply || classification.isAutoReply || classification.deliveryFailure || classification.limitNotice) {
+  // Bell notifications are only created for newly saved inbound messages.
+  // This keeps refresh/open checks from re-alerting old replies that were already synced.
+  const shouldNotify = saveStatus === 'inserted' && (classification.isRealReply || classification.deliveryFailure || classification.limitNotice || classification.noInbox || classification.blocked || classification.classification === 'bounce_notice');
+  if (shouldNotify) {
     const title = notificationTitleForInbound(classification.classification, message.fromEmail || targetEmail || '', null);
     const shortMessage = [message.subject, message.snippet || message.body.slice(0, 180)].filter(Boolean).join(' - ').slice(0, 320);
     await createAppNotification(supabase, {
       workspaceId,
-      type: classification.isRealReply ? 'real_reply' : classification.isAutoReply ? 'auto_reply' : classification.limitNotice ? 'gmail_limit_notice' : classification.classification,
+      type: classification.isRealReply ? 'real_reply' : classification.limitNotice ? 'gmail_limit_notice' : classification.classification,
       title,
       message: shortMessage || classification.classification,
       entityType: 'gmail_message',
@@ -599,21 +627,33 @@ function buildQuery(mode: SyncMode, days: number) {
   return `newer_than:${days}d -from:me -in:sent`;
 }
 
-export async function syncGmailInbound({ supabase, workspaceId, accountId, maxResults = 100, mode, days = 30 }: SyncParams): Promise<InboundStats> {
+export async function syncGmailInbound({ supabase, workspaceId, accountId, maxResults = 100, mode, days = 30, newOnly = false, deadlineMs }: SyncParams): Promise<InboundStats> {
   if (!workspaceId || !accountId) throw new Error('workspace_id and gmail_account_id are required.');
-  const limit = Math.max(1, Math.min(Number(maxResults || 100), 500));
+  const startedAt = Date.now();
+  const limit = Math.max(1, Math.min(Number(maxResults || 100), newOnly ? 25 : 500));
   const { data: account, error: accountError } = await supabase.from('gmail_accounts').select('*').eq('workspace_id', workspaceId).eq('id', accountId).single();
   if (accountError || !account) throw new Error(accountError?.message || 'Gmail account not found.');
 
   const accessToken = await ensureAccessToken(supabase, workspaceId, account as AnyRecord);
-  const query = encodeURIComponent(buildQuery(mode, Math.max(1, Math.min(Number(days || 30), 90))));
+  const query = encodeURIComponent(buildQuery(mode, Math.max(1, Math.min(Number(days || 30), newOnly ? 14 : 90))));
   const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=${limit}&includeSpamTrash=true`;
   const list = await gmailJson(accessToken, listUrl);
-  const messages: Array<{ id: string; threadId?: string }> = Array.isArray(list.messages) ? list.messages : [];
+  let messages: Array<{ id: string; threadId?: string }> = Array.isArray(list.messages) ? list.messages : [];
 
   const stats: InboundStats = { success: true, scanned: 0, saved: 0, matched: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, temporary: 0, ignored: 0, unmatched: 0, accountEmail: String((account as AnyRecord).email || '') };
 
+  if (newOnly && messages.length) {
+    const existingIds = await existingInboundMessageIds(supabase, workspaceId, messages.map((item) => String(item.id || '')));
+    const before = messages.length;
+    messages = messages.filter((item) => item.id && !existingIds.has(String(item.id)));
+    stats.ignored += before - messages.length;
+  }
+
   for (const item of messages) {
+    if (deadlineMs && Date.now() - startedAt > deadlineMs) {
+      stats.ignored += 1;
+      break;
+    }
     stats.scanned += 1;
     const gmailMessage = await gmailJson(accessToken, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(item.id)}?format=full`);
     const normalized = normalizeGmailMessage(gmailMessage);

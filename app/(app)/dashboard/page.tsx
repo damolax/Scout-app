@@ -247,11 +247,29 @@ async function fetchPeriodMessages(workspaceId: string, period: PeriodDefinition
   const senderIds = Array.from(new Set([...(sentRows || []).map((row: any) => row.gmail_account_id), ...(replyRows || []).map((row: any) => row.gmail_account_id)].filter(Boolean)));
 
   const templateNames = new Map<string, string>();
+  const activeTemplateIds = new Set<string>();
   const senderEmails = new Map<string, string>();
 
-  if (templateIds.length) {
-    const { data } = await supabase.from('templates').select('id,name').eq('workspace_id', workspaceId).in('id', templateIds);
-    for (const row of data || []) templateNames.set(row.id, row.name || 'Untitled template');
+  // Only current active templates appear in performance. Archived/deleted/old versions are hidden.
+  const { data: activeTemplates } = await supabase
+    .from('templates')
+    .select('id,name')
+    .eq('workspace_id', workspaceId)
+    .eq('active', true)
+    .limit(1000);
+  for (const row of activeTemplates || []) {
+    if (row.id) {
+      activeTemplateIds.add(row.id);
+      templateNames.set(row.id, row.name || 'Untitled template');
+    }
+  }
+
+  if (templateIds.length && !activeTemplateIds.size) {
+    const { data } = await supabase.from('templates').select('id,name').eq('workspace_id', workspaceId).in('id', templateIds).eq('active', true);
+    for (const row of data || []) {
+      activeTemplateIds.add(row.id);
+      templateNames.set(row.id, row.name || 'Untitled template');
+    }
   }
   if (senderIds.length) {
     const { data } = await supabase.from('gmail_accounts').select('id,email').eq('workspace_id', workspaceId).in('id', senderIds);
@@ -261,30 +279,38 @@ async function fetchPeriodMessages(workspaceId: string, period: PeriodDefinition
   const templateMap = new Map<string, { id: string; name: string; sent: number; replies: number }>();
   const senderMap = new Map<string, { id: string; email: string; sent: number; replies: number }>();
 
+  for (const [id, name] of templateNames.entries()) {
+    templateMap.set(id, { id, name, sent: 0, replies: 0 });
+  }
+
   for (const row of sentRows || []) {
-    const tid = row.template_id || 'none';
+    const tid = row.template_id || '';
     const sid = row.gmail_account_id || 'none';
-    const t = templateMap.get(tid) || { id: tid, name: tid === 'none' ? 'No template tracked' : (templateNames.get(tid) || 'Unknown template'), sent: 0, replies: 0 };
-    t.sent += 1;
-    templateMap.set(tid, t);
+    if (tid && activeTemplateIds.has(tid)) {
+      const t = templateMap.get(tid) || { id: tid, name: templateNames.get(tid) || 'Untitled template', sent: 0, replies: 0 };
+      t.sent += 1;
+      templateMap.set(tid, t);
+    }
     const s = senderMap.get(sid) || { id: sid, email: sid === 'none' ? 'No sender tracked' : (senderEmails.get(sid) || 'Unknown sender'), sent: 0, replies: 0 };
     s.sent += 1;
     senderMap.set(sid, s);
   }
 
   for (const row of replyRows || []) {
-    const tid = row.template_id || 'none';
+    const tid = row.template_id || '';
     const sid = row.gmail_account_id || 'none';
-    const t = templateMap.get(tid) || { id: tid, name: tid === 'none' ? 'No template tracked' : (templateNames.get(tid) || 'Unknown template'), sent: 0, replies: 0 };
-    t.replies += 1;
-    templateMap.set(tid, t);
+    if (tid && activeTemplateIds.has(tid)) {
+      const t = templateMap.get(tid) || { id: tid, name: templateNames.get(tid) || 'Untitled template', sent: 0, replies: 0 };
+      t.replies += 1;
+      templateMap.set(tid, t);
+    }
     const s = senderMap.get(sid) || { id: sid, email: sid === 'none' ? 'No sender tracked' : (senderEmails.get(sid) || 'Unknown sender'), sent: 0, replies: 0 };
     s.replies += 1;
     senderMap.set(sid, s);
   }
 
   return {
-    templates: Array.from(templateMap.values()).sort((a, b) => b.sent - a.sent).slice(0, 10),
+    templates: Array.from(templateMap.values()).sort((a, b) => (b.sent - a.sent) || (b.replies - a.replies) || a.name.localeCompare(b.name)).slice(0, 10),
     senders: Array.from(senderMap.values()).sort((a, b) => b.sent - a.sent).slice(0, 10)
   };
 }

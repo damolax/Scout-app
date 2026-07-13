@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-25-auto-in-app-reply-sync",
-  "version": "10.25.0",
+  "name": "scout-app-v10-26-new-only-reply-sync-template-versioning",
+  "version": "10.26.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.25: automatically sync Gmail replies and delivery signals when the app opens, refreshes, or becomes active, then updates Scout bell notifications."
+  "description": "Scout App v10.26: new-only app-open reply sync, clean in-app notifications, template saves without attachments schema errors, and template updates as new performance versions."
 }

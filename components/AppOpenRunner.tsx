@@ -10,8 +10,8 @@ const LOCK_TTL_MS = 45_000;
 
 const INBOUND_LOCK_KEY = "scout_v10_25_inbound_sync_lock";
 const INBOUND_LAST_RUN_KEY = "scout_v10_25_inbound_sync_last_run";
-const INBOUND_INTERVAL_MS = 180_000;
-const INBOUND_LOCK_TTL_MS = 120_000;
+const INBOUND_INTERVAL_MS = 90_000;
+const INBOUND_LOCK_TTL_MS = 45_000;
 
 type RunnerResponse = {
   success?: boolean;
@@ -148,23 +148,19 @@ export function AppOpenRunner({ workspaceId }: { workspaceId?: string | null }) 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workspaceId,
-          maxResults: 25,
-          bounceMaxResults: 15,
-          days: 14,
-          accountLimit: 50,
-          source: "v10_25_app_open_inbound_sync",
+          maxResults: 6,
+          bounceMaxResults: 2,
+          days: 3,
+          accountLimit: 5,
+          deadlineMs: 18000,
+          newOnly: true,
+          source: "v10_26_app_open_new_only_inbound_check",
         }),
       });
       const json = (await response.json().catch(() => ({}))) as InboundSyncResponse;
       if (!response.ok || json?.success === false) {
-        const message = json?.error || `Reply sync failed with HTTP ${response.status}`;
-        emitLiveActivity({
-          kind: "schedule",
-          status: "runner_note",
-          title: "Reply sync issue",
-          message,
-          createdAt: new Date().toISOString(),
-        });
+        // App-open reply checks are quick background checks. Do not create noisy Scout alerts for a timeout.
+        // Manual full sync remains available on the Replies page.
         return;
       }
 

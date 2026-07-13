@@ -184,7 +184,7 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     }
   }
 
-  function templatePayload(category: MessageCategory | null, userId?: string | null) {
+  function templatePayload(category: MessageCategory | null, userId?: string | null, extraRaw: Record<string, unknown> = {}) {
     const cleanSubject = subject.trim();
     const cleanMessage = message.trim();
     if (!cleanSubject || !cleanMessage) throw new Error('Subject and message are required.');
@@ -199,8 +199,8 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       template_type: templateType,
       purpose: purpose.trim() || null,
       reply_context: templateType === 'reply' ? (replyContext.trim() || null) : null,
-      attachments,
-      raw: { attachments },
+      // Store files in raw.attachments so saving works even if the older database has no templates.attachments column.
+      raw: { attachments, ...extraRaw },
       active: true,
       created_by: userId || null
     };
@@ -260,11 +260,28 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setBusy(true);
     setError('');
     try {
+      const oldTemplateId = templateId;
+      const { data: { user } } = await supabase.auth.getUser();
       const category = await ensureCategory();
-      const { workspace_id: _workspaceId, created_by: _createdBy, ...payload } = templatePayload(category);
-      const { error: updateError } = await supabase.from('templates').update({ ...payload, updated_at: new Date().toISOString() }).eq('workspace_id', workspace.id).eq('id', templateId);
-      if (updateError) throw updateError;
-      setStatus(`${typeLabel(templateType)} updated.`);
+
+      // Updating a template creates a fresh version with a fresh id.
+      // This makes performance start from zero for the updated version and hides the old version.
+      const { error: archiveError } = await supabase
+        .from('templates')
+        .update({ active: false, updated_at: new Date().toISOString() })
+        .eq('workspace_id', workspace.id)
+        .eq('id', oldTemplateId);
+      if (archiveError) throw archiveError;
+
+      const payload = templatePayload(category, user?.id || null, {
+        versioned_from_template_id: oldTemplateId,
+        version_created_at: new Date().toISOString(),
+        version_note: 'Updated template saved as a new performance version.'
+      });
+      const { data, error: insertError } = await supabase.from('templates').insert(payload).select('*').single();
+      if (insertError) throw insertError;
+      setTemplateId(data.id);
+      setStatus(`${typeLabel(templateType)} updated as a new template version. Its performance starts from zero. The old version is hidden from performance.`);
       await loadAll();
     } catch (err) {
       setError(formatError(err));
