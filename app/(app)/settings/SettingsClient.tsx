@@ -114,8 +114,8 @@ export default function SettingsClient({ workspace, isAdmin = false }: { workspa
       for (const account of rows) {
         const existing = current[account.id];
         next[account.id] = existing || {
-          daily_limit: String(account.daily_limit || 150),
-          default_run_limit: String(account.default_run_limit || Math.min(Number(account.daily_limit || 150), 100)),
+          daily_limit: String(account.daily_limit || 450),
+          default_run_limit: String(account.default_run_limit || Math.min(Number(account.daily_limit || 450), 50)),
           account_type: String(account.account_type || 'gmail'),
           seed_inbox_enabled: Boolean(account.seed_inbox_enabled),
           seed_test_address: String(account.seed_test_address || account.email || '')
@@ -256,8 +256,8 @@ export default function SettingsClient({ workspace, isAdmin = false }: { workspa
 
   function senderSettingsPatch(account: GmailAccount) {
     const draft = limitDrafts[account.id];
-    const dailyLimit = Math.max(1, Math.min(50000, Number(draft?.daily_limit || account.daily_limit || 150)));
-    const defaultRunLimit = Math.max(1, Math.min(dailyLimit, Number(draft?.default_run_limit || account.default_run_limit || Math.min(dailyLimit, 100))));
+    const dailyLimit = Math.max(1, Math.min(50000, Number(draft?.daily_limit || account.daily_limit || 450)));
+    const defaultRunLimit = Math.max(1, Math.min(dailyLimit, Number(draft?.default_run_limit || account.default_run_limit || Math.min(dailyLimit, 50))));
     return {
       account_type: draft?.account_type || account.account_type || 'gmail',
       daily_limit: dailyLimit,
@@ -376,8 +376,8 @@ export default function SettingsClient({ workspace, isAdmin = false }: { workspa
 
   async function toggleSeedInbox(account: GmailAccount, enabled: boolean) {
     const draft = limitDrafts[account.id] || {
-      daily_limit: String(account.daily_limit || 150),
-      default_run_limit: String(account.default_run_limit || 100),
+      daily_limit: String(account.daily_limit || 450),
+      default_run_limit: String(account.default_run_limit || 50),
       account_type: String(account.account_type || 'gmail'),
       seed_inbox_enabled: Boolean(account.seed_inbox_enabled),
       seed_test_address: String(account.seed_test_address || account.email || '')
@@ -691,11 +691,11 @@ export default function SettingsClient({ workspace, isAdmin = false }: { workspa
 
         <div className="table-wrap" style={{ marginTop: 14 }}><table><thead><tr><th>Email</th><th>Status</th><th>Limits</th><th>Seed receiver</th><th>Total sent</th><th>Actions</th></tr></thead><tbody>
           {accounts.map((account) => {
-            const draft = limitDrafts[account.id] || { daily_limit: String(account.daily_limit || 150), default_run_limit: String(account.default_run_limit || 100), account_type: String(account.account_type || 'gmail'), seed_inbox_enabled: Boolean(account.seed_inbox_enabled), seed_test_address: String(account.seed_test_address || account.email || '') };
+            const draft = limitDrafts[account.id] || { daily_limit: String(account.daily_limit || 450), default_run_limit: String(account.default_run_limit || 50), account_type: String(account.account_type || 'gmail'), seed_inbox_enabled: Boolean(account.seed_inbox_enabled), seed_test_address: String(account.seed_test_address || account.email || '') };
             return <tr key={account.id}>
               <td><strong>{account.email}</strong><br /><span className="muted">{account.last_error || (account.paused_until ? `Paused until ${new Date(account.paused_until).toLocaleString()}` : 'Ready')}</span></td>
               <td><span className={`status ${isPaused(account) ? 'paused' : account.status}`}>{isPaused(account) ? 'paused' : account.status}</span><br /><select className="select" value={draft.account_type} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, account_type: e.target.value } }))}><option value="gmail">Gmail</option><option value="workspace">Workspace</option><option value="other">Other</option></select></td>
-              <td><div className="grid grid-2"><div><label className="label">Daily safe limit</label><input className="input" type="number" min={1} value={draft.daily_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, daily_limit: e.target.value } }))} /></div><div><label className="label">Default max/run</label><input className="input" type="number" min={1} value={draft.default_run_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, default_run_limit: e.target.value } }))} /></div></div></td>
+              <td className="sender-limits-cell"><div className="sender-limits-grid"><div><label className="label">Daily safe limit</label><input className="input sender-limit-input" type="number" inputMode="numeric" min={1} value={draft.daily_limit} placeholder="450" required aria-label={`Daily safe limit for ${account.email}`} onBlur={(e) => { if (!e.target.value.trim()) setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, daily_limit: '450' } })); }} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, daily_limit: e.target.value } }))} /><span className="muted sender-limit-hint">Blank resets to 450/day</span></div><div><label className="label">Default max/run</label><input className="input sender-limit-input" type="number" inputMode="numeric" min={1} value={draft.default_run_limit} placeholder="50" required aria-label={`Default maximum per run for ${account.email}`} onBlur={(e) => { if (!e.target.value.trim()) setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, default_run_limit: '50' } })); }} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, default_run_limit: e.target.value } }))} /><span className="muted sender-limit-hint">Blank resets to 50/run — never unlimited</span></div></div></td>
               <td><label className="checkbox-row"><input type="checkbox" checked={draft.seed_inbox_enabled} onChange={(e) => toggleSeedInbox(account, e.target.checked)} /> Use as seed receiver</label><span className="muted" style={{ display: 'block', fontSize: 12 }}>Receives test emails from sender accounts. It does not send outreach unless also used as a sender.</span><input className="input" value={draft.seed_test_address} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_test_address: e.target.value } }))} placeholder="seed inbox email" /></td>
               <td><strong>{Number(sentTotalByEmail[normalizeEmail(account.email)] ?? account.sent_today ?? 0).toLocaleString()}</strong><br /><span className="muted">total sent</span><br /><span className="muted">Signature: {account.signature_enabled === false ? 'off' : account.signature_text || account.signature_html || account.signature_logo_url ? 'on' : 'empty'}</span></td>
               <td><button className="btn secondary" type="button" disabled={busy} onClick={() => saveSenderSettings(account)}>Save sender settings</button> <button className="btn secondary" type="button" disabled={busy || !(account.access_token || account.refresh_token)} onClick={() => verifySenderProfile(account)}>Verify</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => pauseOrResume(account)}>{isPaused(account) || account.status !== 'connected' ? 'Resume' : 'Pause'}</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => removeAccount(account)}>Remove</button></td>

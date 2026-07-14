@@ -26,9 +26,9 @@ async function assertMember(workspaceId: string) {
     .eq('workspace_id', workspaceId)
     .eq('user_id', user.id)
     .eq('approved', true)
-    .maybeSingle();
+    .limit(1);
   if (error) return { error: error.message, status: 500 } as const;
-  if (!member) return { error: 'You are not approved for this workspace.', status: 403 } as const;
+  if (!member?.length) return { error: 'You are not approved for this workspace.', status: 403 } as const;
   return { user, member } as const;
 }
 

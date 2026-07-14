@@ -54,7 +54,7 @@ async function signedInMemberCanRun(workspaceId: string) {
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
       .eq('approved', true)
-      .maybeSingle();
+      .limit(1);
     if (memberError) return false;
     return Boolean(member);
   } catch {

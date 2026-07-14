@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
 import { parseSourceScoutText, type SourceScoutMode } from '@/lib/source-scout';
+import { businessIdentityKeys } from '@/lib/normalize';
 
 function errorMessage(error: unknown) {
   if (!error) return 'Unknown error';
@@ -42,21 +43,35 @@ export async function POST(request: NextRequest) {
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
       .eq('approved', true)
-      .maybeSingle();
+      .limit(1);
     if (memberError) throw memberError;
-    if (!member) return NextResponse.json({ success: false, error: 'You are not approved for this workspace.' }, { status: 403 });
+    if (!member?.length) return NextResponse.json({ success: false, error: 'You are not approved for this workspace.' }, { status: 403 });
 
     const parsed = parseSourceScoutText({ text, niche, location, country, sourceMode });
     if (previewOnly) return NextResponse.json({ success: true, previewOnly: true, ...parsed });
 
-    const leadKeys = Array.from(new Set(parsed.leads.map((lead) => lead.normalized_key).filter(Boolean)));
-    let teamDuplicateKeys = new Set<string>();
-    if (leadKeys.length) {
-      const { data: teamDupes } = await supabase.rpc('team_duplicate_keys', { input_keys: leadKeys, target_workspace: workspaceId });
-      teamDuplicateKeys = new Set((teamDupes || []).map((row: any) => String(row.normalized_key || '')).filter(Boolean));
+    const leadIdentityKeys = new Map<string, string[]>();
+    const allIdentityKeys = new Set<string>();
+    for (const lead of parsed.leads) {
+      const keys = businessIdentityKeys(lead as any);
+      leadIdentityKeys.set(lead.normalized_key, keys);
+      for (const key of keys) allIdentityKeys.add(key);
+    }
+    const teamDuplicateKeys = new Set<string>();
+    const identityKeyList = Array.from(allIdentityKeys);
+    for (let index = 0; index < identityKeyList.length; index += 1000) {
+      const { data: teamDupes, error: teamError } = await supabase.rpc('team_duplicate_keys', {
+        input_keys: identityKeyList.slice(index, index + 1000),
+        target_workspace: workspaceId
+      });
+      if (teamError) throw teamError;
+      for (const row of teamDupes || []) teamDuplicateKeys.add(String((row as any).normalized_key || ''));
     }
 
-    const filteredLeads = parsed.leads.filter((lead) => !teamDuplicateKeys.has(lead.normalized_key));
+    const isTeamDuplicate = (lead: (typeof parsed.leads)[number]) =>
+      (leadIdentityKeys.get(lead.normalized_key) || []).some((key) => teamDuplicateKeys.has(key));
+    const filteredLeads = parsed.leads.filter((lead) => !isTeamDuplicate(lead));
+    const teamDuplicateLeadCount = parsed.leads.length - filteredLeads.length;
 
     const { data: batch, error: batchError } = await supabase
       .from('import_batches')
@@ -65,7 +80,7 @@ export async function POST(request: NextRequest) {
         file_name: `source-scout-${sourceMode}-${new Date().toISOString()}`,
         row_count: filteredLeads.length,
         inserted_count: 0,
-        skipped_count: teamDuplicateKeys.size,
+        skipped_count: teamDuplicateLeadCount,
         headers: ['name', 'email', 'website', 'phone', 'category', 'location', 'source'],
         category_id: audienceCategoryId,
         category_name: audienceCategoryName,
@@ -146,14 +161,14 @@ export async function POST(request: NextRequest) {
 
     await supabase
       .from('import_batches')
-      .update({ inserted_count: inserted.length, skipped_count: Math.max(0, payload.length - inserted.length) + teamDuplicateKeys.size })
+      .update({ inserted_count: inserted.length, skipped_count: Math.max(0, payload.length - inserted.length) + teamDuplicateLeadCount })
       .eq('id', batch.id);
 
     await supabase.from('activity_logs').insert({
       workspace_id: workspaceId,
       type: 'source_scout_import',
       message: `Source Scout imported ${inserted.length} lead(s), direct emails ${directEmailRows.length}, queued ${queuedAutoScout} website(s) for Auto Scout.`,
-      raw: { sourceMode, niche, location, country, parsedCounts: { leads: parsed.leads.length, directEmailCount: parsed.directEmailCount, websiteOnlyCount: parsed.websiteOnlyCount, teamDuplicatesRemoved: teamDuplicateKeys.size }, importBatchId: batch.id },
+      raw: { sourceMode, niche, location, country, parsedCounts: { leads: parsed.leads.length, directEmailCount: parsed.directEmailCount, websiteOnlyCount: parsed.websiteOnlyCount, teamDuplicatesRemoved: teamDuplicateLeadCount }, importBatchId: batch.id },
       created_by: user.id
     });
 
@@ -162,8 +177,8 @@ export async function POST(request: NextRequest) {
       importBatchId: batch.id,
       parsed: parsed.leads.length,
       inserted: inserted.length,
-      skippedOrDuplicate: Math.max(0, payload.length - inserted.length) + teamDuplicateKeys.size,
-      teamDuplicatesRemoved: teamDuplicateKeys.size,
+      skippedOrDuplicate: Math.max(0, payload.length - inserted.length) + teamDuplicateLeadCount,
+      teamDuplicatesRemoved: teamDuplicateLeadCount,
       directEmails: directEmailRows.length,
       websiteOnly: inserted.filter((row) => !row.email && row.website).length,
       queuedAutoScout,

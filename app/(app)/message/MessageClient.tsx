@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase-browser";
 import { analyzeSpamRisk } from "@/lib/spam-guard";
 import { emitLiveActivity } from "@/lib/live-activity-client";
 import { applyCountryFilter, businessMatchesCountry, extractBusinessCountries } from "@/lib/country-location";
+import { resolveBusinessLanguage, resolveTemplateContent } from "@/lib/template-language";
+import { businessIdentityKeys } from "@/lib/normalize";
 import {
   Business,
   GmailAccount,
@@ -42,6 +44,7 @@ type LocationOption = {
   value: string;
   label: string;
   count: number;
+  totalCount: number;
 };
 
 type SendResult = {
@@ -90,6 +93,10 @@ const LOCATION_RAW_KEYS = [
 ];
 
 const READY_PAGE_SIZE = 100;
+const LOCATION_SCAN_PAGE_SIZE = 1000;
+const COUNTRY_SCAN_PAGE_SIZE = 1000;
+const SAFE_SCHEDULE_CHUNK_SIZE = 3;
+const MESSAGE_REQUEST_TIMEOUT_MS = 90000;
 const MAX_MESSAGE_BATCH_SIZE = 50000;
 const SHORTCODES = [
   "{name}",
@@ -131,6 +138,22 @@ function formatError(error: unknown) {
     );
   } catch {
     return String(error);
+  }
+}
+
+async function fetchJsonWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs = MESSAGE_REQUEST_TIMEOUT_MS,
+) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    const json = await response.json().catch(() => ({}));
+    return { response, json };
+  } finally {
+    window.clearTimeout(timer);
   }
 }
 
@@ -416,6 +439,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [autoRunSchedules, setAutoRunSchedules] = useState(true);
   const [scheduleRunnerBusy, setScheduleRunnerBusy] = useState(false);
   const scheduleRunnerRef = useRef(false);
+  const refreshInFlightRef = useRef(false);
+  const locationsRequestRef = useRef(0);
+  const readyContactsRequestRef = useRef(0);
   const [scheduleReminderEnabled, setScheduleReminderEnabled] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<string>("unsupported");
   const [showMoreOptions, setShowMoreOptions] = useState(false);
@@ -468,8 +494,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const selectedAudienceCategory =
     categories.find((c) => c.id === audienceCategoryId) || null;
   function senderDailyLimit(account: GmailAccount) {
-    const limit = Number(account.daily_limit || 0);
-    return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : Number.POSITIVE_INFINITY;
+    const limit = Number(account.daily_limit || 450);
+    return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 450;
   }
   function senderRemainingToday(account: GmailAccount) {
     const daily = senderDailyLimit(account);
@@ -492,19 +518,22 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   });
   const previewBusiness =
     readyContacts.find((b) => selectedContacts[b.id]) || readyContacts[0];
+  const previewLocalized = previewBusiness && currentTemplate
+    ? resolveTemplateContent(currentTemplate, previewBusiness)
+    : null;
   const previewSubject =
-    previewBusiness && currentTemplate
+    previewBusiness && previewLocalized
       ? renderTemplate(
           splitSubjects(
-            currentTemplate.subject,
-            currentTemplate.subject_variants,
-          )[0] || currentTemplate.subject,
+            previewLocalized.subject,
+            previewLocalized.subjectVariants,
+          )[0] || previewLocalized.subject,
           previewBusiness,
         )
       : "";
   const previewBody =
-    previewBusiness && currentTemplate
-      ? renderTemplate(currentTemplate.message, previewBusiness)
+    previewBusiness && previewLocalized
+      ? renderTemplate(previewLocalized.message, previewBusiness)
       : "";
   const spamReport = analyzeSpamRisk(previewSubject, previewBody);
 
@@ -551,68 +580,60 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     setSelectedAccounts((current) => {
       const next: Record<string, boolean> = {};
       for (const account of rows)
-        next[account.id] =
-          current[account.id] ??
-          (["connected", "ready"].includes(String(account.status || "")) &&
-            !isPaused(account));
+        next[account.id] = current[account.id] ??
+          (["connected", "ready"].includes(String(account.status || "")) && !isPaused(account));
       return next;
     });
     if (!specificSenderId && rows[0]?.id) setSpecificSenderId(rows[0].id);
 
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const countsByEmail: Record<string, number> = {};
-    const senderEmails = rows.map((account) => normalizeEmail(account.email)).filter(Boolean);
-    if (senderEmails.length) {
-      const { data: sentRows } = await supabase
-        .from("sent_messages")
-        .select("from_email")
-        .eq("workspace_id", workspace.id)
-        .eq("status", "sent")
-        .gte("sent_at", since)
-        .in("from_email", senderEmails)
-        .range(0, 99999);
-      for (const row of sentRows || []) {
-        const key = normalizeEmail((row as any).from_email);
-        if (key) countsByEmail[key] = (countsByEmail[key] || 0) + 1;
-      }
-    }
     const counts: Record<string, number> = {};
-    for (const account of rows) counts[account.id] = countsByEmail[normalizeEmail(account.email)] || 0;
+    for (const account of rows) counts[account.id] = Math.max(0, Number(account.sent_today || 0));
     setSenderLast24h(counts);
   }
 
   async function loadAvailableLocations() {
-    let query = contactableStatusQuery(
-      supabase
+    const requestId = ++locationsRequestRef.current;
+    const counts = new Map<string, { total: number; sendable: number }>();
+    const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
+
+    // Scan the complete workspace in small pages. The Businesses page shows the
+    // full workspace, so the Send filter must not silently stop at 10,000 rows
+    // or hide countries merely because some leads still need an email.
+    for (let offset = 0; ; offset += LOCATION_SCAN_PAGE_SIZE) {
+      let query = supabase
         .from("businesses")
-        .select("id,location,raw,category,category_id,email,status,updated_at")
+        .select("id,location,raw,domain,website,email,status,category,category_id,updated_at")
         .eq("workspace_id", workspace.id)
-        .not("email", "is", null)
-        .neq("email", "")
         .order("updated_at", { ascending: false })
-        .range(0, 19999),
-    );
-
-    if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
-    else {
-      const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
-      if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
-    }
-
-    const { data, error: locationError } = await query;
-    if (locationError) throw locationError;
-
-    const counts = new Map<string, number>();
-    for (const row of (data || []) as Business[]) {
-      for (const value of extractBusinessLocations(row)) {
-        counts.set(value, (counts.get(value) || 0) + 1);
+        .range(offset, offset + LOCATION_SCAN_PAGE_SIZE - 1);
+      if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
+      else if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
+      const { data, error: locationError } = await query;
+      if (locationError) throw locationError;
+      if (requestId !== locationsRequestRef.current) return;
+      const rows = (data || []) as Business[];
+      for (const row of rows) {
+        const isSendable = Boolean(
+          row.email && CONTACTABLE_BUSINESS_STATUSES.includes(String(row.status || "")),
+        );
+        for (const value of extractBusinessLocations(row)) {
+          const current = counts.get(value) || { total: 0, sendable: 0 };
+          current.total += 1;
+          if (isSendable) current.sendable += 1;
+          counts.set(value, current);
+        }
       }
+      if (rows.length < LOCATION_SCAN_PAGE_SIZE) break;
     }
-
+    if (requestId !== locationsRequestRef.current) return;
     const options = Array.from(counts.entries())
-      .map(([value, count]) => ({ value, count, label: `${value} (${count.toLocaleString()})` }))
+      .map(([value, totals]) => ({
+        value,
+        count: totals.sendable,
+        totalCount: totals.total,
+        label: `${value} (${totals.sendable.toLocaleString()} ready / ${totals.total.toLocaleString()} total)`,
+      }))
       .sort((a, b) => a.value.localeCompare(b.value));
-
     setLocationOptions(options);
     setCountryFilter((current) =>
       current && !options.some((option) => option.value === current) ? "" : current,
@@ -620,59 +641,65 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   }
 
   async function loadReadyContacts() {
+    const requestId = ++readyContactsRequestRef.current;
     const cleanSearch = readySearch.trim().replace(/[%_]/g, "");
     const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
     const cleanCountry = countryFilter.trim().replace(/[%_]/g, "");
-    const targetBusinessId =
-      typeof window !== "undefined"
-        ? new URL(window.location.href).searchParams.get("business")
-        : "";
-    const pageLimit = cleanCountry ? 10000 : READY_PAGE_SIZE;
-    let query = contactableStatusQuery(
-      supabase
-        .from("businesses")
-        .select("*", { count: "exact" })
-        .eq("workspace_id", workspace.id)
-        .not("email", "is", null)
-        .neq("email", "")
-        .order("updated_at", { ascending: true })
-        .limit(pageLimit),
-    );
-    if (cleanSearch)
-      query = query.or(
-        `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
+    const targetBusinessId = typeof window !== "undefined" ? new URL(window.location.href).searchParams.get("business") : "";
+    let rows: Business[] = [];
+    let total = 0;
+    if (!cleanCountry) {
+      let query = contactableStatusQuery(
+        supabase.from("businesses").select("*", { count: "exact" })
+          .eq("workspace_id", workspace.id).not("email", "is", null).neq("email", "")
+          .order("updated_at", { ascending: true }).limit(READY_PAGE_SIZE),
       );
-    if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
-    else if (cleanCategory)
-      query = query.ilike("category", `%${cleanCategory}%`);
-    const { data, error: loadError, count } = await query;
-    if (loadError) throw loadError;
-    let allRows = applyLocationFilter((data || []) as Business[], cleanCountry);
-    let rows = allRows.slice(0, READY_PAGE_SIZE);
+      if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
+      if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
+      else if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
+      const { data, error: loadError, count } = await query;
+      if (loadError) throw loadError;
+      rows = (data || []) as Business[];
+      total = Number(count || rows.length);
+    } else {
+      const matched: Business[] = [];
+      for (let offset = 0; ; offset += COUNTRY_SCAN_PAGE_SIZE) {
+        let query = contactableStatusQuery(
+          supabase.from("businesses").select("*")
+            .eq("workspace_id", workspace.id).not("email", "is", null).neq("email", "")
+            .order("updated_at", { ascending: true }).range(offset, offset + COUNTRY_SCAN_PAGE_SIZE - 1),
+        );
+        if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
+        if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
+        else if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
+        const { data, error: loadError } = await query;
+        if (loadError) throw loadError;
+        if (requestId !== readyContactsRequestRef.current) return;
+        const pageRows = (data || []) as Business[];
+        const pageMatches = applyLocationFilter(pageRows, cleanCountry);
+        total += pageMatches.length;
+        for (const row of pageMatches) {
+          if (matched.length < READY_PAGE_SIZE) matched.push(row);
+        }
+        if (pageRows.length < COUNTRY_SCAN_PAGE_SIZE) break;
+      }
+      rows = matched;
+    }
+    if (requestId !== readyContactsRequestRef.current) return;
     let selected: Record<string, boolean> = {};
     if (targetBusinessId) {
-      const { data: target, error: targetError } = await supabase
-        .from("businesses")
-        .select("*")
-        .eq("workspace_id", workspace.id)
-        .eq("id", targetBusinessId)
-        .maybeSingle();
+      const { data: target, error: targetError } = await supabase.from("businesses").select("*")
+        .eq("workspace_id", workspace.id).eq("id", targetBusinessId).maybeSingle();
       if (targetError) throw targetError;
       if (target?.email) {
-        rows = [
-          target as Business,
-          ...rows.filter((b) => b.id !== target.id),
-        ].slice(0, READY_PAGE_SIZE);
+        rows = [target as Business, ...rows.filter((business) => business.id !== target.id)].slice(0, READY_PAGE_SIZE);
         selected = { [target.id]: true };
         setStatus(`Loaded selected business: ${target.name || target.email}.`);
       }
     }
-    setReadyContacts(rows);
-    setReadyTotal(cleanCountry ? allRows.length : count || rows.length);
-    setSelectedContacts(selected);
-    if (!rows.length && cleanCountry) {
-      setStatus(`No contactable emails matched ${cleanCountry}. Try All countries or run Repair Ready Contacts.`);
-    }
+    if (requestId !== readyContactsRequestRef.current) return;
+    setReadyContacts(rows); setReadyTotal(total || rows.length); setSelectedContacts(selected);
+    if (!rows.length && cleanCountry) setStatus(`No contactable emails matched ${cleanCountry}. Try All countries or run Repair Ready Contacts.`);
   }
 
   async function loadRecentSent() {
@@ -712,33 +739,50 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       .from("message_schedules")
       .select("*")
       .eq("workspace_id", workspace.id)
-      .in("status", ["scheduled", "due", "running", "stopped", "cancelled", "failed", "complete", "completed"])
+      .in("status", ["scheduled", "due", "running", "sent", "stopped", "cancelled", "failed", "complete", "completed"])
       .order("updated_at", { ascending: false })
       .limit(80);
     if (scheduleError) throw scheduleError;
-    setSchedules((data || []) as MessageSchedule[]);
+    const rows = (data || []) as MessageSchedule[];
+    setSchedules(rows);
+
+    const latestJob = rows.find((row) => {
+      const raw = (row.raw || {}) as Record<string, unknown>;
+      return raw.durable_job === true || row.run_kind === "manual_now";
+    });
+    if (latestJob) {
+      const requested = Math.max(0, Number(latestJob.target_count || 0));
+      const attempted = Math.max(0, Number(latestJob.processed_count || 0));
+      const sent = Math.max(0, Number(latestJob.sent_count || 0));
+      const failed = Math.max(0, Number(latestJob.failed_count || 0));
+      const skipped = Math.max(0, Number(latestJob.skipped_count || 0));
+      setSummary({
+        requested,
+        attempted,
+        sent,
+        failed,
+        skipped,
+        stopped: ["stopped", "cancelled", "failed"].includes(String(latestJob.status || "")),
+      });
+      setProgress(requested > 0 ? Math.min(100, Math.round((attempted / requested) * 100)) : 0);
+    }
   }
 
   async function refreshAll() {
-    setLoading(true);
-    setError("");
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+    setLoading(true); setError("");
     try {
-      await Promise.all([
-        loadCategories(),
-        loadTemplates(),
-        loadAccounts(),
-        loadAvailableLocations(),
-        loadReadyContacts(),
-        loadRecentSent(),
-        loadDueFollowUps(),
-        loadSchedules(),
-      ]);
-      setStatus("Loaded Message workspace.");
-    } catch (err) {
-      setError(formatError(err));
-    } finally {
-      setLoading(false);
-    }
+      const critical = await Promise.allSettled([loadCategories(), loadTemplates(), loadAccounts()]);
+      const secondary = await Promise.allSettled([loadReadyContacts(), loadRecentSent(), loadDueFollowUps(), loadSchedules()]);
+      const failures = [...critical, ...secondary]
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => formatError(result.reason));
+      if (failures.length) {
+        setStatus(`Message page loaded with ${failures.length} temporary data warning${failures.length === 1 ? "" : "s"}. Sending controls remain available.`);
+        setError(failures.slice(0, 2).join(" | "));
+      } else setStatus("Loaded Message workspace.");
+    } finally { refreshInFlightRef.current = false; setLoading(false); }
   }
 
   useEffect(() => {
@@ -748,7 +792,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
   useEffect(() => {
     if (!workspace.id) return;
-    loadAvailableLocations().catch((err) => setError(formatError(err)));
+    const timer = window.setTimeout(() => loadAvailableLocations().catch((err) => setError(formatError(err))), 350);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, audienceCategoryId, businessCategoryFilter]);
 
@@ -776,18 +821,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (!workspace.id) return;
     let accountTick = 0;
     const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      loadSchedules().catch(() => undefined);
-      loadRecentSent().catch(() => undefined);
+      if (document.visibilityState !== "visible" || busy || loading) return;
+      void Promise.allSettled([loadSchedules(), loadRecentSent()]);
       accountTick += 1;
-      if (accountTick >= 3) {
-        accountTick = 0;
-        loadAccounts().catch(() => undefined);
-      }
-    }, 20000);
+      if (accountTick >= 4) { accountTick = 0; loadAccounts().catch(() => undefined); }
+    }, 30000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace.id]);
+  }, [workspace.id, busy, loading]);
 
   useEffect(() => {
     if (!workspace.id || !autoRunSchedules) return;
@@ -801,7 +842,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           new Date(schedule.scheduled_for).getTime() <= now,
       );
       if (hasDueSchedule) runDueSchedulesFromApp({ silent: true }).catch(() => undefined);
-    }, 15000);
+    }, 12000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, autoRunSchedules, busy, loading, scheduleRunnerBusy, schedules]);
@@ -968,11 +1009,11 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     const raw = senderRunLimits[account.id];
     let runCap = Number.POSITIVE_INFINITY;
     if (raw === undefined || raw === null || String(raw).trim() === "") {
-      const defaultLimit = Number(account.default_run_limit || account.daily_limit || 0);
-      runCap = Number.isFinite(defaultLimit) && defaultLimit > 0 ? Math.floor(defaultLimit) : Number.POSITIVE_INFINITY;
+      const defaultLimit = Number(account.default_run_limit || 50);
+      runCap = Number.isFinite(defaultLimit) && defaultLimit > 0 ? Math.floor(defaultLimit) : 50;
     } else {
       const parsed = Number(raw);
-      runCap = !Number.isFinite(parsed) || parsed <= 0 ? Number.POSITIVE_INFINITY : Math.floor(parsed);
+      runCap = !Number.isFinite(parsed) || parsed <= 0 ? 50 : Math.floor(parsed);
     }
     const remaining = senderRemainingToday(account);
     return Math.max(0, Math.min(runCap, remaining));
@@ -1010,26 +1051,36 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         ),
       ]);
 
-      let filteredQuery = contactableStatusQuery(
-        supabase
-          .from("businesses")
-          .select("id,location,raw,email,status,category,category_id,name,domain,website", { count: "exact" })
-          .eq("workspace_id", workspace.id)
-          .not("email", "is", null)
-          .neq("email", "")
-          .limit(cleanCountry ? 10000 : 1),
-      );
-      if (cleanSearch) filteredQuery = filteredQuery.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
-      if (audienceCategoryId) filteredQuery = filteredQuery.eq("category_id", audienceCategoryId);
-      else if (cleanCategory) filteredQuery = filteredQuery.ilike("category", `%${cleanCategory}%`);
-      const { data: filteredRows, count: filteredBeforeLocation } = await filteredQuery;
-      const locationMatched = cleanCountry ? applyLocationFilter((filteredRows || []) as Business[], cleanCountry).length : Number(filteredBeforeLocation || 0);
+      let filteredBeforeLocation = 0;
+      let locationMatched = 0;
+      for (let offset = 0; ; offset += COUNTRY_SCAN_PAGE_SIZE) {
+        let filteredQuery = contactableStatusQuery(
+          supabase
+            .from("businesses")
+            .select("id,location,raw,email,status,category,category_id,name,domain,website")
+            .eq("workspace_id", workspace.id)
+            .not("email", "is", null)
+            .neq("email", "")
+            .range(offset, offset + COUNTRY_SCAN_PAGE_SIZE - 1),
+        );
+        if (cleanSearch) filteredQuery = filteredQuery.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
+        if (audienceCategoryId) filteredQuery = filteredQuery.eq("category_id", audienceCategoryId);
+        else if (cleanCategory) filteredQuery = filteredQuery.ilike("category", `%${cleanCategory}%`);
+        const { data: filteredRows, error: filteredError } = await filteredQuery;
+        if (filteredError) throw filteredError;
+        const pageRows = (filteredRows || []) as Business[];
+        filteredBeforeLocation += pageRows.length;
+        locationMatched += cleanCountry
+          ? applyLocationFilter(pageRows, cleanCountry).length
+          : pageRows.length;
+        if (pageRows.length < COUNTRY_SCAN_PAGE_SIZE) break;
+      }
       const pieces = [
         messageKind === "follow_up" ? "No due follow-up contacts found." : "No contactable leads found for this send.",
         `${Number(totalWithEmail || 0).toLocaleString()} total lead(s) have an email.`,
         `${Number(contactableWithEmail || 0).toLocaleString()} have a contactable status: ${CONTACTABLE_BUSINESS_STATUSES.join(", ")}.`,
       ];
-      if (audienceCategoryId || cleanCategory || cleanSearch) pieces.push(`${Number(filteredBeforeLocation || 0).toLocaleString()} match your audience/category/search filters before location.`);
+      if (audienceCategoryId || cleanCategory || cleanSearch) pieces.push(`${Number(filteredBeforeLocation).toLocaleString()} match your audience/category/search filters before location.`);
       if (cleanCountry) pieces.push(`${locationMatched.toLocaleString()} match the selected country: ${cleanCountry}.`);
       pieces.push("Use All countries, clear search/category filters, or run Auto Scout/Repair Ready Contacts if the email exists but is not marked contactable.");
       return pieces.join(" ");
@@ -1038,6 +1089,43 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         ? "No due follow-up contacts with email found."
         : "No contactable leads with email found. Clear filters or run Auto Scout/Repair Ready Contacts.";
     }
+  }
+
+  async function filterTeamSendableContacts(candidates: Business[]) {
+    if (!candidates.length) return { allowed: [] as Business[], blocked: 0 };
+
+    const businessKeys = new Map<string, string[]>();
+    const allKeys = new Set<string>();
+    for (const business of candidates) {
+      const keys = businessIdentityKeys(business as any);
+      businessKeys.set(business.id, keys);
+      for (const key of keys) allKeys.add(key);
+    }
+    if (!allKeys.size) return { allowed: candidates, blocked: 0 };
+
+    const blockedKeys = new Set<string>();
+    const keys = Array.from(allKeys);
+    const pageSize = 1000;
+    for (let index = 0; index < keys.length; index += pageSize) {
+      const { data, error: guardError } = await supabase.rpc('team_duplicate_keys', {
+        input_keys: keys.slice(index, index + pageSize),
+        target_workspace: workspace.id
+      });
+      if (guardError) {
+        const message = formatError(guardError);
+        if (message.toLowerCase().includes('team_duplicate_keys')) {
+          throw new Error('Team duplicate protection is not installed. Run RUN_THIS_SQL_ONCE_V10_32.sql once.');
+        }
+        throw guardError;
+      }
+      for (const row of data || []) blockedKeys.add(String((row as any).normalized_key || ''));
+    }
+
+    const isBlocked = (business: Business) => (businessKeys.get(business.id) || []).some((key) => blockedKeys.has(key));
+    return {
+      allowed: candidates.filter((business) => !isBlocked(business)),
+      blocked: candidates.filter(isBlocked).length
+    };
   }
 
   async function getContactsForSend(
@@ -1059,36 +1147,80 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         const key = normalizeEmail(business.email);
         if (key && !unique.has(key)) unique.set(key, business);
       }
-      return Array.from(unique.values()).slice(0, limit);
+      const guarded = await filterTeamSendableContacts(
+        Array.from(unique.values()).slice(0, limit),
+      );
+      if (guarded.blocked > 0) {
+        setStatus(
+          `${guarded.blocked.toLocaleString()} lead${guarded.blocked === 1 ? " was" : "s were"} blocked because another team member owns the business or email.`,
+        );
+      }
+      return guarded.allowed;
     }
     const cleanSearch = readySearch.trim().replace(/[%_]/g, "");
     const cleanCategory = businessCategoryFilter.trim().replace(/[%_]/g, "");
     const cleanCountry = countryFilter.trim().replace(/[%_]/g, "");
-    const queryLimit = cleanCountry ? Math.max(1000, Math.min(10000, limit * 8)) : limit;
-    let query = contactableStatusQuery(
-      supabase
-        .from("businesses")
-        .select("*")
-        .eq("workspace_id", workspace.id)
-        .not("email", "is", null)
-        .neq("email", "")
-        .order("updated_at", { ascending: true })
-        .limit(queryLimit),
-    );
-    if (cleanSearch)
-      query = query.or(
-        `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
+    if (!cleanCountry) {
+      let query = contactableStatusQuery(
+        supabase
+          .from("businesses")
+          .select("*")
+          .eq("workspace_id", workspace.id)
+          .not("email", "is", null)
+          .neq("email", "")
+          .order("updated_at", { ascending: true })
+          .limit(limit),
       );
-    if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
-    else if (cleanCategory)
-      query = query.ilike("category", `%${cleanCategory}%`);
-    const { data, error: loadError } = await query;
-    if (loadError) throw loadError;
-    for (const business of applyLocationFilter((data || []) as Business[], cleanCountry)) {
-      const key = normalizeEmail(business.email);
-      if (key && !unique.has(key)) unique.set(key, business);
+      if (cleanSearch)
+        query = query.or(
+          `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
+        );
+      if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
+      else if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
+      const { data, error: loadError } = await query;
+      if (loadError) throw loadError;
+      for (const business of (data || []) as Business[]) {
+        const key = normalizeEmail(business.email);
+        if (key && !unique.has(key)) unique.set(key, business);
+      }
+    } else {
+      for (let offset = 0; unique.size < limit; offset += COUNTRY_SCAN_PAGE_SIZE) {
+        let query = contactableStatusQuery(
+          supabase
+            .from("businesses")
+            .select("*")
+            .eq("workspace_id", workspace.id)
+            .not("email", "is", null)
+            .neq("email", "")
+            .order("updated_at", { ascending: true })
+            .range(offset, offset + COUNTRY_SCAN_PAGE_SIZE - 1),
+        );
+        if (cleanSearch)
+          query = query.or(
+            `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
+          );
+        if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
+        else if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
+        const { data, error: loadError } = await query;
+        if (loadError) throw loadError;
+        const pageRows = (data || []) as Business[];
+        for (const business of applyLocationFilter(pageRows, cleanCountry)) {
+          const key = normalizeEmail(business.email);
+          if (key && !unique.has(key)) unique.set(key, business);
+          if (unique.size >= limit) break;
+        }
+        if (pageRows.length < COUNTRY_SCAN_PAGE_SIZE) break;
+      }
     }
-    return Array.from(unique.values()).slice(0, limit);
+    const guarded = await filterTeamSendableContacts(
+      Array.from(unique.values()).slice(0, limit),
+    );
+    if (guarded.blocked > 0) {
+      setStatus(
+        `${guarded.blocked.toLocaleString()} lead${guarded.blocked === 1 ? " was" : "s were"} blocked because another team member owns the business or email.`,
+      );
+    }
+    return guarded.allowed;
   }
 
   async function repairReadyContacts() {
@@ -1123,7 +1255,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     template: MessageTemplate,
     index: number,
   ) {
-    const subjects = splitSubjects(template.subject, template.subject_variants);
+    const localized = resolveTemplateContent(template, business);
+    const subjects = splitSubjects(localized.subject, localized.subjectVariants);
     return {
       id: business.id,
       businessId: business.id,
@@ -1131,10 +1264,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       businessName: business.name || "",
       email: normalizeEmail(business.email),
       subject: renderTemplate(
-        subjects[index % Math.max(1, subjects.length)] || template.subject,
+        subjects[index % Math.max(1, subjects.length)] || localized.subject,
         business,
       ),
-      message: renderTemplate(template.message, business),
+      message: renderTemplate(localized.message, business),
       templateId: template.id,
       templateName: template.name,
       categoryId: template.category_id || "",
@@ -1142,7 +1275,11 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       attachments: templateAttachments(template),
       website: business.website || "",
       domain: business.domain || getDomain(business),
-      source: business.source || "scout_v818",
+      source: business.source || "scout_v1031",
+      language: localized.language,
+      languageLabel: localized.languageLabel,
+      detectedLanguage: localized.detectedLanguage,
+      usedLanguageFallback: localized.usedFallback,
     };
   }
 
@@ -1218,7 +1355,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       error_code: result.code || null,
       sent_at: sentAt,
       is_follow_up: !!isFollowUp,
-      raw: { ...result, dry_run: isDryRun, follow_up: !!isFollowUp, attachments: (attachments || []).map((a: any) => ({ name: a.name || a.filename, url: a.public_url || a.url })) },
+      raw: {
+        ...result,
+        dry_run: isDryRun,
+        follow_up: !!isFollowUp,
+        template_language: resolveTemplateContent(template, business).language,
+        detected_business_language: resolveBusinessLanguage(business),
+        attachments: (attachments || []).map((a: any) => ({ name: a.name || a.filename, url: a.public_url || a.url }))
+      },
     };
     const { error: insertError } = await supabase
       .from("sent_messages")
@@ -1313,10 +1457,12 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       ]),
     );
 
-    const response = await fetch("/api/message/start-job", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const { response, json } = await fetchJsonWithTimeout(
+      "/api/message/start-job",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
         workspaceId: workspace.id,
         type: messageKind,
         categoryId,
@@ -1347,9 +1493,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           audience_category_id: audienceCategoryId || null,
           audience_category_name: selectedAudienceCategory?.name || null,
         },
-      }),
-    });
-    const json = await response.json().catch(() => ({}));
+        }),
+      },
+    );
     if (!response.ok || json?.success === false)
       throw new Error(
         json?.error || `Start job failed with HTTP ${response.status}`,
@@ -1368,13 +1514,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     setStatus(
       `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). Keep Scout open while it sends. Job: ${scheduleId}`,
     );
-    await Promise.all([
-      loadSchedules(),
-      loadReadyContacts(),
-      loadRecentSent(),
-      loadDueFollowUps(),
-      loadAccounts(),
-    ]);
+    await Promise.allSettled([loadSchedules(), loadRecentSent(), loadAccounts()]);
   }
 
   async function sendBatch(
@@ -1576,6 +1716,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             workspace_id: workspace.id,
+            business_id: business.id,
             gmail_account_id: account.id,
             to: payload.email,
             subject: payload.subject,
@@ -1590,6 +1731,47 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           result.status || (json?.success ? "sent" : "failed"),
         ).toLowerCase();
         const limitHit = isLimitPayload(json, result);
+        const teamDuplicateBlocked =
+          String(json?.code || result.code || "").toLowerCase() ===
+            "team_duplicate_blocked" ||
+          String(result.status || "").toLowerCase() ===
+            "team_duplicate_blocked";
+
+        if (teamDuplicateBlocked) {
+          const reason =
+            json?.error ||
+            result.reason ||
+            "Blocked because this lead already belongs to another team member.";
+          skipped += 1;
+          rowsForDownload.push({
+            business: business.name,
+            email: business.email,
+            sender: account.email,
+            template: template.name,
+            status: "team_duplicate_blocked",
+            reason,
+          });
+          await logOutreachEvent({
+            batch_id: batchId,
+            business_id: business.id,
+            gmail_account_id: account.id,
+            template_id: template.id,
+            type: "team_duplicate_blocked",
+            message: reason,
+            raw: json,
+          });
+          emitLiveActivity({
+            kind: "send",
+            status: "skipped",
+            title: "Team duplicate blocked",
+            message: `${payload.email} was not sent because another team member owns the lead.`,
+            toEmail: payload.email,
+            fromEmail: account.email,
+            businessName: business.name || "",
+            countText: `${attempted.toLocaleString()} / ${requested.toLocaleString()}`,
+          });
+          continue;
+        }
 
         if (json?.access_token) {
           await supabase
@@ -1835,6 +2017,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     }
   }
 
+  async function startSendNow() {
+    if (busy) return;
+    setBusy(true); setError(""); setProgress(0); setLastResults([]);
+    try { await startDurableSendJob(undefined, { messageKind: "initial" }); }
+    catch (err) { setError(formatError(err)); }
+    finally { setBusy(false); }
+  }
+
   async function saveSchedule() {
     setBusy(true);
     setError("");
@@ -1982,24 +2172,29 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     const byId = new Map(
       ((data || []) as Business[]).map((business) => [business.id, business]),
     );
-    return ids.map((id) => byId.get(id)).filter(Boolean) as Business[];
+    const candidates = ids
+      .map((id) => byId.get(id))
+      .filter(Boolean) as Business[];
+    const guarded = await filterTeamSendableContacts(candidates);
+    if (guarded.blocked > 0) {
+      setStatus(
+        `${guarded.blocked.toLocaleString()} due follow-up${guarded.blocked === 1 ? " was" : "s were"} blocked because another team member owns the lead.`,
+      );
+    }
+    return guarded.allowed;
   }
 
   async function sendDueFollowUpsNow() {
-    const freshDue = await fetchDueFollowUps(
-      Math.min(Number(sendLimit || 1000), 1000),
-    );
-    setDueFollowUps(freshDue);
-    const contacts = await getDueFollowUpBusinesses(
-      Math.min(Number(sendLimit || 1000), freshDue.length || 1000),
-      freshDue,
-    );
-    await sendBatch(contacts, {
-      isFollowUp: true,
-      limit: contacts.length,
-      messageKind: "follow_up",
-      followupSegment: followUpSegment,
-    });
+    if (busy) return;
+    setBusy(true); setError("");
+    try {
+      const freshDue = await fetchDueFollowUps(Math.min(Number(sendLimit || 1000), 1000));
+      setDueFollowUps(freshDue);
+      const contacts = await getDueFollowUpBusinesses(Math.min(Number(sendLimit || 1000), freshDue.length || 1000), freshDue);
+      if (!contacts.length) throw new Error("No due follow-up contacts found.");
+      await startDurableSendJob(contacts, { isFollowUp: true, limit: contacts.length, messageKind: "follow_up", followupSegment: followUpSegment });
+    } catch (err) { setError(formatError(err)); }
+    finally { setBusy(false); }
   }
 
   async function runDueSchedulesFromApp(options?: { silent?: boolean }) {
@@ -2012,18 +2207,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       setStatus("Checking saved sends that are due now...");
     }
     try {
-      const response = await fetch("/api/message/run-schedules", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          limit: 1,
-          workspaceId: workspace.id,
-          targetLimit: 25,
-          senderRunLimit: 25,
-          source: "open_app_schedule_runner",
-        }),
-      });
-      const json = await response.json().catch(() => ({}));
+      const { response, json } = await fetchJsonWithTimeout(
+        "/api/message/run-schedules",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ limit: 1, workspaceId: workspace.id, targetLimit: SAFE_SCHEDULE_CHUNK_SIZE, source: "open_app_schedule_runner" }),
+        },
+      );
       if (!response.ok || json?.success === false)
         throw new Error(
           json?.error || `Due schedule run failed with HTTP ${response.status}`,
@@ -2048,13 +2239,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             : "No due schedules right now.",
         );
       }
-      await Promise.all([
-        loadSchedules(),
-        loadReadyContacts(),
-        loadRecentSent(),
-        loadDueFollowUps(),
-        loadAccounts(),
-      ]);
+      await Promise.allSettled([loadSchedules(), loadRecentSent(), loadAccounts()]);
+      if (results.some((row: any) => ["sent", "failed"].includes(String(row?.status || "")))) {
+        void Promise.allSettled([loadReadyContacts(), loadDueFollowUps()]);
+      }
       return json;
     } catch (err) {
       if (!options?.silent) setError(formatError(err));
@@ -2130,7 +2318,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
   function senderCountLine(account: GmailAccount) {
     const sent = Number(senderLast24h[account.id] || 0);
-    const limit = Number(account.daily_limit || 0);
+    const limit = Number(account.daily_limit || 450);
     return limit > 0
       ? `${sent.toLocaleString()} sent in last 24h / ${limit.toLocaleString()} daily limit`
       : `${sent.toLocaleString()} sent in last 24h`;
@@ -2300,7 +2488,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               ))}
             </select>
             <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-              Countries only. These come from your uploaded leads.
+              Exact countries from your full Businesses list. Counts show ready-to-send leads and total leads.
             </p>
           </div>
           <div>
@@ -2437,7 +2625,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                           className="input"
                           type="number"
                           min={1}
-                          placeholder={`Settings default: ${Number(a.default_run_limit || a.daily_limit || 0).toLocaleString()}`}
+                          placeholder={`Settings default: ${Number(a.default_run_limit || 50).toLocaleString()}`}
                           value={senderRunLimits[a.id] || ""}
                           onChange={(e) =>
                             setSenderRunLimits((cur) => ({
@@ -2451,7 +2639,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                         <label className="label">Today's sending cap</label>
                         <div className="notice" style={{ color: "#86efac" }}>
                           {senderCountLine(a)} · run default{" "}
-                          {Number(a.default_run_limit || 0).toLocaleString()}
+                          {Number(a.default_run_limit || 50).toLocaleString()}
                         </div>
                       </div>
                     </div>
@@ -2468,7 +2656,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                   className="input"
                   type="number"
                   min={1}
-                  placeholder={`Settings default: ${Number(connectedAccounts.find((a) => a.id === specificSenderId)?.default_run_limit || connectedAccounts.find((a) => a.id === specificSenderId)?.daily_limit || 0).toLocaleString()}`}
+                  placeholder={`Settings default: ${Number(connectedAccounts.find((a) => a.id === specificSenderId)?.default_run_limit || 50).toLocaleString()}`}
                   value={senderRunLimits[specificSenderId] || ""}
                   onChange={(e) =>
                     setSenderRunLimits((cur) => ({
@@ -2496,7 +2684,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             className="btn"
             type="button"
             disabled={busy || loading}
-            onClick={() => sendBatch(undefined, { messageKind: "initial" })}
+            onClick={startSendNow}
           >
             Send Now
           </button>
@@ -2593,6 +2781,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                   <th>Use</th>
                   <th>Business</th>
                   <th>Email</th>
+                  <th>Language</th>
                   <th>Category</th>
                 </tr>
               </thead>
@@ -2619,12 +2808,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                       </span>
                     </td>
                     <td>{b.email}</td>
+                    <td>{(() => { const language = resolveBusinessLanguage(b); return <><span className="badge">{language.label}</span><br /><span className="muted" style={{ fontSize: 11 }}>{language.sourceLabel}</span></>; })()}</td>
                     <td>{b.category_name || b.category || "-"}</td>
                   </tr>
                 ))}
                 {!readyContacts.length ? (
                   <tr>
-                    <td colSpan={6} className="muted">
+                    <td colSpan={5} className="muted">
                       No Ready contacts found.
                     </td>
                   </tr>
@@ -2652,6 +2842,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               <p className="muted">
                 {previewBusiness.name || previewBusiness.email}
               </p>
+              {previewLocalized ? <div className="notice" style={{ marginBottom: 12 }}>
+                <strong>Language:</strong> {previewLocalized.languageLabel}. Detected from {previewLocalized.detectedLanguage.sourceLabel}.
+                {previewLocalized.usedFallback ? ' This template has no complete matching translation, so Scout will use English.' : ''}
+              </div> : null}
               <label className="label">Subject</label>
               <div className="notice">{previewSubject}</div>
               <label className="label" style={{ marginTop: 12 }}>

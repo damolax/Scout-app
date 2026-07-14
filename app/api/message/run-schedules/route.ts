@@ -8,6 +8,8 @@ import { analyzeSpamRisk } from "@/lib/spam-guard";
 import { createAppNotification } from "@/lib/notifications";
 import { buildMimeMessage, appendSignatureToText, EmailAttachment } from "@/lib/email-signature";
 import { applyCountryFilter, businessMatchesCountry, extractBusinessCountries } from "@/lib/country-location";
+import { resolveTemplateContent } from "@/lib/template-language";
+import { businessIdentityKeys } from "@/lib/normalize";
 
 type AnyRow = Record<string, any>;
 
@@ -24,8 +26,8 @@ type WorkerSummary = {
   batchId?: string;
 };
 
-const MAX_WORKER_BATCH_SIZE = 2000;
-const MAX_SCHEDULES_PER_RUN = 25;
+const MAX_WORKER_BATCH_SIZE = 10;
+const MAX_SCHEDULES_PER_RUN = 3;
 const CONTACTABLE_BUSINESS_STATUSES = ["ready", "found", "connected"];
 const LOCATION_RAW_KEYS = [
   "location",
@@ -227,20 +229,16 @@ function senderCap(scheduleRaw: AnyRow, account: AnyRow, senderRunLimitOverride?
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed > 0) runLimit = Math.floor(parsed);
   } else {
-    const defaultLimit = Number(
-      account.default_run_limit || account.daily_limit || 0,
-    );
-    runLimit = Number.isFinite(defaultLimit) && defaultLimit > 0
-      ? Math.floor(defaultLimit)
-      : Number.POSITIVE_INFINITY;
+    const defaultLimit = Number(account.default_run_limit || 50);
+    runLimit = Number.isFinite(defaultLimit) && defaultLimit > 0 ? Math.floor(defaultLimit) : 50;
   }
-  const dailyLimit = Number(account.daily_limit || 0);
+  const dailyLimit = Number(account.daily_limit || 450);
   const alreadySent = Number(account.sent_today || 0);
   if (Number.isFinite(dailyLimit) && dailyLimit > 0) {
     const remainingToday = Math.max(0, Math.floor(dailyLimit - alreadySent));
     return Math.max(0, Math.min(runLimit, remainingToday));
   }
-  return runLimit;
+  return Math.max(0, Math.min(runLimit, 450));
 }
 
 
@@ -483,6 +481,69 @@ async function loadAccounts(
   );
 }
 
+async function guardTeamBusinessForSend(
+  supabase: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  businessId: string,
+) {
+  const { data: rows, error: businessError } = await supabase
+    .from('businesses')
+    .select('id,normalized_key,email,domain,website,phone,name')
+    .eq('workspace_id', workspaceId)
+    .eq('id', businessId)
+    .limit(1);
+  if (businessError) throw businessError;
+  const business = rows?.[0];
+  if (!business) return { allowed: false, ownerWorkspaceId: null, conflictKey: null };
+  const keys = businessIdentityKeys(business as any);
+  if (!keys.length) return { allowed: true, ownerWorkspaceId: workspaceId, conflictKey: null };
+  const { data: claims, error: claimError } = await supabase
+    .from('team_scouted_leads')
+    .select('normalized_key,first_workspace_id')
+    .in('normalized_key', keys);
+  if (claimError) throw claimError;
+  const conflict = (claims || []).find((row: any) => String(row.first_workspace_id || '') && String(row.first_workspace_id) !== workspaceId);
+  return {
+    allowed: !conflict,
+    ownerWorkspaceId: conflict ? String(conflict.first_workspace_id) : workspaceId,
+    conflictKey: conflict ? String(conflict.normalized_key || '') : null
+  };
+}
+
+async function filterTeamSendableBusinesses(
+  supabase: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  businesses: AnyRow[],
+) {
+  if (!businesses.length) return { allowed: [] as AnyRow[], blocked: 0 };
+  const rowKeys = new Map<string, string[]>();
+  const allKeys = new Set<string>();
+  for (const business of businesses) {
+    const id = String(business.id || '');
+    const keys = businessIdentityKeys(business as any);
+    rowKeys.set(id, keys);
+    for (const key of keys) allKeys.add(key);
+  }
+  if (!allKeys.size) return { allowed: businesses, blocked: 0 };
+  const blockedKeys = new Set<string>();
+  const keys = Array.from(allKeys);
+  for (let index = 0; index < keys.length; index += 1000) {
+    const { data, error } = await supabase
+      .from('team_scouted_leads')
+      .select('normalized_key,first_workspace_id')
+      .in('normalized_key', keys.slice(index, index + 1000));
+    if (error) throw error;
+    for (const row of data || []) {
+      if (String(row.first_workspace_id || '') && String(row.first_workspace_id) !== workspaceId) blockedKeys.add(String(row.normalized_key || ''));
+    }
+  }
+  const isBlocked = (business: AnyRow) => (rowKeys.get(String(business.id || '')) || []).some((key) => blockedKeys.has(key));
+  return {
+    allowed: businesses.filter((business) => !isBlocked(business)),
+    blocked: businesses.filter(isBlocked).length
+  };
+}
+
 async function loadReadyBusinesses(
   supabase: ReturnType<typeof createAdminClient>,
   schedule: AnyRow,
@@ -501,43 +562,77 @@ async function loadReadyBusinesses(
   const cleanLocation = String(raw.location_filter || raw.country_filter || "")
     .trim()
     .replace(/[%_]/g, "");
-  const exactUploadedLocation = String(raw.location_filter_mode || "") === "exact_uploaded_location" || Boolean(raw.location_filter);
   const audienceCategoryId = String(
     schedule.audience_category_id || raw.audience_category_id || "",
   ).trim();
 
-  const queryLimit = cleanLocation ? Math.max(1000, Math.min(10000, limit * 8)) : limit;
-  let query = supabase
-    .from("businesses")
-    .select("*")
-    .eq("workspace_id", schedule.workspace_id)
-    .in("status", CONTACTABLE_BUSINESS_STATUSES)
-    .not("email", "is", null)
-    .neq("email", "")
-    .order("updated_at", { ascending: true })
-    .limit(queryLimit);
-
-  if (selectedIds.length) query = query.in("id", selectedIds);
-  if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
-  else if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
-  if (cleanSearch)
-    query = query.or(
-      `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
-    );
-  if (cleanLocation && !exactUploadedLocation) {
-    query = query.or(
-      `location.ilike.%${cleanLocation}%,source.ilike.%${cleanLocation}%,website.ilike.%${cleanLocation}%,domain.ilike.%${cleanLocation}%`,
-    );
-  }
-
-  const { data, error } = await query;
-  if (error) throw error;
   const unique = new Map<string, AnyRow>();
-  for (const row of applyLocationFilter((data || []) as AnyRow[], cleanLocation)) {
-    const email = normalizeEmail(row.email);
-    if (email && !unique.has(email)) unique.set(email, row);
+
+  if (selectedIds.length || !cleanLocation) {
+    let query = supabase
+      .from("businesses")
+      .select("*")
+      .eq("workspace_id", schedule.workspace_id)
+      .in("status", CONTACTABLE_BUSINESS_STATUSES)
+      .not("email", "is", null)
+      .neq("email", "")
+      .order("updated_at", { ascending: true })
+      .limit(selectedIds.length ? Math.max(limit, selectedIds.length) : limit);
+
+    if (selectedIds.length) query = query.in("id", selectedIds);
+    if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
+    else if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
+    if (cleanSearch)
+      query = query.or(
+        `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
+      );
+
+    const { data, error } = await query;
+    if (error) throw error;
+    for (const row of applyLocationFilter((data || []) as AnyRow[], cleanLocation)) {
+      const email = normalizeEmail(row.email);
+      if (email && !unique.has(email)) unique.set(email, row);
+    }
+  } else {
+    // Country filtering is derived from the complete uploaded business record,
+    // not a database text search. Page until enough exact matches are found so
+    // countries beyond the old 10,000-row cutoff remain sendable.
+    const pageSize = 1000;
+    for (let offset = 0; unique.size < limit; offset += pageSize) {
+      let query = supabase
+        .from("businesses")
+        .select("*")
+        .eq("workspace_id", schedule.workspace_id)
+        .in("status", CONTACTABLE_BUSINESS_STATUSES)
+        .not("email", "is", null)
+        .neq("email", "")
+        .order("updated_at", { ascending: true })
+        .range(offset, offset + pageSize - 1);
+      if (audienceCategoryId) query = query.eq("category_id", audienceCategoryId);
+      else if (cleanCategory) query = query.ilike("category", `%${cleanCategory}%`);
+      if (cleanSearch)
+        query = query.or(
+          `name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`,
+        );
+      const { data, error } = await query;
+      if (error) throw error;
+      const pageRows = (data || []) as AnyRow[];
+      for (const row of applyLocationFilter(pageRows, cleanLocation)) {
+        const email = normalizeEmail(row.email);
+        if (email && !unique.has(email)) unique.set(email, row);
+        if (unique.size >= limit) break;
+      }
+      if (pageRows.length < pageSize) break;
+    }
   }
-  return Array.from(unique.values()).slice(0, limit);
+
+  const candidates = Array.from(unique.values()).slice(0, limit);
+  const guarded = await filterTeamSendableBusinesses(
+    supabase,
+    String(schedule.workspace_id),
+    candidates,
+  );
+  return guarded.allowed;
 }
 
 async function loadFollowUpBusinesses(
@@ -590,7 +685,15 @@ async function loadFollowUpBusinesses(
   const byId = new Map(
     (data || []).map((row: AnyRow) => [String(row.id), row]),
   );
-  return ids.map((id: string) => byId.get(id)).filter(Boolean);
+  const candidates = ids
+    .map((id: string) => byId.get(id))
+    .filter(Boolean) as AnyRow[];
+  const guarded = await filterTeamSendableBusinesses(
+    supabase,
+    String(schedule.workspace_id),
+    candidates,
+  );
+  return guarded.allowed;
 }
 
 async function runOneSchedule(
@@ -673,15 +776,16 @@ async function runOneSchedule(
       source: "Scout",
     };
     const sampleTemplate = templates[0];
+    const sampleLocalized = resolveTemplateContent(sampleTemplate, sampleBusiness);
     const sampleSubject = renderTemplate(
       splitSubjects(
-        String(sampleTemplate.subject || ""),
-        sampleTemplate.subject_variants,
-      )[0] || String(sampleTemplate.subject || ""),
+        sampleLocalized.subject,
+        sampleLocalized.subjectVariants,
+      )[0] || sampleLocalized.subject,
       sampleBusiness,
     );
     const sampleBody = renderTemplate(
-      String(sampleTemplate.message || ""),
+      sampleLocalized.message,
       sampleBusiness,
     );
     const guard = analyzeSpamRisk(sampleSubject, sampleBody);
@@ -723,6 +827,15 @@ async function runOneSchedule(
     );
     let activeAccounts = [...accounts];
     let cursor = 0;
+    const preparedAttachmentsByTemplate = new Map<string, Promise<EmailAttachment[]>>();
+    const preparedAttachmentsFor = (template: AnyRow) => {
+      const key = String(template.id || template.name || "template");
+      const existing = preparedAttachmentsByTemplate.get(key);
+      if (existing) return existing;
+      const pending = prepareAttachments(templateAttachments(template));
+      preparedAttachmentsByTemplate.set(key, pending);
+      return pending;
+    };
 
     for (let i = 0; i < contacts.length; i++) {
       const control = await loadScheduleControl(supabase, workspaceId, scheduleId);
@@ -732,10 +845,32 @@ async function runOneSchedule(
         break;
       }
       const business = contacts[i];
+      const teamGuard = await guardTeamBusinessForSend(
+        supabase,
+        workspaceId,
+        String(business.id),
+      );
+      if (!teamGuard.allowed) {
+        skipped += 1;
+        await supabase.from("outreach_events").insert({
+          workspace_id: workspaceId,
+          batch_id: batchId,
+          business_id: business.id,
+          type: "team_duplicate_blocked",
+          message: `Blocked ${normalizeEmail(business.email)} because another team member owns the lead.`,
+          raw: {
+            schedule_id: scheduleId,
+            owner_workspace_id: teamGuard.ownerWorkspaceId,
+            conflict_key: teamGuard.conflictKey,
+          },
+        });
+        continue;
+      }
       const eligibleAccounts = activeAccounts.filter(
         (account) => (sentBySender[account.id] || 0) < senderCap(raw, account, senderRunLimitOverride),
       );
       if (!eligibleAccounts.length) {
+        stopped = true;
         skipped += contacts.length - i;
         break;
       }
@@ -749,18 +884,17 @@ async function runOneSchedule(
           : templates[i % templates.length];
       cursor += 1;
       attempted += 1;
+      const localized = resolveTemplateContent(template, business);
       const subjects = splitSubjects(
-        String(template.subject || ""),
-        template.subject_variants,
+        localized.subject,
+        localized.subjectVariants,
       );
       const subject = renderTemplate(
-        subjects[i % Math.max(1, subjects.length)] ||
-          String(template.subject || ""),
+        subjects[i % Math.max(1, subjects.length)] || localized.subject,
         business,
       );
-      const body = renderTemplate(String(template.message || ""), business);
+      const body = renderTemplate(localized.message, business);
       const finalBody = appendSignatureToText(body, account);
-      const attachments = await prepareAttachments(templateAttachments(template));
       const toEmail = normalizeEmail(business.email);
       const nowIso = new Date().toISOString();
 
@@ -780,7 +914,10 @@ async function runOneSchedule(
             from_email: normalizeEmail(account.email),
             to_email: toEmail,
             current: baseProcessed + attempted,
-            target: totalTarget
+            target: totalTarget,
+            template_language: localized.language,
+            detected_business_language: localized.detectedLanguage,
+            used_language_fallback: localized.usedFallback
           },
         });
       await supabase
@@ -794,6 +931,7 @@ async function runOneSchedule(
         .eq("id", scheduleId);
 
       try {
+        const attachments = await preparedAttachmentsFor(template);
         let gmailMessageId = "";
         let gmailThreadId = "";
         if (!dryRun) {
@@ -835,6 +973,9 @@ async function runOneSchedule(
             signature_applied:
               account.signature_enabled !== false &&
               Boolean(account.signature_text || account.signature_html),
+            template_language: localized.language,
+            detected_business_language: localized.detectedLanguage,
+            used_language_fallback: localized.usedFallback,
             attachments: templateAttachments(template).map((a: AnyRow) => ({ name: a.name || a.filename, url: a.public_url || a.url })),
           },
         });
@@ -910,6 +1051,9 @@ async function runOneSchedule(
             signature_applied:
               account.signature_enabled !== false &&
               Boolean(account.signature_text || account.signature_html),
+            template_language: localized.language,
+            detected_business_language: localized.detectedLanguage,
+            used_language_fallback: localized.usedFallback,
             attachments: templateAttachments(template).map((a: AnyRow) => ({ name: a.name || a.filename, url: a.public_url || a.url })),
           },
         });
@@ -946,7 +1090,7 @@ async function runOneSchedule(
       await supabase
         .from("message_schedules")
         .update({
-          processed_count: baseProcessed + attempted,
+          processed_count: baseProcessed + attempted + skipped,
           sent_count: baseSent + sent,
           failed_count: baseFailed + failed,
           skipped_count: baseSkipped + skipped,
@@ -957,7 +1101,7 @@ async function runOneSchedule(
         .eq("id", scheduleId);
     }
 
-    const totalProcessed = baseProcessed + attempted;
+    const totalProcessed = baseProcessed + attempted + skipped;
     const totalSent = baseSent + sent;
     const totalFailed = baseFailed + failed;
     const totalSkipped = baseSkipped + skipped;
@@ -992,28 +1136,19 @@ async function runOneSchedule(
       })
       .eq("workspace_id", workspaceId)
       .eq("id", scheduleId);
-    await createAppNotification(supabase as any, {
-      workspaceId,
-      type: shouldContinue ? "job_progress" : "job_completed",
-      title: `${schedule.type === "follow_up" ? "Follow-up" : "Message"} job ${stopped ? "stopped" : shouldContinue ? "progress" : "completed"}`,
-      message: shouldContinue
-        ? `Sent ${totalSent.toLocaleString()} so far. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; keep Scout open so it continues on the next check.`
-        : `Sent ${totalSent.toLocaleString()}, failed ${totalFailed.toLocaleString()}, skipped ${totalSkipped.toLocaleString()}.`,
-      entityType: "message_schedule",
-      entityId: scheduleId,
-      raw: {
-        schedule_id: scheduleId,
-        batch_id: batchId,
-        attempted,
-        sent,
-        failed,
-        skipped,
-        total_processed: totalProcessed,
-        total_sent: totalSent,
-        total_target: totalTarget,
-        should_continue: shouldContinue,
-      },
-    });
+    try {
+      await createAppNotification(supabase as any, {
+        workspaceId,
+        type: shouldContinue ? "job_progress" : "job_completed",
+        title: `${schedule.type === "follow_up" ? "Follow-up" : "Message"} job ${stopped ? "stopped" : shouldContinue ? "progress" : "completed"}`,
+        message: shouldContinue
+          ? `Sent ${totalSent.toLocaleString()} so far. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; keep Scout open so it continues on the next check.`
+          : `Sent ${totalSent.toLocaleString()}, failed ${totalFailed.toLocaleString()}, skipped ${totalSkipped.toLocaleString()}.`,
+        entityType: "message_schedule",
+        entityId: scheduleId,
+        raw: { schedule_id: scheduleId, batch_id: batchId, attempted, sent, failed, skipped, total_processed: totalProcessed, total_sent: totalSent, total_target: totalTarget, should_continue: shouldContinue },
+      });
+    } catch {}
     return {
       scheduleId,
       status: shouldContinue ? "running" : stopped ? "skipped" : "sent",
@@ -1033,7 +1168,7 @@ async function runOneSchedule(
         status: "failed",
         last_error: reason,
         batch_id: batchId,
-        processed_count: baseProcessed + attempted,
+        processed_count: baseProcessed + attempted + skipped,
         sent_count: baseSent + sent,
         failed_count: baseFailed + failed,
         skipped_count: baseSkipped + skipped,

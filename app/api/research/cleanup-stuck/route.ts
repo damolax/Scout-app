@@ -19,7 +19,7 @@ async function currentUserCanUseWorkspace(workspaceId: string) {
     .eq('workspace_id', workspaceId)
     .eq('user_id', user.id)
     .eq('approved', true)
-    .maybeSingle();
+    .limit(1);
   if (memberError) throw memberError;
   return Boolean(member);
 }

@@ -3,15 +3,20 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { csvColumnsLookDifferent, parseCsvText } from '@/lib/csv';
+import { errorMessage, fetchJson, isAuthError, isTransientError, withRetry } from '@/lib/app-error';
 import { Business, CsvBusinessInput, CsvInvalidRow, ImportResult, MessageCategory, Workspace } from '@/lib/types';
 
 const MAX_IMPORT_ROWS = 100000;
-const SERVER_IMPORT_CHUNK = 5000;
+const TARGET_IMPORT_CHUNK_ROWS = 1000;
+const MIN_IMPORT_CHUNK_ROWS = 100;
+const MAX_IMPORT_CHUNK_BYTES = 1_250_000;
+const MAX_IMPORT_FILE_BYTES = 100 * 1024 * 1024;
 const ACTIVE_QUEUE_STATUSES = ['pending', 'scanning', 'found', 'ready', 'review'];
 
 type ImportPhase = 'idle' | 'reading' | 'ready' | 'checking' | 'importing' | 'done' | 'failed';
 type TargetWarning = { activeCount: number; previousHeaders: string[]; newHeaders: string[] } | null;
 type ImportChunkResult = { inserted_count: number; skipped_queue_count: number; skipped_history_count: number; skipped_team_count?: number; skipped_keys?: string[] | null };
+type AudienceCategorySelection = { id: string; name: string };
 
 function chunk<T>(items: T[], size: number): T[][] {
   const result: T[][] = [];
@@ -31,21 +36,7 @@ function uniqueRows(rows: CsvBusinessInput[]) {
 }
 
 function formatImportError(error: unknown) {
-  if (!error) return 'Unknown import error.';
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  try {
-    const value = error as { message?: string; code?: string; details?: string; hint?: string; error_description?: string };
-    const parts = [
-      value.message || value.error_description,
-      value.code ? `Code: ${value.code}` : '',
-      value.details ? `Details: ${value.details}` : '',
-      value.hint ? `Hint: ${value.hint}` : ''
-    ].filter(Boolean);
-    return parts.length ? parts.join(' | ') : JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
+  return errorMessage(error, 'Unknown import error.');
 }
 
 function csvEscape(value: unknown) {
@@ -123,6 +114,61 @@ function toRpcRows(rows: CsvBusinessInput[]) {
   }));
 }
 
+
+function estimateRpcRowBytes(row: CsvBusinessInput): number {
+  try {
+    return new TextEncoder().encode(JSON.stringify(toRpcRows([row])[0])).length + 2;
+  } catch {
+    return 2048;
+  }
+}
+
+function makeImportChunks(rows: CsvBusinessInput[]): CsvBusinessInput[][] {
+  const parts: CsvBusinessInput[][] = [];
+  let current: CsvBusinessInput[] = [];
+  let currentBytes = 2;
+
+  for (const row of rows) {
+    const rowBytes = estimateRpcRowBytes(row);
+    const exceedsRows = current.length >= TARGET_IMPORT_CHUNK_ROWS;
+    const exceedsBytes = current.length > 0 && currentBytes + rowBytes > MAX_IMPORT_CHUNK_BYTES;
+    if (exceedsRows || exceedsBytes) {
+      parts.push(current);
+      current = [];
+      currentBytes = 2;
+    }
+    current.push(row);
+    currentBytes += rowBytes;
+  }
+
+  if (current.length) parts.push(current);
+  return parts;
+}
+
+function shouldSplitImportChunk(error: unknown): boolean {
+  if (isAuthError(error)) return false;
+  const message = formatImportError(error).toLowerCase();
+  if ([
+    'permission denied',
+    'not approved for this workspace',
+    'does not exist',
+    'could not find the function',
+    'schema cache',
+    'invalid input syntax',
+    'violates check constraint'
+  ].some((part) => message.includes(part))) return false;
+
+  return isTransientError(error) || [
+    'payload',
+    'request entity too large',
+    'body exceeded',
+    'statement timeout',
+    'resource limit',
+    'memory',
+    'connection'
+  ].some((part) => message.includes(part));
+}
+
 export default function UploadClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const [categories, setCategories] = useState<MessageCategory[]>([]);
@@ -139,6 +185,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   const [enqueueResearch, setEnqueueResearch] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [targetWarning, setTargetWarning] = useState<TargetWarning>(null);
   const [allowDifferentTarget, setAllowDifferentTarget] = useState(false);
 
@@ -201,10 +248,101 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     if (csvColumnsLookDifferent(previousHeaders, nextHeaders)) setTargetWarning({ activeCount, previousHeaders, newHeaders: nextHeaders });
   }
 
+
+  async function invokeImportRpc(
+    part: CsvBusinessInput[],
+    batchId: string,
+    category: AudienceCategorySelection,
+    onRetry: (message: string) => void
+  ): Promise<ImportChunkResult> {
+    let refreshedSession = false;
+
+    return withRetry(async () => {
+      const { data, error } = await supabase.rpc('import_businesses_chunk_with_category', {
+        target_workspace: workspace.id,
+        target_batch_id: batchId,
+        input_rows: toRpcRows(part),
+        target_category_id: category.id || null,
+        target_category_name: category.name || null
+      });
+
+      if (error && isAuthError(error) && !refreshedSession) {
+        refreshedSession = true;
+        const { error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) throw refreshError;
+        const retry = await supabase.rpc('import_businesses_chunk_with_category', {
+          target_workspace: workspace.id,
+          target_batch_id: batchId,
+          input_rows: toRpcRows(part),
+          target_category_id: category.id || null,
+          target_category_name: category.name || null
+        });
+        if (retry.error) throw retry.error;
+        const refreshedItem = ((retry.data || []) as ImportChunkResult[])[0];
+        if (!refreshedItem) throw new Error('Import server returned no result for this chunk.');
+        return refreshedItem;
+      }
+
+      if (error) throw error;
+      const item = ((data || []) as ImportChunkResult[])[0];
+      if (!item) throw new Error('Import server returned no result for this chunk.');
+      return item;
+    }, {
+      retries: 3,
+      baseDelayMs: 650,
+      maxDelayMs: 6000,
+      onRetry: (error, attempt, delayMs) => {
+        onRetry(`Temporary upload interruption. Retrying safely (${attempt}/3) in ${(delayMs / 1000).toFixed(1)}s: ${formatImportError(error)}`);
+      }
+    });
+  }
+
+  async function importChunkWithRecovery(
+    part: CsvBusinessInput[],
+    batchId: string,
+    category: AudienceCategorySelection,
+    onLeafComplete: (rowCount: number) => void,
+    onRetry: (message: string) => void
+  ): Promise<ImportChunkResult[]> {
+    try {
+      const item = await invokeImportRpc(part, batchId, category, onRetry);
+      onLeafComplete(part.length);
+      return [item];
+    } catch (error) {
+      if (part.length <= MIN_IMPORT_CHUNK_ROWS || !shouldSplitImportChunk(error)) throw error;
+      const middle = Math.ceil(part.length / 2);
+      onRetry(`A ${part.length.toLocaleString()}-row chunk was too heavy or interrupted. Scout is splitting it into smaller safe chunks without restarting the import.`);
+      const left = await importChunkWithRecovery(part.slice(0, middle), batchId, category, onLeafComplete, onRetry);
+      const right = await importChunkWithRecovery(part.slice(middle), batchId, category, onLeafComplete, onRetry);
+      return [...left, ...right];
+    }
+  }
+
+  async function fetchBatchImportedKeys(batchId: string): Promise<Set<string>> {
+    const keys = new Set<string>();
+    const pageSize = 1000;
+    for (let from = 0; from < MAX_IMPORT_ROWS; from += pageSize) {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('normalized_key')
+        .eq('workspace_id', workspace.id)
+        .eq('import_batch_id', batchId)
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      for (const row of data || []) {
+        const key = String((row as { normalized_key?: string }).normalized_key || '').trim();
+        if (key) keys.add(key);
+      }
+      if (!data || data.length < pageSize) break;
+    }
+    return keys;
+  }
+
   async function onFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     setResult(null);
     setErrors([]);
+    setWarnings([]);
     setRows([]);
     setInvalidRows([]);
     setHeaders([]);
@@ -213,6 +351,14 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     if (!file) return;
 
     setFileName(file.name);
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      setPhase('failed');
+      setProgress(`This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The safe browser limit is ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)} MB. Split it into smaller CSV files while keeping each file under 100,000 usable rows.`);
+      setErrors([`File is too large for a reliable browser upload (${(file.size / 1024 / 1024).toFixed(1)} MB).`]);
+      event.target.value = '';
+      return;
+    }
+
     setPhase('reading');
     setProgress('Reading CSV locally. The app only renders a 25-row preview, so large files should not freeze the page...');
     try {
@@ -230,7 +376,12 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         return;
       }
 
-      await checkTargetMismatch(parsed.headers);
+      try {
+        await checkTargetMismatch(parsed.headers);
+      } catch (warningError) {
+        console.warn('Target comparison skipped because Supabase was temporarily unavailable:', warningError);
+        setWarnings((current) => [...current, 'The target comparison could not be completed, but the CSV is ready and can still be imported.']);
+      }
       setRows(parsed.rows);
       setPhase('ready');
       const emailCount = parsed.rows.filter((row) => row.email).length;
@@ -239,18 +390,19 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     } catch (error) {
       setPhase('failed');
       setErrors([formatImportError(error)]);
-      setProgress('File could not be read. See error below.');
+      setProgress('File could not be read. Confirm it is a valid CSV and try again.');
+    } finally {
+      event.target.value = '';
     }
   }
 
   async function enqueueImportedResearch(batchId: string) {
-    const response = await fetch('/api/research/enqueue', {
+    const json = await fetchJson<{ success?: boolean; error?: string; enqueued?: number }>('/api/research/enqueue', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ workspaceId: workspace.id, limit: 10000, importBatchId: batchId })
-    });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok || !json.success) throw new Error(json.error || 'Could not enqueue background email research.');
+    }, { timeoutMs: 45000, retries: 2 });
+    if (!json.success) throw new Error(json.error || 'Could not enqueue background email research.');
     return Number(json.enqueued || 0);
   }
 
@@ -268,10 +420,22 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     setImporting(true);
     setResult(null);
     setErrors([]);
+    setWarnings([]);
     setPercent(0);
+
+    const startedAt = performance.now();
+    const unique = uniqueRows(rows);
+    const deduped = unique.rows;
+    const duplicateRows = unique.duplicateRows;
+    let batchId = '';
+    let processed = 0;
+    let insertedFromRpc = 0;
+    let skippedQueueFromRpc = 0;
+    let skippedHistoryFromRpc = 0;
+    let skippedTeamFromRpc = 0;
+    const skippedKeysFromRpc = new Set<string>();
+
     try {
-      const startedAt = performance.now();
-      const { rows: deduped, duplicateRows } = uniqueRows(rows);
       setPhase('checking');
       setProgress(`Preparing ${deduped.length.toLocaleString()} unique business(es). Removed ${duplicateRows.length.toLocaleString()} duplicate row(s) inside the file.`);
 
@@ -280,86 +444,140 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
 
       const category = await ensureAudienceCategory();
 
-      const { data: batch, error: batchError } = await supabase
-        .from('import_batches')
-        .insert({
-          workspace_id: workspace.id,
-          file_name: fileName || 'csv_upload.csv',
-          row_count: rows.length,
-          inserted_count: 0,
-          skipped_count: duplicateRows.length + invalidRows.length,
-          headers,
-          category_id: category.id || null,
-          category_name: category.name || null,
-          source_mode: 'csv_upload',
-          created_by: userData.user.id
-        })
-        .select('id')
-        .single();
-      if (batchError) throw batchError;
+      const requestedBatchId = crypto.randomUUID();
+      const batch = await withRetry(async () => {
+        const response = await supabase
+          .from('import_batches')
+          .upsert({
+            id: requestedBatchId,
+            workspace_id: workspace.id,
+            file_name: fileName || 'csv_upload.csv',
+            row_count: rows.length,
+            inserted_count: 0,
+            skipped_count: duplicateRows.length + invalidRows.length,
+            headers,
+            category_id: category.id || null,
+            category_name: category.name || null,
+            source_mode: 'csv_upload',
+            created_by: userData.user.id
+          }, { onConflict: 'id' })
+          .select('id')
+          .single();
+        if (response.error) throw response.error;
+        return response.data;
+      }, { retries: 2 });
 
-      let inserted = 0;
-      let skippedExistingQueue = 0;
-      let skippedScouted = 0;
-      let skippedTeam = 0;
-      let processed = 0;
-      const skippedKeys = new Set<string>();
+      batchId = String(batch.id);
+      const parts = makeImportChunks(deduped);
       setPhase('importing');
+      setProgress(`Starting safe cloud import in ${parts.length.toLocaleString()} chunk(s). Scout automatically retries temporary failures and splits heavy chunks.`);
 
-      for (const part of chunk(deduped, SERVER_IMPORT_CHUNK)) {
-        processed += part.length;
-        setPercent(Math.min(95, Math.round((processed / Math.max(deduped.length, 1)) * 95)));
-        setProgress(`Fast cloud import: ${processed.toLocaleString()} / ${deduped.length.toLocaleString()} row(s). Server is deduping and inserting in one step...`);
-        const { data, error } = await supabase.rpc('import_businesses_chunk_with_category', {
-          target_workspace: workspace.id,
-          target_batch_id: batch.id,
-          input_rows: toRpcRows(part),
-          target_category_id: category.id || null,
-          target_category_name: category.name || null
-        });
-        if (error) throw error;
-        const item = ((data || []) as ImportChunkResult[])[0];
-        inserted += Number(item?.inserted_count || 0);
-        skippedExistingQueue += Number(item?.skipped_queue_count || 0);
-        skippedScouted += Number(item?.skipped_history_count || 0);
-        skippedTeam += Number(item?.skipped_team_count || 0);
-        (item?.skipped_keys || []).forEach((key) => skippedKeys.add(key));
+      for (let index = 0; index < parts.length; index += 1) {
+        const part = parts[index];
+        const results = await importChunkWithRecovery(
+          part,
+          batchId,
+          category,
+          (rowCount) => {
+            processed += rowCount;
+            setPercent(Math.min(96, Math.round((processed / Math.max(deduped.length, 1)) * 96)));
+            setProgress(`Safe cloud import: ${processed.toLocaleString()} / ${deduped.length.toLocaleString()} row(s). Chunk ${Math.min(index + 1, parts.length).toLocaleString()} of ${parts.length.toLocaleString()}.`);
+          },
+          (message) => setProgress(message)
+        );
+
+        for (const item of results) {
+          insertedFromRpc += Number(item.inserted_count || 0);
+          skippedQueueFromRpc += Number(item.skipped_queue_count || 0);
+          skippedHistoryFromRpc += Number(item.skipped_history_count || 0);
+          skippedTeamFromRpc += Number(item.skipped_team_count || 0);
+          for (const key of item.skipped_keys || []) skippedKeysFromRpc.add(key);
+        }
+
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
-      const skippedRows = deduped.filter((row) => skippedKeys.has(row.normalized_key));
+      setProgress('Verifying the saved rows so a retried network request cannot produce an incorrect total...');
+      let importedKeys: Set<string> | null = null;
+      try {
+        importedKeys = await withRetry(() => fetchBatchImportedKeys(batchId), { retries: 2 });
+      } catch (verificationError) {
+        console.warn('Import verification query failed:', verificationError);
+        setWarnings((current) => [...current, 'The upload completed, but Scout could not run the final verification count. The imported records are still protected by database deduplication.']);
+      }
+
+      const inserted = importedKeys ? importedKeys.size : insertedFromRpc;
+      const skippedRows = importedKeys
+        ? deduped.filter((row) => !importedKeys!.has(row.normalized_key))
+        : deduped.filter((row) => skippedKeysFromRpc.has(row.normalized_key));
+      const uniqueSkipped = Math.max(0, deduped.length - inserted);
+      const skippedTeam = Math.min(uniqueSkipped, skippedTeamFromRpc);
+      const skippedScouted = Math.min(Math.max(0, uniqueSkipped - skippedTeam), skippedHistoryFromRpc);
+      const skippedExistingQueue = Math.max(0, uniqueSkipped - skippedTeam - skippedScouted);
       let queuedResearch = 0;
+
       if (enqueueResearch && inserted > 0) {
         setProgress('Import saved. Queueing background email research jobs...');
-        queuedResearch = await enqueueImportedResearch(batch.id);
+        try {
+          queuedResearch = await enqueueImportedResearch(batchId);
+        } catch (researchError) {
+          console.warn('Optional research queue step failed after successful import:', researchError);
+          setWarnings((current) => [...current, `Businesses were imported successfully, but background research was not queued: ${formatImportError(researchError)}`]);
+        }
       }
 
       const skippedTotal = skippedRows.length + duplicateRows.length + invalidRows.length;
-      await supabase.from('import_batches').update({ inserted_count: inserted, skipped_count: skippedTotal }).eq('id', batch.id);
+      const { error: batchUpdateError } = await supabase
+        .from('import_batches')
+        .update({ inserted_count: inserted, skipped_count: skippedTotal })
+        .eq('id', batchId);
+      if (batchUpdateError) {
+        console.warn('Import batch summary update failed:', batchUpdateError);
+        setWarnings((current) => [...current, 'The leads were saved, but the import-history summary could not be updated.']);
+      }
 
       if (skippedTeam > 0) {
-        await supabase.from('app_notifications').insert({
+        const { error: notificationError } = await supabase.from('app_notifications').insert({
           workspace_id: workspace.id,
           type: 'team_duplicate_removed',
           title: 'Team duplicate leads removed',
           message: `${skippedTeam.toLocaleString()} lead${skippedTeam === 1 ? '' : 's'} already scouted by a team member and removed from this upload.`,
           entity_type: 'import_batch',
-          entity_id: batch.id,
-          raw: { batchId: batch.id, skippedTeam, removedFromUpload: true }
+          entity_id: batchId,
+          raw: { batchId, skippedTeam, removedFromUpload: true }
         });
+        if (notificationError) console.warn('Team duplicate notification could not be created:', notificationError);
       }
 
-      setResult({ uploaded: rows.length, inserted, skippedExistingQueue, skippedScouted, skippedTeam, skippedFileDuplicates: duplicateRows.length, invalidRows, skippedRows, batchId: batch.id, queuedResearch });
+      setResult({ uploaded: rows.length, inserted, skippedExistingQueue, skippedScouted, skippedTeam, skippedFileDuplicates: duplicateRows.length, invalidRows, skippedRows, batchId, queuedResearch });
       const seconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
       setPercent(100);
       setPhase('done');
       setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new business(es), skipped ${skippedTotal.toLocaleString()}.${skippedTeam ? ` ${skippedTeam.toLocaleString()} were already scouted by a team member and removed.` : ''} Rows with email were saved as Ready; no-email rows were saved as Pending for Auto Scout.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
     } catch (error) {
       const message = formatImportError(error);
-      console.error('Scout v8.10 fast import failed:', error);
+      console.error('Scout reliable import failed:', error);
+
+      let partialInserted = insertedFromRpc;
+      if (batchId) {
+        try {
+          const partialKeys = await fetchBatchImportedKeys(batchId);
+          partialInserted = partialKeys.size;
+          await supabase
+            .from('import_batches')
+            .update({ inserted_count: partialInserted, skipped_count: duplicateRows.length + invalidRows.length })
+            .eq('id', batchId);
+        } catch (partialError) {
+          console.warn('Could not verify partial import after failure:', partialError);
+        }
+      }
+
       setErrors([message]);
       setPhase('failed');
-      setProgress('Import failed. See the real error below.');
+      setPercent(Math.min(96, Math.round((processed / Math.max(deduped.length, 1)) * 96)));
+      setProgress(partialInserted > 0
+        ? `The connection stopped after ${partialInserted.toLocaleString()} row(s) were safely saved. Select the same CSV and import again; Scout's database deduplication will continue without creating duplicate leads.`
+        : 'The import did not complete. Scout retried and reduced the chunk size before stopping. Check the error below and try the same file again.');
     } finally {
       setImporting(false);
     }
@@ -482,7 +700,8 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         </div>
       </div>
 
-      {errors.length ? <div className="error"><strong>Import note:</strong><br />{errors.map((error, index) => <div key={index}>{error}</div>)}</div> : null}
+      {warnings.length ? <div className="notice"><strong>Completed with note:</strong><br />{warnings.map((warning, index) => <div key={index}>{warning}</div>)}</div> : null}
+      {errors.length ? <div className="error"><strong>Import stopped:</strong><br />{errors.map((error, index) => <div key={index}>{error}</div>)}</div> : null}
 
       {result ? (
         <div className="grid grid-4">

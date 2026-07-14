@@ -574,3 +574,29 @@ code { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-
 .level-hint-box strong { display:block; font-size: 12px; margin-bottom: 6px; }
 .level-hint-box ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
 .level-hint-box li + li { margin-top: 4px; }
+/* Scout v10.31.1: keep sender-limit values fully visible in Settings. */
+.sender-limits-cell { min-width: 340px; }
+.sender-limits-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(145px, 1fr));
+  gap: 12px;
+  min-width: 320px;
+}
+.sender-limit-input {
+  min-width: 145px;
+  width: 100%;
+  font-size: 16px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.sender-limit-hint {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+@media (max-width: 700px) {
+  .sender-limits-cell { min-width: 250px; }
+  .sender-limits-grid { grid-template-columns: 1fr; min-width: 220px; }
+  .sender-limit-input { min-width: 220px; }
+}

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase-browser';
 import { Business, BusinessStatus, Workspace } from '@/lib/types';
+import { resolveBusinessLanguage } from '@/lib/template-language';
+import { resolveBusinessCountry } from '@/lib/country-location';
 
 const STATUS_OPTIONS: BusinessStatus[] = ['pending', 'scanning', 'found', 'ready', 'review', 'contacted', 'responded', 'no_inbox', 'bounced', 'invalid', 'duplicate', 'archived'];
 const PAGE_SIZE = 100;
@@ -31,9 +33,13 @@ function csvEscape(value: unknown) {
 
 function downloadBusinesses(name: string, businesses: Business[]) {
   if (!businesses.length) return;
-  const headers = ['id', 'name', 'email', 'phone', 'website', 'domain', 'category', 'location', 'source', 'status', 'score', 'normalized_key', 'created_at', 'updated_at'];
+  const headers = ['id', 'name', 'email', 'phone', 'website', 'domain', 'category', 'location', 'detected_country', 'detected_language', 'language_source', 'source', 'status', 'score', 'normalized_key', 'created_at', 'updated_at'];
   const lines = [headers.join(',')];
-  for (const b of businesses) lines.push(headers.map((h) => csvEscape((b as unknown as Record<string, unknown>)[h])).join(','));
+  for (const b of businesses) {
+    const language = resolveBusinessLanguage(b);
+    const row: Record<string, unknown> = { ...(b as unknown as Record<string, unknown>), detected_country: resolveBusinessCountry(b), detected_language: language.code, language_source: language.sourceLabel };
+    lines.push(headers.map((h) => csvEscape(row[h])).join(','));
+  }
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -355,7 +361,7 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
             <thead>
               <tr>
                 <th><input type="checkbox" checked={businesses.length > 0 && selectedIds.length === businesses.length} onChange={(event) => toggleAll(event.target.checked)} /></th>
-                <th>Business</th><th>Email</th><th>Website</th><th>Status</th><th>Source</th><th>Added</th><th>Actions</th>
+                <th>Business</th><th>Email</th><th>Website</th><th>Country</th><th>Language</th><th>Status</th><th>Source</th><th>Added</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -365,6 +371,8 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
                   <td><Link href={`/businesses/${b.id}`}><strong>{b.name || '-'}</strong></Link><br /><span className="muted">{b.category || ''} {b.location ? `· ${b.location}` : ''}</span><br /><Link className="muted" href={`/businesses/${b.id}`}>Open business →</Link></td>
                   <td>{b.email || <span className="muted">No email</span>}</td>
                   <td>{b.website || b.domain || <span className="muted">No site</span>}</td>
+                  <td>{resolveBusinessCountry(b) || <span className="muted">Unassigned</span>}</td>
+                  <td>{(() => { const language = resolveBusinessLanguage(b); return <><span className="badge">{language.label}</span><br /><span className="muted" style={{ fontSize: 11 }}>{language.sourceLabel}</span></>; })()}</td>
                   <td><span className={`status ${b.status}`}>{b.status.replace('_', ' ')}</span></td>
                   <td>{b.source || '-'}</td>
                   <td>{new Date(b.created_at).toLocaleString()}</td>
@@ -381,7 +389,7 @@ export default function BusinessQueueClient({ workspace }: { workspace: Workspac
                 </tr>
               ))}
               {!businesses.length ? (
-                <tr><td colSpan={8} className="muted">No businesses found. Upload a CSV first or change filters.</td></tr>
+                <tr><td colSpan={10} className="muted">No businesses found. Upload a CSV first or change filters.</td></tr>
               ) : null}
             </tbody>
           </table>

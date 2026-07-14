@@ -9,38 +9,45 @@ export async function middleware(request: NextRequest) {
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) return response;
 
-  const supabase = createServerClient(url, anon, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+  try {
+    const supabase = createServerClient(url, anon, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          response = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+        }
       }
+    });
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const path = request.nextUrl.pathname;
+    const isProtected = protectedPrefixes.some((prefix) => path.startsWith(prefix));
+
+    if (isProtected && !user) {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = '/login';
+      loginUrl.searchParams.set('next', `${path}${request.nextUrl.search}`);
+      return NextResponse.redirect(loginUrl);
     }
-  });
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const path = request.nextUrl.pathname;
-  const isProtected = protectedPrefixes.some((prefix) => path.startsWith(prefix));
+    if ((path === '/login' || path === '/') && user) {
+      const dashboardUrl = request.nextUrl.clone();
+      dashboardUrl.pathname = '/dashboard';
+      dashboardUrl.search = '';
+      return NextResponse.redirect(dashboardUrl);
+    }
 
-  if (isProtected && !user) {
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = '/login';
-    loginUrl.searchParams.set('next', path);
-    return NextResponse.redirect(loginUrl);
+    return response;
+  } catch (error) {
+    // Do not turn a temporary Supabase/Auth outage into a site-wide middleware 500.
+    // Protected server pages still validate the session before returning private data.
+    console.error('Scout middleware auth check failed:', error);
+    return response;
   }
-
-  if ((path === '/login' || path === '/') && user) {
-    const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = '/dashboard';
-    dashboardUrl.search = '';
-    return NextResponse.redirect(dashboardUrl);
-  }
-
-  return response;
 }
 
 export const config = {

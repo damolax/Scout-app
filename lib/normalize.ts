@@ -82,3 +82,59 @@ export function displayDomain(input: { domain?: unknown; website?: unknown; emai
   const email = normalizeEmail(input.email);
   return email.includes('@') ? email.split('@')[1] : '';
 }
+
+const NON_UNIQUE_BUSINESS_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'outlook.com', 'hotmail.com', 'live.com',
+  'icloud.com', 'aol.com', 'proton.me', 'protonmail.com',
+  'google.com', 'facebook.com', 'instagram.com', 'linkedin.com', 'youtube.com', 'youtu.be',
+  'tiktok.com', 'x.com', 'twitter.com', 'pinterest.com', 'reddit.com', 'wikipedia.org',
+  'yelp.com', 'trustpilot.com', 'yellowpages.com', 'clutch.co', 'g2.com', 'github.com',
+  'shopify.com', 'apps.shopify.com', 'wordpress.org', 'medium.com', 'quora.com'
+]);
+
+function isNonUniqueBusinessDomain(domain: string): boolean {
+  const normalized = String(domain || '').trim().toLowerCase().replace(/^www\./, '');
+  if (!normalized) return true;
+  for (const blocked of NON_UNIQUE_BUSINESS_DOMAINS) {
+    if (normalized === blocked || normalized.endsWith(`.${blocked}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Returns every stable identity that can prove two records are the same lead.
+ * Email, genuine business domain and phone are checked independently. The
+ * existing normalized key is retained for backwards compatibility and name
+ * is used only when no stronger identity exists.
+ */
+export function businessIdentityKeys(input: {
+  email?: unknown;
+  domain?: unknown;
+  website?: unknown;
+  phone?: unknown;
+  name?: unknown;
+  normalized_key?: unknown;
+}): string[] {
+  const keys = new Set<string>();
+  const email = normalizeEmail(input.email);
+  const domain = domainFromWebsite(input.domain || input.website);
+  const phone = normalizePhone(input.phone);
+  const supplied = cleanText(input.normalized_key).toLowerCase();
+
+  if (email) keys.add(`email:${email}`);
+  if (domain && !isNonUniqueBusinessDomain(domain)) keys.add(`domain:${domain}`);
+  if (phone) keys.add(`phone:${phone}`);
+
+  if (supplied) {
+    const [kind, ...rest] = supplied.split(':');
+    const value = rest.join(':');
+    if (kind !== 'domain' || (value && !isNonUniqueBusinessDomain(value))) keys.add(supplied);
+  }
+
+  if (!keys.size) {
+    const name = cleanText(input.name).toLowerCase().replace(/\s+/g, ' ');
+    if (name) keys.add(`name:${name}`);
+  }
+
+  return Array.from(keys).sort();
+}

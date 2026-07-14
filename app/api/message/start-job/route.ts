@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
 import { createAppNotification } from '@/lib/notifications';
+import { businessIdentityKeys } from '@/lib/normalize';
 
 function formatError(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -26,13 +27,48 @@ export async function POST(request: NextRequest) {
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
       .eq('approved', true)
-      .maybeSingle();
+      .limit(1);
     if (memberError) throw memberError;
-    if (!member) return NextResponse.json({ success: false, error: 'You are not approved for this workspace.' }, { status: 403 });
+    if (!member?.length) return NextResponse.json({ success: false, error: 'You are not approved for this workspace.' }, { status: 403 });
 
     const type = String(body.type || 'initial') === 'follow_up' ? 'follow_up' : 'initial';
     const targetCount = Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(body.targetCount || 1000)));
-    const selectedBusinessIds = Array.isArray(body.selectedBusinessIds) ? body.selectedBusinessIds.map(String).filter(Boolean).slice(0, targetCount) : [];
+    let selectedBusinessIds = Array.isArray(body.selectedBusinessIds) ? body.selectedBusinessIds.map(String).filter(Boolean).slice(0, targetCount) : [];
+    let teamDuplicatesBlocked = 0;
+
+    if (selectedBusinessIds.length) {
+      const { data: selectedRows, error: selectedError } = await supabase
+        .from('businesses')
+        .select('id,normalized_key,email,domain,website,phone,name')
+        .eq('workspace_id', workspaceId)
+        .in('id', selectedBusinessIds);
+      if (selectedError) throw selectedError;
+      const rowKeys = new Map<string, string[]>();
+      const allKeys = new Set<string>();
+      for (const row of selectedRows || []) {
+        const keys = businessIdentityKeys(row as any);
+        rowKeys.set(String((row as any).id), keys);
+        for (const key of keys) allKeys.add(key);
+      }
+      const keys = Array.from(allKeys);
+      const blockedKeys = new Set<string>();
+      for (let index = 0; index < keys.length; index += 1000) {
+        const { data: guardRows, error: guardError } = await supabase.rpc('team_duplicate_keys', {
+          input_keys: keys.slice(index, index + 1000),
+          target_workspace: workspaceId
+        });
+        if (guardError) throw guardError;
+        for (const row of guardRows || []) blockedKeys.add(String((row as any).normalized_key || ''));
+      }
+      const allowedIds = new Set((selectedRows || [])
+        .filter((row: any) => !(rowKeys.get(String(row.id)) || []).some((key) => blockedKeys.has(key)))
+        .map((row: any) => String(row.id)));
+      teamDuplicatesBlocked = Math.max(0, selectedBusinessIds.length - allowedIds.size);
+      selectedBusinessIds = selectedBusinessIds.filter((id: string) => allowedIds.has(id));
+      if (!selectedBusinessIds.length) {
+        return NextResponse.json({ success: false, code: 'team_duplicate_blocked', error: 'All selected leads are already owned by another Scout team member.', teamDuplicatesBlocked }, { status: 409 });
+      }
+    }
     const selectedSenderIds = Array.isArray(body.selectedSenderIds) ? body.selectedSenderIds.map(String).filter(Boolean) : [];
     if (!selectedSenderIds.length) return NextResponse.json({ success: false, error: 'Select at least one connected sender first.' }, { status: 400 });
 
@@ -56,7 +92,8 @@ export async function POST(request: NextRequest) {
       dry_run: Boolean(body.dryRun),
       allow_high_risk_send: Boolean(body.allowHighRiskSend),
       followup_segment: type === 'follow_up' ? String(body.followupSegment || 'all_unanswered') : null,
-      due_business_ids: type === 'follow_up' ? selectedBusinessIds : []
+      due_business_ids: type === 'follow_up' ? selectedBusinessIds : [],
+      team_duplicates_blocked_before_job: teamDuplicatesBlocked
     };
 
     const scheduleFor = new Date(body.scheduledFor || Date.now());
@@ -79,23 +116,26 @@ export async function POST(request: NextRequest) {
     }).select('*').single();
     if (error) throw error;
 
-    await createAppNotification(supabase as any, {
-      workspaceId,
-      userId: user.id,
-      type: 'job_started',
-      title: `${type === 'follow_up' ? 'Follow-up' : 'Message'} job started`,
-      message: `Scout created a saved job for ${(selectedBusinessIds.length || targetCount).toLocaleString()} contact(s). Keep Scout open and the in-app schedule runner will continue it.`,
-      entityType: 'message_schedule',
-      entityId: data.id,
-      raw: { schedule_id: data.id, type, targetCount, selectedBusinessCount: selectedBusinessIds.length }
-    });
+    try {
+      await createAppNotification(supabase as any, {
+        workspaceId,
+        userId: user.id,
+        type: 'job_started',
+        title: `${type === 'follow_up' ? 'Follow-up' : 'Message'} job started`,
+        message: `Scout created a saved job for ${(selectedBusinessIds.length || targetCount).toLocaleString()} contact(s).${teamDuplicatesBlocked ? ` ${teamDuplicatesBlocked.toLocaleString()} team-owned duplicate(s) were blocked.` : ''} Keep Scout open and the in-app schedule runner will continue it.`,
+        entityType: 'message_schedule',
+        entityId: data.id,
+        raw: { schedule_id: data.id, type, targetCount, selectedBusinessCount: selectedBusinessIds.length }
+      });
+    } catch {}
+
 
     const shouldRunNow = body.runNow !== false && scheduleFor.getTime() <= Date.now() + 60_000;
     let workerKick: any = null;
     if (shouldRunNow) {
       const origin = request.nextUrl.origin;
       const secret = process.env.SCHEDULE_WORKER_SECRET || process.env.CRON_SECRET || process.env.RUN_ALL_WORKER_SECRET || '';
-      const firstRunTargetLimit = Math.max(1, Math.min(25, Number(body.firstRunTargetLimit || body.kickLimit || 10)));
+      const firstRunTargetLimit = 1;
       try {
         const workerResponse = await fetch(`${origin}/api/message/run-schedules`, {
           method: 'POST',
@@ -108,7 +148,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, schedule: data, startedWorker: shouldRunNow, workerKick });
+    return NextResponse.json({ success: true, schedule: data, startedWorker: shouldRunNow, workerKick, teamDuplicatesBlocked });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 500 });
   }

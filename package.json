@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-30-team-duplicate-admin-dashboard",
-  "version": "10.30.0",
+  "name": "scout-app-v10-32-clean-rebuild",
+  "version": "10.32.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.29: private workspace per signup, admin signup notifications, follow-up send up to 1000, and clearer account isolation."
+  "description": "Scout App v10.32: stable workspace, signup name, country-assigned translations, reliable uploads and durable messaging."
 }

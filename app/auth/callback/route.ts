@@ -8,7 +8,14 @@ export async function GET(request: NextRequest) {
 
   if (code) {
     const supabase = await createClient();
-    await supabase.auth.exchangeCodeForSession(code);
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) {
+      const failedUrl = new URL(request.url);
+      failedUrl.pathname = '/reset-password';
+      failedUrl.search = '';
+      failedUrl.searchParams.set('error', error.message || 'The reset link is invalid or expired.');
+      return NextResponse.redirect(failedUrl);
+    }
   }
 
   const redirectUrl = new URL(request.url);
