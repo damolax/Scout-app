@@ -1,3 +1,9 @@
+#!/usr/bin/env bash
+set -e
+echo "Writing updated files..."
+
+mkdir -p "app/(app)/dashboard"
+cat > "app/(app)/dashboard/page.tsx" << 'CLAUDE_EOF_MARKER'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subMonths } from 'date-fns'
@@ -306,3 +312,77 @@ export default async function DashboardPage({ searchParams }: { searchParams: { 
     />
   )
 }
+CLAUDE_EOF_MARKER
+
+mkdir -p "app/(app)/money"
+cat > "app/(app)/money/page.tsx" << 'CLAUDE_EOF_MARKER'
+import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import MoneyClient from './MoneyClient'
+import { getEffectiveProfile } from '@/lib/view-as'
+import { statusRank, STATUS_ORDER } from '@/lib/types'
+
+export default async function MoneyPage() {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: realProfile } = await supabase
+    .from('profiles').select('*, color_groups!profiles_color_group_id_fkey(*)').eq('id', user.id).single()
+  if (!realProfile) redirect('/login')
+
+  const { profile } = await getEffectiveProfile(supabase, realProfile)
+
+  const isAdmin = profile.is_admin || profile.is_director || profile.is_co_admin
+  const emAndBelowStatuses = STATUS_ORDER.filter(s => statusRank(s) <= statusRank('executive_manager'))
+  const isEmOrBelow = emAndBelowStatuses.includes(profile.status)
+
+  const [
+    { data: myWeeklyEarnings },
+    { data: allEarnings },
+    { data: colorGroups },
+    { data: allProfiles },
+  ] = await Promise.all([
+    supabase.from('weekly_earnings')
+      .select('*')
+      .eq('user_id', profile.id)
+      .order('week_start', { ascending: false }),
+
+    isAdmin
+      ? supabase.from('weekly_earnings')
+          .select('*, profiles!weekly_earnings_user_id_fkey(id, full_name, member_id, status, color_group_id, color_groups!profiles_color_group_id_fkey(name, hex_color, code))')
+          .order('week_start', { ascending: false })
+      : { data: [] },
+
+    supabase.from('color_groups').select('*').order('name'),
+
+    // Everyone approved can have earnings recorded against them — not just EM and below.
+    // (The "Executive Manager and below" restriction only applies to the public
+    // Top Earners / Consistent Earners leaderboards on the dashboard.)
+    isAdmin
+      ? supabase.from('profiles')
+          .select('id, full_name, member_id, status, color_groups!profiles_color_group_id_fkey(name)')
+          .eq('approved', true)
+          .order('full_name')
+      : { data: [] },
+  ])
+
+  return (
+    <MoneyClient
+      profile={profile}
+      isAdmin={isAdmin}
+      isEmOrBelow={isEmOrBelow}
+      myWeeklyEarnings={myWeeklyEarnings ?? []}
+      allEarnings={(allEarnings ?? []) as any[]}
+      colorGroups={colorGroups ?? []}
+      allProfiles={(allProfiles ?? []) as any[]}
+    />
+  )
+}
+CLAUDE_EOF_MARKER
+
+echo "Staging and committing..."
+git add .
+git commit -m "fix: disambiguate weekly_earnings-to-profiles FK (recorded_by vs user_id) causing silent leaderboard query failure"
+git push origin main
+echo "Done. Vercel should start redeploying now."
