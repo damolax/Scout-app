@@ -26,10 +26,9 @@ export async function POST(request: NextRequest) {
       .select('workspace_id,user_id,approved')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
-      .eq('approved', true)
       .limit(1);
     if (memberError) throw memberError;
-    if (!member?.length) return NextResponse.json({ success: false, error: 'You are not approved for this workspace.' }, { status: 403 });
+    if (!member?.length) return NextResponse.json({ success: false, error: 'You do not belong to this workspace.' }, { status: 403 });
 
     const type = String(body.type || 'initial') === 'follow_up' ? 'follow_up' : 'initial';
     const targetCount = Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(body.targetCount || 1000)));

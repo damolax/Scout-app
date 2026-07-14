@@ -21,7 +21,6 @@ async function currentUserCanUseWorkspace(workspaceId: string) {
     .select('workspace_id,user_id,approved')
     .eq('workspace_id', workspaceId)
     .eq('user_id', user.id)
-    .eq('approved', true)
     .limit(1);
   if (memberError) throw memberError;
   return Boolean(member);
@@ -33,7 +32,7 @@ export async function POST(request: NextRequest) {
     const workspaceId = String(body.workspaceId || '').trim();
     if (!workspaceId) return NextResponse.json({ success: false, error: 'Missing workspaceId.' }, { status: 400 });
     if (!(await currentUserCanUseWorkspace(workspaceId))) {
-      return NextResponse.json({ success: false, error: 'You are not approved for this workspace.' }, { status: 403 });
+      return NextResponse.json({ success: false, error: 'You do not belong to this workspace.' }, { status: 403 });
     }
 
     const supabase = createAdminClient();

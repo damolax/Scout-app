@@ -3,32 +3,44 @@ import { Workspace } from './types';
 
 type WorkspaceMembershipRow = {
   role?: string | null;
-  approved?: boolean | null;
   workspaces?: Workspace | Workspace[] | null;
 };
+
+function firstWorkspace(value: unknown): Workspace | null {
+  if (Array.isArray(value)) return (value[0] || null) as Workspace | null;
+  return value && typeof value === 'object' ? (value as Workspace) : null;
+}
 
 export async function getCurrentWorkspace(): Promise<{ workspace: Workspace | null; error?: string }> {
   const supabase = await createClient();
   const { data: { user }, error: userError } = await supabase.auth.getUser();
   if (userError || !user) return { workspace: null, error: 'Not signed in' };
 
-  // Keep the original v10.30 architecture: only read an existing approved
-  // membership. Do not create or repair workspaces during normal page loads.
-  // An array query avoids PostgREST's "Cannot coerce ... to a single JSON
-  // object" error when historical duplicate membership rows exist.
+  // v10.33 uses a read-only SECURITY DEFINER RPC that returns the signed-in
+  // user's own workspace. Account creation/repair remains in the database
+  // trigger and one-time recovery migration, not in normal page rendering.
+  const { data: rpcRows, error: rpcError } = await supabase.rpc('current_scout_workspace');
+  const rpcWorkspace = firstWorkspace(rpcRows);
+  if (!rpcError && rpcWorkspace?.id) return { workspace: rpcWorkspace };
+
+  // Compatibility fallback while the recovery SQL is being installed.
+  // Do not use .single()/.maybeSingle(), and do not use approval as an access gate.
   const { data, error } = await supabase
     .from('workspace_members')
-    .select('role, approved, workspaces(id, name, api_key, app_url, render_backend_url, default_audience_category_id, default_audience_category_name, dork_settings, extension_settings, email_signature_text, email_signature_html, email_logo_url)')
+    .select('role, workspaces(id, name, api_key, app_url, render_backend_url, default_audience_category_id, default_audience_category_name, dork_settings, extension_settings, email_signature_text, email_signature_html, email_logo_url)')
     .eq('user_id', user.id)
-    .eq('approved', true)
-    .order('role', { ascending: true })
     .order('created_at', { ascending: true })
-    .limit(1);
+    .limit(10);
 
-  if (error) return { workspace: null, error: error.message };
+  if (error) return { workspace: null, error: rpcError?.message || error.message };
 
-  const row = ((data || []) as WorkspaceMembershipRow[])[0];
-  const workspace = Array.isArray(row?.workspaces) ? row?.workspaces[0] : row?.workspaces;
-  if (!workspace) return { workspace: null, error: 'No approved workspace found for this account.' };
-  return { workspace: workspace as Workspace };
+  for (const row of (data || []) as WorkspaceMembershipRow[]) {
+    const workspace = firstWorkspace(row.workspaces);
+    if (workspace?.id) return { workspace };
+  }
+
+  return {
+    workspace: null,
+    error: rpcError?.message || 'Workspace setup is unavailable for this account. Please sign out and sign in again.'
+  };
 }

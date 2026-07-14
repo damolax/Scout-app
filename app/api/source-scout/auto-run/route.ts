@@ -20,10 +20,9 @@ async function assertMember(supabase: Awaited<ReturnType<typeof createClient>>, 
     .select('workspace_id,user_id,approved')
     .eq('workspace_id', workspaceId)
     .eq('user_id', userId)
-    .eq('approved', true)
     .limit(1);
   if (error) throw error;
-  if (!member?.length) throw new Error('You are not approved for this workspace.');
+  if (!member?.length) throw new Error('You do not belong to this workspace.');
 }
 
 export async function POST(request: NextRequest) {

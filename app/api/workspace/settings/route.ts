@@ -25,10 +25,9 @@ async function assertMember(workspaceId: string) {
     .select('workspace_id,user_id,approved,role')
     .eq('workspace_id', workspaceId)
     .eq('user_id', user.id)
-    .eq('approved', true)
     .limit(1);
   if (error) return { error: error.message, status: 500 } as const;
-  if (!member?.length) return { error: 'You are not approved for this workspace.', status: 403 } as const;
+  if (!member?.length) return { error: 'You do not belong to this workspace.', status: 403 } as const;
   return { user, member } as const;
 }
 

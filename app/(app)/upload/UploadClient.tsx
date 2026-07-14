@@ -150,7 +150,7 @@ function shouldSplitImportChunk(error: unknown): boolean {
   const message = formatImportError(error).toLowerCase();
   if ([
     'permission denied',
-    'not approved for this workspace',
+    'do not belong to this workspace',
     'does not exist',
     'could not find the function',
     'schema cache',

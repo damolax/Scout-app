@@ -24,10 +24,9 @@ export async function POST(request: NextRequest) {
       .select('workspace_id')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
-      .eq('approved', true)
       .limit(1);
     if (memberError) throw memberError;
-    if (!member?.length) return NextResponse.json({ success: false, error: 'You are not approved for this workspace.' }, { status: 403 });
+    if (!member?.length) return NextResponse.json({ success: false, error: 'You do not belong to this workspace.' }, { status: 403 });
 
     let query = supabase.from('app_notifications').delete().eq('workspace_id', workspaceId);
     if (!all) {

@@ -30,7 +30,6 @@ async function signedInMemberCanRun(workspaceId: string) {
       .select('workspace_id,user_id,approved')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
-      .eq('approved', true)
       .limit(1);
     if (memberError) return false;
     return Boolean(member);

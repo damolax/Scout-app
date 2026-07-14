@@ -1,0 +1,51 @@
+SCOUT V10.33 — EXACT ROLLOUT ORDER
+
+IMPORTANT
+- Run the v10.33 SQL FIRST.
+- Do not run any v10.31 or v10.32 SQL.
+- The SQL is designed for the live schema audit uploaded on 14 July 2026.
+
+STEP 1 — SUPABASE RECOVERY
+1. Open Supabase.
+2. Click SQL Editor.
+3. Click New query.
+4. Open RUN_THIS_SQL_FIRST_V10_33_ACCESS_RECOVERY.sql.
+5. Copy the entire file into the SQL Editor.
+6. Click Run once.
+7. At the bottom, read the JSON result named scout_v10_33_recovery_result.
+
+EXPECTED RESULT
+- only_admin_email: ["oyekunleolalekan3168@gmail.com"]
+- users_without_profile: 0
+- users_without_membership: 0
+- regular_users_with_admin_membership: 0
+- auth_users, profiles, and the number of users with memberships should match.
+  Membership count can be greater than the user count only when historical extra memberships already exist.
+
+STEP 2 — TEST THE CURRENT LIVE APP BEFORE DEPLOYING CODE
+1. Sign out of Scout completely.
+2. Sign in as oyekunleolalekan3168@gmail.com.
+3. Confirm Dashboard opens.
+4. Open Businesses, Messages, Templates, and Team Dashboard.
+5. Sign in with one regular account and confirm it opens its own private workspace.
+
+STEP 3 — DEPLOY THE V10.33 CODE
+1. Save scout-app-v10-33-access-recovery.zip in Windows Downloads.
+2. Save DEPLOY_V10_33_SAFE_GIT_BASH.sh in Windows Downloads.
+3. Open Git Bash.
+4. Run:
+
+   cd ~/Downloads
+   bash DEPLOY_V10_33_SAFE_GIT_BASH.sh
+
+5. The script checks GitHub first, creates a backup branch, commits, and pushes.
+6. Open Vercel and wait for the newest deployment to become Ready.
+
+STEP 4 — FINAL TEST
+1. Sign out and sign back in.
+2. Confirm the Dashboard says Welcome, <first name>.
+3. Confirm only oyekunleolalekan3168@gmail.com can open Team Dashboard.
+4. Confirm Team Dashboard shows connected-account counts but not sender email addresses.
+5. Create one test account using Full name, Email, and Password.
+6. Confirm the new account enters Scout without manual approval.
+7. Confirm the new user's name appears in Team Dashboard.

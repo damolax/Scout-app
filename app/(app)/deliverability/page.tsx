@@ -30,7 +30,7 @@ export default async function DeliverabilityPage() {
   const { workspace } = await getCurrentWorkspace();
   const supabase = await createClient();
   if (!workspace) {
-    return <div className="card"><h2>Deliverability</h2><p className="error">No approved workspace found.</p></div>;
+    return <div className="card"><h2>Deliverability</h2><p className="error">No workspace is available for this account.</p></div>;
   }
 
   const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();

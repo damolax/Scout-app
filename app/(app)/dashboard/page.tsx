@@ -335,9 +335,18 @@ async function safeMissingEmailCount(workspaceId: string) {
 export default async function DashboardPage({ searchParams }: { searchParams?: DashboardSearchParams }) {
   const params = await Promise.resolve(searchParams || {});
   const period = periodFor((params as any).range);
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: profileRows } = user
+    ? await supabase.from('profiles').select('full_name').eq('id', user.id).limit(1)
+    : { data: [] as Array<{ full_name?: string | null }> };
+  const metadata = (user?.user_metadata || {}) as Record<string, unknown>;
+  const fullName = String(profileRows?.[0]?.full_name || metadata.full_name || metadata.name || '').trim();
+  const emailName = String(user?.email || '').split('@')[0].trim();
+  const welcomeName = (fullName || emailName || 'there').split(/\s+/)[0];
+
   const { workspace, error } = await getCurrentWorkspace();
   if (!workspace) return <div className="error">Workspace error: {error}</div>;
-  const supabase = await createClient();
 
   const previous = period.previous;
   const [
@@ -443,7 +452,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     <div className="stack">
       <div className="topbar">
         <div className="page-title">
-          <h2>Dashboard</h2>
+          <h2>Welcome, {welcomeName}</h2>
           <p>Your simple control center. See the important numbers first, then choose the next action.</p>
         </div>
         <span className="badge">Workspace: {workspace.name}</span>
