@@ -11,6 +11,8 @@ export async function getCurrentWorkspace(): Promise<{ workspace: Workspace | nu
     .select('role, approved, workspaces(id, name, api_key, app_url, render_backend_url, default_audience_category_id, default_audience_category_name, dork_settings, extension_settings, email_signature_text, email_signature_html, email_logo_url)')
     .eq('user_id', user.id)
     .eq('approved', true)
+    .order('role', { ascending: true })
+    .order('created_at', { ascending: true })
     .limit(1)
     .single();
 

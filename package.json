@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-28-followup-template-settings-fix",
-  "version": "10.28.0",
+  "name": "scout-app-v10-29-private-workspaces-followup-1000",
+  "version": "10.29.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout App v10.28: clearer follow-up sending, initial-only template selection/rotation for Send Emails, separate follow-up template selection, clearer seed receiver text, and Settings total sent per sender."
+  "description": "Scout App v10.29: private workspace per signup, admin signup notifications, follow-up send up to 1000, and clearer account isolation."
 }

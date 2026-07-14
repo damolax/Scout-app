@@ -685,7 +685,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     setRecentSent((data || []) as SendLogRow[]);
   }
 
-  async function fetchDueFollowUps(limitRows = 100) {
+  async function fetchDueFollowUps(limitRows = 1000) {
     const { data, error: dueError } = await supabase.rpc("get_due_followups", {
       target_workspace: workspace.id,
       limit_rows: limitRows,
@@ -704,7 +704,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   }
 
   async function loadDueFollowUps() {
-    setDueFollowUps(await fetchDueFollowUps(100));
+    setDueFollowUps(await fetchDueFollowUps(1000));
   }
 
   async function loadSchedules() {
@@ -2731,7 +2731,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             These are people you emailed more than 72 hours ago who did not send a reply. Send them now when you are ready.
           </p>
           <div className="notice" style={{ marginBottom: 12 }}>
-            Due now: <strong>{dueFollowUps.length.toLocaleString()}</strong> contact(s). Choose the follow-up template here, then send once.
+            Due now: <strong>{dueFollowUps.length.toLocaleString()}</strong> contact(s). You can send up to 1,000 follow-ups at once. Choose the follow-up template here, then send once.
           </div>
           <div className="grid grid-2">
             <div>
@@ -2802,7 +2802,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {dueFollowUps.slice(0, 100).map((row) => (
+                  {dueFollowUps.slice(0, 1000).map((row) => (
                     <tr key={`${row.business_id}-${row.last_sent_at}`}>
                       <td>{row.business_name || "-"}</td>
                       <td>{row.to_email}</td>

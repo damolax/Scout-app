@@ -46,8 +46,8 @@ export default function LoginClient() {
         <div className="brand" style={{ marginBottom: 24 }}>
           <div className="logo" />
           <div>
-            <h1>Scout App v8 Cloud</h1>
-            <p>Email + password login. Auto-approved workspace access.</p>
+            <h1>Scout App</h1>
+            <p>Email + password login. Every user gets a private Scout workspace.</p>
           </div>
         </div>
         <form onSubmit={submit} className="stack">
