@@ -11,7 +11,7 @@ const ACTIVE_QUEUE_STATUSES = ['pending', 'scanning', 'found', 'ready', 'review'
 
 type ImportPhase = 'idle' | 'reading' | 'ready' | 'checking' | 'importing' | 'done' | 'failed';
 type TargetWarning = { activeCount: number; previousHeaders: string[]; newHeaders: string[] } | null;
-type ImportChunkResult = { inserted_count: number; skipped_queue_count: number; skipped_history_count: number; skipped_keys?: string[] | null };
+type ImportChunkResult = { inserted_count: number; skipped_queue_count: number; skipped_history_count: number; skipped_team_count?: number; skipped_keys?: string[] | null };
 
 function chunk<T>(items: T[], size: number): T[][] {
   const result: T[][] = [];
@@ -301,6 +301,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       let inserted = 0;
       let skippedExistingQueue = 0;
       let skippedScouted = 0;
+      let skippedTeam = 0;
       let processed = 0;
       const skippedKeys = new Set<string>();
       setPhase('importing');
@@ -321,6 +322,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         inserted += Number(item?.inserted_count || 0);
         skippedExistingQueue += Number(item?.skipped_queue_count || 0);
         skippedScouted += Number(item?.skipped_history_count || 0);
+        skippedTeam += Number(item?.skipped_team_count || 0);
         (item?.skipped_keys || []).forEach((key) => skippedKeys.add(key));
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
@@ -335,11 +337,23 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       const skippedTotal = skippedRows.length + duplicateRows.length + invalidRows.length;
       await supabase.from('import_batches').update({ inserted_count: inserted, skipped_count: skippedTotal }).eq('id', batch.id);
 
-      setResult({ uploaded: rows.length, inserted, skippedExistingQueue, skippedScouted, skippedFileDuplicates: duplicateRows.length, invalidRows, skippedRows, batchId: batch.id, queuedResearch });
+      if (skippedTeam > 0) {
+        await supabase.from('app_notifications').insert({
+          workspace_id: workspace.id,
+          type: 'team_duplicate_removed',
+          title: 'Team duplicate leads removed',
+          message: `${skippedTeam.toLocaleString()} lead${skippedTeam === 1 ? '' : 's'} already scouted by a team member and removed from this upload.`,
+          entity_type: 'import_batch',
+          entity_id: batch.id,
+          raw: { batchId: batch.id, skippedTeam, removedFromUpload: true }
+        });
+      }
+
+      setResult({ uploaded: rows.length, inserted, skippedExistingQueue, skippedScouted, skippedTeam, skippedFileDuplicates: duplicateRows.length, invalidRows, skippedRows, batchId: batch.id, queuedResearch });
       const seconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
       setPercent(100);
       setPhase('done');
-      setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new business(es), skipped ${skippedTotal.toLocaleString()}. Rows with email were saved as Ready; no-email rows were saved as Pending for Auto Scout.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
+      setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new business(es), skipped ${skippedTotal.toLocaleString()}.${skippedTeam ? ` ${skippedTeam.toLocaleString()} were already scouted by a team member and removed.` : ''} Rows with email were saved as Ready; no-email rows were saved as Pending for Auto Scout.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
     } catch (error) {
       const message = formatImportError(error);
       console.error('Scout v8.10 fast import failed:', error);
@@ -475,7 +489,8 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
           <div className="card kpi"><div className="title">Uploaded</div><div className="num">{result.uploaded.toLocaleString()}</div></div>
           <div className="card kpi"><div className="title">Imported</div><div className="num">{result.inserted.toLocaleString()}</div></div>
           <div className="card kpi"><div className="title">Already In Queue</div><div className="num">{result.skippedExistingQueue.toLocaleString()}</div></div>
-          <div className="card kpi"><div className="title">Already Scouted</div><div className="num">{result.skippedScouted.toLocaleString()}</div></div>
+          <div className="card kpi"><div className="title">Already In This Account</div><div className="num">{result.skippedScouted.toLocaleString()}</div></div>
+          <div className="card kpi"><div className="title">Team Already Scouted</div><div className="num">{Number((result as any).skippedTeam || 0).toLocaleString()}</div></div>
           <div className="card kpi"><div className="title">File Duplicates</div><div className="num">{result.skippedFileDuplicates.toLocaleString()}</div></div>
           <div className="card kpi"><div className="title">Invalid Rows</div><div className="num">{result.invalidRows.length.toLocaleString()}</div></div>
           <div className="card kpi"><div className="title">Research Jobs</div><div className="num">{(result.queuedResearch || 0).toLocaleString()}</div></div>

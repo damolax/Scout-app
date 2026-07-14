@@ -96,7 +96,31 @@ export async function POST(request: NextRequest) {
 
     if (!payload.length) return NextResponse.json({ success: false, ok: false, error: 'No usable business keys found.' }, { status: 400 });
 
-    const { data: inserted, error } = await admin.from('businesses').upsert(payload, {
+    const keys = Array.from(new Set(payload.map((row) => String(row.normalized_key || '')).filter(Boolean)));
+    let teamDuplicateKeys = new Set<string>();
+    if (keys.length) {
+      const { data: dupes } = await admin
+        .from('team_scouted_leads')
+        .select('normalized_key,first_workspace_id')
+        .in('normalized_key', keys)
+        .neq('first_workspace_id', workspace.id);
+      teamDuplicateKeys = new Set((dupes || []).map((row: any) => String(row.normalized_key || '')).filter(Boolean));
+    }
+    const filteredPayload = payload.filter((row) => !teamDuplicateKeys.has(String(row.normalized_key || '')));
+    if (!filteredPayload.length) {
+      await admin.from('app_notifications').insert({
+        workspace_id: workspace.id,
+        type: 'team_duplicate_removed',
+        title: 'Team duplicate leads removed',
+        message: `${teamDuplicateKeys.size.toLocaleString()} lead${teamDuplicateKeys.size === 1 ? '' : 's'} already scouted by a team member and removed from this extension import.`,
+        entity_type: 'extension_import',
+        entity_id: `${Date.now()}`,
+        raw: { teamDuplicatesRemoved: teamDuplicateKeys.size, source: body.source || 'extension' }
+      });
+      return NextResponse.json({ success: true, ok: true, received: rows.length, inserted: 0, added: 0, skippedOrDuplicate: teamDuplicateKeys.size, duplicates: teamDuplicateKeys.size, teamDuplicatesRemoved: teamDuplicateKeys.size, directEmails: 0, emailsFound: 0, queuedAutoScout: 0, audienceCategoryId: defaultCategoryId, audienceCategoryName: defaultCategoryName });
+    }
+
+    const { data: inserted, error } = await admin.from('businesses').upsert(filteredPayload, {
       onConflict: 'workspace_id,normalized_key',
       ignoreDuplicates: true
     }).select('id,email,website');
@@ -134,11 +158,23 @@ export async function POST(request: NextRequest) {
       if (!jobsError) queuedAutoScout = jobs?.length || 0;
     }
 
+    if (teamDuplicateKeys.size > 0) {
+      await admin.from('app_notifications').insert({
+        workspace_id: workspace.id,
+        type: 'team_duplicate_removed',
+        title: 'Team duplicate leads removed',
+        message: `${teamDuplicateKeys.size.toLocaleString()} lead${teamDuplicateKeys.size === 1 ? '' : 's'} already scouted by a team member and removed from this extension import.`,
+        entity_type: 'extension_import',
+        entity_id: `${Date.now()}`,
+        raw: { teamDuplicatesRemoved: teamDuplicateKeys.size, source: body.source || 'extension' }
+      });
+    }
+
     await admin.from('activity_logs').insert({
       workspace_id: workspace.id,
       type: 'extension_ingest',
-      message: `Extension imported ${insertedRows.length} lead(s)${defaultCategoryName ? ` for ${defaultCategoryName}` : ''}, direct emails ${directEmailRows.length}, queued ${queuedAutoScout} website(s) for Auto Scout.`,
-      raw: { received: rows.length, inserted: insertedRows.length, directEmails: directEmailRows.length, queuedAutoScout, source: body.source || 'extension', audienceCategoryId: defaultCategoryId, audienceCategoryName: defaultCategoryName }
+      message: `Extension imported ${insertedRows.length} lead(s)${defaultCategoryName ? ` for ${defaultCategoryName}` : ''}, direct emails ${directEmailRows.length}, queued ${queuedAutoScout} website(s) for Auto Scout.${teamDuplicateKeys.size ? ` Removed ${teamDuplicateKeys.size.toLocaleString()} already scouted by team.` : ''}`,
+      raw: { received: rows.length, inserted: insertedRows.length, directEmails: directEmailRows.length, queuedAutoScout, teamDuplicatesRemoved: teamDuplicateKeys.size, source: body.source || 'extension', audienceCategoryId: defaultCategoryId, audienceCategoryName: defaultCategoryName }
     });
 
     return NextResponse.json({
@@ -147,8 +183,9 @@ export async function POST(request: NextRequest) {
       received: rows.length,
       inserted: insertedRows.length,
       added: insertedRows.length,
-      skippedOrDuplicate: Math.max(0, payload.length - insertedRows.length),
-      duplicates: Math.max(0, payload.length - insertedRows.length),
+      skippedOrDuplicate: Math.max(0, filteredPayload.length - insertedRows.length) + teamDuplicateKeys.size,
+      duplicates: Math.max(0, filteredPayload.length - insertedRows.length) + teamDuplicateKeys.size,
+      teamDuplicatesRemoved: teamDuplicateKeys.size,
       directEmails: directEmailRows.length,
       emailsFound: directEmailRows.length,
       queuedAutoScout,

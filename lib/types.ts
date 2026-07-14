@@ -88,6 +88,7 @@ export type ImportResult = {
   inserted: number;
   skippedExistingQueue: number;
   skippedScouted: number;
+  skippedTeam?: number;
   skippedFileDuplicates: number;
   invalidRows: CsvInvalidRow[];
   skippedRows: CsvBusinessInput[];

@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle, Trophy } from 'lucide-react';
+import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle, Trophy, Users } from 'lucide-react';
 
-const items = [
+const baseItems = [
   { href: '/dashboard', label: 'Home', icon: BarChart3 },
   { href: '/source-scout', label: 'Find Leads', icon: Search },
   { href: '/message', label: 'Send Emails', icon: Mail },
@@ -21,7 +21,8 @@ const groupedRoutes: Record<string, string[]> = {
   '/replies': ['/replies'],
   '/settings': ['/settings'],
   '/challenges': ['/challenges'],
-  '/help': ['/help']
+  '/help': ['/help'],
+  '/team': ['/team']
 };
 
 function isActive(pathname: string, href: string) {
@@ -29,8 +30,15 @@ function isActive(pathname: string, href: string) {
   return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }
 
-export function AppNav() {
+export function AppNav({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
+  const items = isAdmin
+    ? [
+        ...baseItems.slice(0, 5),
+        { href: '/team', label: 'Team', icon: Users },
+        ...baseItems.slice(5)
+      ]
+    : baseItems;
   return (
     <nav className="nav" aria-label="Main navigation">
       {items.map((item) => {

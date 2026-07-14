@@ -45,7 +45,7 @@ function shortenSignature(account: GmailAccount) {
 }
 
 
-export default function SettingsClient({ workspace }: { workspace: Workspace }) {
+export default function SettingsClient({ workspace, isAdmin = false }: { workspace: Workspace; isAdmin?: boolean }) {
   const supabase = useMemo(() => createClient(), []);
   const identityLoadedRef = useRef(false);
   const [appUrl, setAppUrl] = useState(workspace.app_url || '');
@@ -755,26 +755,33 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         </tbody></table></div>
       </div>
 
-      <div className="card" style={{ padding: 18 }}>
-        <h3>Admin Setup for Team + Extension</h3>
-        <p className="muted">Save these once so another person can open the app, go to Settings, connect Gmail, and start scouting. The Render/backend URL is optional unless you still use a separate Render service for deep workers.</p>
-        <div className="grid grid-2">
-          <div><label className="label">Scout App URL / Vercel URL</label><input className="input" value={appUrl} onChange={(e) => setAppUrl(e.target.value)} placeholder="https://your-scout-app.vercel.app" /></div>
-          <div><label className="label">Render / backend URL, optional</label><input className="input" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} placeholder="https://your-render-backend.onrender.com" /></div>
+      {isAdmin ? (
+        <div className="card" style={{ padding: 18 }}>
+          <h3>Admin Setup for Team + Extension</h3>
+          <p className="muted">Only the main admin can change these shared setup values. New users receive these defaults automatically, but they cannot change the team setup.</p>
+          <div className="grid grid-2">
+            <div><label className="label">Scout App URL / Vercel URL</label><input className="input" value={appUrl} onChange={(e) => setAppUrl(e.target.value)} placeholder="https://your-scout-app.vercel.app" /></div>
+            <div><label className="label">Render / backend URL, optional</label><input className="input" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} placeholder="https://your-render-backend.onrender.com" /></div>
+          </div>
+          <div className="grid grid-2" style={{ marginTop: 12 }}>
+            <div><label className="label">Default audience category</label><select className="select" value={defaultAudienceCategoryId} onChange={(e) => { setDefaultAudienceCategoryId(e.target.value); const cat = categories.find((c) => c.id === e.target.value); if (cat) setDefaultAudienceCategoryName(cat.name); }}><option value="">None / create below</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+            <div><label className="label">New default category name</label><input className="input" value={defaultAudienceCategoryName} onChange={(e) => { setDefaultAudienceCategoryName(e.target.value); if (defaultAudienceCategoryId) setDefaultAudienceCategoryId(''); }} placeholder="Airtable service, Marketing, Shopify audit" /></div>
+          </div>
+          <div className="notice" style={{ marginTop: 12 }}>Extension ingest URL: <code>{(appUrl || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')}/api/extension/ingest</code></div>
+          <label className="label" style={{ marginTop: 12 }}>Extension workspace key</label>
+          <input className="input" readOnly value={workspace.api_key || 'No API key found. Re-run migration.'} />
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button className="btn" type="button" disabled={busy} onClick={saveWorkspaceSettings}>Save admin setup</button>
+            <button className="btn secondary" type="button" onClick={saveLocalBackend}>Save backend locally too</button>
+            <button className="btn secondary" type="button" onClick={checkBackend}>Check backend</button>
+          </div>
         </div>
-        <div className="grid grid-2" style={{ marginTop: 12 }}>
-          <div><label className="label">Default audience category</label><select className="select" value={defaultAudienceCategoryId} onChange={(e) => { setDefaultAudienceCategoryId(e.target.value); const cat = categories.find((c) => c.id === e.target.value); if (cat) setDefaultAudienceCategoryName(cat.name); }}><option value="">None / create below</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-          <div><label className="label">New default category name</label><input className="input" value={defaultAudienceCategoryName} onChange={(e) => { setDefaultAudienceCategoryName(e.target.value); if (defaultAudienceCategoryId) setDefaultAudienceCategoryId(''); }} placeholder="Airtable service, Marketing, Shopify audit" /></div>
+      ) : (
+        <div className="card" style={{ padding: 18 }}>
+          <h3>Team setup</h3>
+          <p className="muted">The main admin manages the shared app URL, backend URL, and extension setup. Your account uses those values automatically. Use this page for your Gmail senders, signature, and sending limits.</p>
         </div>
-        <div className="notice" style={{ marginTop: 12 }}>Extension ingest URL: <code>{(appUrl || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '')}/api/extension/ingest</code></div>
-        <label className="label" style={{ marginTop: 12 }}>Extension workspace key</label>
-        <input className="input" readOnly value={workspace.api_key || 'No API key found. Re-run migration.'} />
-        <div className="actions" style={{ marginTop: 12 }}>
-          <button className="btn" type="button" disabled={busy} onClick={saveWorkspaceSettings}>Save admin setup</button>
-          <button className="btn secondary" type="button" onClick={saveLocalBackend}>Save backend locally too</button>
-          <button className="btn secondary" type="button" onClick={checkBackend}>Check backend</button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
