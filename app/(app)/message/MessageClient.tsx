@@ -386,6 +386,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [specificSenderId, setSpecificSenderId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [templateId, setTemplateId] = useState("");
+  const [followUpTemplateId, setFollowUpTemplateId] = useState("");
   const [templateMode, setTemplateMode] = useState<TemplateMode>("specific");
   const [senderMode, setSenderMode] = useState<SenderMode>("rotate");
   const [businessCategoryFilter, setBusinessCategoryFilter] = useState("");
@@ -445,7 +446,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     (id) => selectedAccounts[id],
   );
   const sendableTemplates = templates.filter(
-    (t) => (t.template_type || "initial") !== "reply",
+    (t) => (t.template_type || "initial") === "initial" && t.active !== false,
   );
   const categoryTemplates = sendableTemplates.filter(
     (t) => !categoryId || t.category_id === categoryId,
@@ -457,9 +458,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     (t) => (t.template_type || "initial") === "follow_up" && t.active !== false,
   );
   const currentTemplate =
-    templates.find((t) => t.id === templateId) ||
+    sendableTemplates.find((t) => t.id === templateId) ||
     categoryTemplates[0] ||
-    templates[0];
+    sendableTemplates[0];
+  const currentFollowUpTemplate =
+    allFollowUpTemplates.find((t) => t.id === followUpTemplateId) ||
+    followUpTemplates[0] ||
+    allFollowUpTemplates[0];
   const selectedAudienceCategory =
     categories.find((c) => c.id === audienceCategoryId) || null;
   function senderDailyLimit(account: GmailAccount) {
@@ -528,7 +533,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       (t) => (t.template_type || "initial") !== "reply",
     );
     setTemplates(rows);
-    if (!templateId && rows[0]?.id) setTemplateId(rows[0].id);
+    const firstInitial = rows.find((t) => (t.template_type || "initial") === "initial" && t.active !== false);
+    const firstFollowUp = rows.find((t) => (t.template_type || "initial") === "follow_up" && t.active !== false);
+    if (!templateId && firstInitial?.id) setTemplateId(firstInitial.id);
+    if (!followUpTemplateId && firstFollowUp?.id) setFollowUpTemplateId(firstFollowUp.id);
   }
 
   async function loadAccounts() {
@@ -935,21 +943,18 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   }
 
   function templatesForSend(kind: MessageKind = "initial") {
-    const requiredType = kind === "follow_up" ? "follow_up" : "initial";
-    const hasRequiredType = (template: MessageTemplate) =>
-      String(template.template_type || "initial") === requiredType;
-    const allowed = (items: MessageTemplate[]) =>
-      items.filter((t) => t.active !== false && hasRequiredType(t));
-    const scoped = allowed(categoryTemplates);
-    const allAllowed = allowed(sendableTemplates);
+    if (kind === "follow_up") {
+      if (currentFollowUpTemplate && currentFollowUpTemplate.active !== false) return [currentFollowUpTemplate];
+      return followUpTemplates.length
+        ? followUpTemplates.slice(0, 1)
+        : allFollowUpTemplates.slice(0, 1);
+    }
 
+    // Initial-message sending must never rotate or select follow-up/reply templates.
+    const scoped = categoryTemplates;
+    const allAllowed = sendableTemplates;
     if (templateMode === "rotate") return scoped.length ? scoped : allAllowed;
-    if (
-      currentTemplate &&
-      hasRequiredType(currentTemplate) &&
-      currentTemplate.active !== false
-    )
-      return [currentTemplate];
+    if (currentTemplate && currentTemplate.active !== false) return [currentTemplate];
     return scoped.length ? scoped.slice(0, 1) : allAllowed.slice(0, 1);
   }
 
@@ -2117,8 +2122,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
   function onCategoryChange(value: string) {
     setCategoryId(value);
-    const first = templates.find((t) => t.category_id === value);
-    if (first) setTemplateId(first.id);
+    const firstInitial = templates.find((t) => t.category_id === value && (t.template_type || "initial") === "initial" && t.active !== false);
+    const firstFollowUp = templates.find((t) => t.category_id === value && (t.template_type || "initial") === "follow_up" && t.active !== false);
+    if (firstInitial) setTemplateId(firstInitial.id);
+    if (firstFollowUp) setFollowUpTemplateId(firstFollowUp.id);
   }
 
   function senderCountLine(account: GmailAccount) {
@@ -2223,6 +2230,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
       <div className="notice">
         Ready to send: <strong>{readyTotal.toLocaleString()}</strong> · Connected senders: <strong>{connectedAccounts.length}</strong> · Due follow-ups: <strong>{dueFollowUps.length.toLocaleString()}</strong>
+        <div className="actions" style={{ marginTop: 10 }}>
+          <a className="btn secondary mini" href="#send-follow-ups">Send follow-ups</a>
+          <span className="muted">Follow-ups are sent from the follow-up section on this same page. First-message sending only uses initial templates.</span>
+        </div>
       </div>
 
       {activeSchedules.length ? (
@@ -2333,7 +2344,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
         <div className="grid grid-2" style={{ marginTop: 14 }}>
           <div className="card" style={{ padding: 14 }}>
-            <h3>Template</h3>
+            <h3>Initial message template</h3>
             <label className="checkbox-row">
               <input
                 type="radio"
@@ -2348,7 +2359,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 checked={templateMode === "rotate"}
                 onChange={() => setTemplateMode("rotate")}
               />{" "}
-              Rotate templates in this category
+              Rotate initial templates in this category
             </label>
             <select
               className="select"
@@ -2357,7 +2368,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               disabled={templateMode === "rotate"}
             >
               <option value="">Select template</option>
-              {(categoryId ? categoryTemplates : templates).map((t) => (
+              {(categoryId ? categoryTemplates : sendableTemplates).map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
                 </option>
@@ -2398,8 +2409,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 {connectedAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.email} ·{" "}
-                    {Number(senderLast24h[a.id] || 0).toLocaleString()} sent
-                    last 24h
+                    {Number(senderLast24h[a.id] || 0).toLocaleString()} used today
                   </option>
                 ))}
               </select>
@@ -2438,7 +2448,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                         />
                       </div>
                       <div>
-                        <label className="label">Used today</label>
+                        <label className="label">Today's sending cap</label>
                         <div className="notice" style={{ color: "#86efac" }}>
                           {senderCountLine(a)} · run default{" "}
                           {Number(a.default_run_limit || 0).toLocaleString()}
@@ -2716,7 +2726,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <h3>Due Follow-ups — 72h no reply</h3>
+          <h3 id="send-follow-ups">Send Follow-ups — 72h no reply</h3>
           <p className="muted">
             These are people you emailed more than 72 hours ago who did not send a reply. Send them now when you are ready.
           </p>
@@ -2747,10 +2757,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               <label className="label">Follow-up template to use</label>
               <select
                 className="select"
-                value={(currentTemplate && (currentTemplate.template_type || "initial") === "follow_up") ? currentTemplate.id : ""}
+                value={currentFollowUpTemplate?.id || ""}
                 onChange={(e) => {
-                  setTemplateMode("specific");
-                  setTemplateId(e.target.value);
+                  setFollowUpTemplateId(e.target.value);
                 }}
               >
                 <option value="">Use first follow-up template</option>

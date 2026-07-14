@@ -54,7 +54,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   const [defaultAudienceCategoryId, setDefaultAudienceCategoryId] = useState(workspace.default_audience_category_id || '');
   const [defaultAudienceCategoryName, setDefaultAudienceCategoryName] = useState(workspace.default_audience_category_name || '');
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
-  const [sentLast24ByEmail, setSentLast24ByEmail] = useState<Record<string, number>>({});
+  const [sentTotalByEmail, setSentTotalByEmail] = useState<Record<string, number>>({});
   const [seedTests, setSeedTests] = useState<SeedInboxTest[]>([]);
   const [limitDrafts, setLimitDrafts] = useState<Record<string, { daily_limit: string; default_run_limit: string; account_type: string; seed_inbox_enabled: boolean; seed_test_address: string }>>({});
   const [identityDraft, setIdentityDraft] = useState<IdentityDraft>({ signature_enabled: true, signature_text: workspace.email_signature_text || '', signature_html: workspace.email_signature_html || '', signature_logo_url: workspace.email_logo_url || '' });
@@ -82,28 +82,21 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     setAccounts(rows);
 
     try {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const emails = rows.map((account) => normalizeEmail(account.email)).filter(Boolean);
-      if (emails.length) {
-        const { data: sentRows, error: sentError } = await supabase
+      const counts: Record<string, number> = {};
+      for (const account of rows) {
+        const email = normalizeEmail(account.email);
+        if (!email) continue;
+        const { count, error: countError } = await supabase
           .from('sent_messages')
-          .select('from_email, gmail_account_id, sent_at')
+          .select('id', { count: 'exact', head: true })
           .eq('workspace_id', workspace.id)
-          .gte('sent_at', since)
-          .in('from_email', emails);
-        if (!sentError) {
-          const counts: Record<string, number> = {};
-          for (const row of sentRows || []) {
-            const key = normalizeEmail((row as any).from_email);
-            if (key) counts[key] = (counts[key] || 0) + 1;
-          }
-          setSentLast24ByEmail(counts);
-        }
-      } else {
-        setSentLast24ByEmail({});
+          .eq('status', 'sent')
+          .eq('from_email', email);
+        if (!countError) counts[email] = count || 0;
       }
+      setSentTotalByEmail(counts);
     } catch {
-      setSentLast24ByEmail({});
+      setSentTotalByEmail({});
     }
     if (!identityLoadedRef.current && rows.length) {
       const source = rows.find((account) => account.signature_text || account.signature_html || (account.raw as any)?.email_identity?.signature_logo_url) || rows[0];
@@ -696,15 +689,15 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           <button className="btn secondary" type="button" style={{ marginTop: 10 }} disabled={busy} onClick={addManualAccount}>Add / Update Sender</button>
         </div> : null}
 
-        <div className="table-wrap" style={{ marginTop: 14 }}><table><thead><tr><th>Email</th><th>Status</th><th>Limits</th><th>Seed receiver</th><th>Used today</th><th>Actions</th></tr></thead><tbody>
+        <div className="table-wrap" style={{ marginTop: 14 }}><table><thead><tr><th>Email</th><th>Status</th><th>Limits</th><th>Seed receiver</th><th>Total sent</th><th>Actions</th></tr></thead><tbody>
           {accounts.map((account) => {
             const draft = limitDrafts[account.id] || { daily_limit: String(account.daily_limit || 150), default_run_limit: String(account.default_run_limit || 100), account_type: String(account.account_type || 'gmail'), seed_inbox_enabled: Boolean(account.seed_inbox_enabled), seed_test_address: String(account.seed_test_address || account.email || '') };
             return <tr key={account.id}>
               <td><strong>{account.email}</strong><br /><span className="muted">{account.last_error || (account.paused_until ? `Paused until ${new Date(account.paused_until).toLocaleString()}` : 'Ready')}</span></td>
               <td><span className={`status ${isPaused(account) ? 'paused' : account.status}`}>{isPaused(account) ? 'paused' : account.status}</span><br /><select className="select" value={draft.account_type} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, account_type: e.target.value } }))}><option value="gmail">Gmail</option><option value="workspace">Workspace</option><option value="other">Other</option></select></td>
               <td><div className="grid grid-2"><div><label className="label">Daily safe limit</label><input className="input" type="number" min={1} value={draft.daily_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, daily_limit: e.target.value } }))} /></div><div><label className="label">Default max/run</label><input className="input" type="number" min={1} value={draft.default_run_limit} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, default_run_limit: e.target.value } }))} /></div></div></td>
-              <td><label className="checkbox-row"><input type="checkbox" checked={draft.seed_inbox_enabled} onChange={(e) => toggleSeedInbox(account, e.target.checked)} /> Use as seed receiver</label><input className="input" value={draft.seed_test_address} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_test_address: e.target.value } }))} placeholder="seed inbox email" /></td>
-              <td><strong>{Number(sentLast24ByEmail[normalizeEmail(account.email)] ?? account.sent_today ?? 0).toLocaleString()}</strong><br /><span className="muted">sent in last 24h</span><br /><span className="muted">Signature: {account.signature_enabled === false ? 'off' : account.signature_text || account.signature_html || account.signature_logo_url ? 'on' : 'empty'}</span></td>
+              <td><label className="checkbox-row"><input type="checkbox" checked={draft.seed_inbox_enabled} onChange={(e) => toggleSeedInbox(account, e.target.checked)} /> Use as seed receiver</label><span className="muted" style={{ display: 'block', fontSize: 12 }}>Receives test emails from sender accounts. It does not send outreach unless also used as a sender.</span><input className="input" value={draft.seed_test_address} onChange={(e) => setLimitDrafts((cur) => ({ ...cur, [account.id]: { ...draft, seed_test_address: e.target.value } }))} placeholder="seed inbox email" /></td>
+              <td><strong>{Number(sentTotalByEmail[normalizeEmail(account.email)] ?? account.sent_today ?? 0).toLocaleString()}</strong><br /><span className="muted">total sent</span><br /><span className="muted">Signature: {account.signature_enabled === false ? 'off' : account.signature_text || account.signature_html || account.signature_logo_url ? 'on' : 'empty'}</span></td>
               <td><button className="btn secondary" type="button" disabled={busy} onClick={() => saveSenderSettings(account)}>Save sender settings</button> <button className="btn secondary" type="button" disabled={busy || !(account.access_token || account.refresh_token)} onClick={() => verifySenderProfile(account)}>Verify</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => pauseOrResume(account)}>{isPaused(account) || account.status !== 'connected' ? 'Resume' : 'Pause'}</button> <button className="btn secondary" type="button" disabled={busy} onClick={() => removeAccount(account)}>Remove</button></td>
             </tr>;
           })}
