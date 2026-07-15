@@ -5,7 +5,7 @@ import { emitLiveActivity } from "@/lib/live-activity-client";
 
 const LOCK_KEY = "scout_v10_open_app_runner_lock";
 const LAST_RUN_KEY = "scout_v10_open_app_runner_last_run";
-const RUN_INTERVAL_MS = 90_000;
+const RUN_INTERVAL_MS = 5_000;
 const LOCK_TTL_MS = 60_000;
 
 const INBOUND_LOCK_KEY = "scout_v10_25_inbound_sync_lock";
@@ -92,9 +92,7 @@ export function AppOpenRunner({ workspaceId }: { workspaceId?: string | null }) 
         body: JSON.stringify({
           workspaceId,
           limit: 1,
-          targetLimit: 25,
-          senderRunLimit: 25,
-          source: "v10_global_open_app_runner",
+          source: "v10_34_parallel_sender_runner",
         }),
       });
       const json = (await response.json().catch(() => ({}))) as RunnerResponse;
@@ -186,7 +184,7 @@ export function AppOpenRunner({ workspaceId }: { workspaceId?: string | null }) 
     if (!workspaceId || typeof window === "undefined") return;
     const tick = () => runDueSchedulesSilently().catch(() => undefined);
     const inboundTick = () => syncInboundSilently().catch(() => undefined);
-    const first = window.setTimeout(tick, 15000);
+    const first = window.setTimeout(tick, 3000);
     const firstInbound = window.setTimeout(() => syncInboundSilently().catch(() => undefined), 8000);
     const timer = window.setInterval(tick, RUN_INTERVAL_MS);
     const inboundTimer = window.setInterval(inboundTick, INBOUND_INTERVAL_MS);

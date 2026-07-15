@@ -95,7 +95,7 @@ const LOCATION_RAW_KEYS = [
 const READY_PAGE_SIZE = 100;
 const LOCATION_SCAN_PAGE_SIZE = 1000;
 const COUNTRY_SCAN_PAGE_SIZE = 1000;
-const SAFE_SCHEDULE_CHUNK_SIZE = 3;
+const SCHEDULE_RUNNER_INTERVAL_MS = 1000;
 const MESSAGE_REQUEST_TIMEOUT_MS = 90000;
 const MAX_MESSAGE_BATCH_SIZE = 50000;
 const SHORTCODES = [
@@ -419,7 +419,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   );
   const [readySearch, setReadySearch] = useState("");
   const [sendLimit, setSendLimit] = useState(1000);
-  const [delayMs, setDelayMs] = useState(0);
+  const [delayMs, setDelayMs] = useState(3000);
   const [dryRun, setDryRun] = useState(false);
   const [allowHighRiskSend, setAllowHighRiskSend] = useState(false);
   const [scheduleType, setScheduleType] = useState<"initial" | "follow_up">(
@@ -842,7 +842,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           new Date(schedule.scheduled_for).getTime() <= now,
       );
       if (hasDueSchedule) runDueSchedulesFromApp({ silent: true }).catch(() => undefined);
-    }, 12000);
+    }, SCHEDULE_RUNNER_INTERVAL_MS);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, autoRunSchedules, busy, loading, scheduleRunnerBusy, schedules]);
@@ -1486,10 +1486,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         readySearch,
         dryRun,
         allowHighRiskSend,
+        delayMs,
         followupSegment: options?.followupSegment || followUpSegment,
         raw: {
           source: "message_page_durable_send",
           previous_client_loop_disabled: true,
+          delay_ms: delayMs,
+          parallel_per_sender: true,
           audience_category_id: audienceCategoryId || null,
           audience_category_name: selectedAudienceCategory?.name || null,
         },
@@ -2077,6 +2080,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
               ]),
             ),
             delay_ms: delayMs,
+            parallel_per_sender: true,
             dry_run: dryRun,
             allow_high_risk_send: allowHighRiskSend,
           },
@@ -2137,6 +2141,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 Number.isFinite(senderCap(s)) ? senderCap(s) : "auto",
               ]),
             ),
+            delay_ms: delayMs,
+            parallel_per_sender: true,
             dry_run: dryRun,
             allow_high_risk_send: allowHighRiskSend,
           },
@@ -2212,7 +2218,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ limit: 1, workspaceId: workspace.id, targetLimit: SAFE_SCHEDULE_CHUNK_SIZE, source: "open_app_schedule_runner" }),
+          body: JSON.stringify({ limit: 1, workspaceId: workspace.id, source: "open_app_parallel_sender_runner" }),
         },
       );
       if (!response.ok || json?.success === false)
@@ -2518,15 +2524,17 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             />
           </div>
           <div>
-            <label className="label">Delay between emails (ms)</label>
+            <label className="label">Delay between emails per sender (seconds)</label>
             <input
               className="input"
               type="number"
-              min={0}
-              max={60000}
-              value={delayMs}
-              onChange={(e) => setDelayMs(Number(e.target.value || 0))}
+              min={1}
+              max={60}
+              step={1}
+              value={Math.max(1, Math.round(delayMs / 1000))}
+              onChange={(e) => setDelayMs(Math.max(1, Number(e.target.value || 3)) * 1000)}
             />
+            <p className="muted" style={{ marginTop: 6 }}>Each selected Gmail account sends on its own lane. With 3 seconds selected, every sender can send one email every 3 seconds.</p>
           </div>
         </div>
 

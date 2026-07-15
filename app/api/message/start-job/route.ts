@@ -92,7 +92,9 @@ export async function POST(request: NextRequest) {
       allow_high_risk_send: Boolean(body.allowHighRiskSend),
       followup_segment: type === 'follow_up' ? String(body.followupSegment || 'all_unanswered') : null,
       due_business_ids: type === 'follow_up' ? selectedBusinessIds : [],
-      team_duplicates_blocked_before_job: teamDuplicatesBlocked
+      team_duplicates_blocked_before_job: teamDuplicatesBlocked,
+      delay_ms: Math.max(1000, Math.min(60000, Number(body.delayMs || (body.raw && body.raw.delay_ms) || 3000))),
+      parallel_per_sender: true
     };
 
     const scheduleFor = new Date(body.scheduledFor || Date.now());
@@ -134,7 +136,7 @@ export async function POST(request: NextRequest) {
     if (shouldRunNow) {
       const origin = request.nextUrl.origin;
       const secret = process.env.SCHEDULE_WORKER_SECRET || process.env.CRON_SECRET || process.env.RUN_ALL_WORKER_SECRET || '';
-      const firstRunTargetLimit = 1;
+      const firstRunTargetLimit = Math.max(1, selectedSenderIds.length);
       try {
         const workerResponse = await fetch(`${origin}/api/message/run-schedules`, {
           method: 'POST',

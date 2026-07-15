@@ -1,0 +1,19 @@
+SCOUT V10.34 — EXACT ROLLOUT STEPS
+
+1. Download scout-app-v10-34-sender-speed-signature.zip.
+2. Put the ZIP in Windows Downloads.
+3. Open Git Bash.
+4. Paste:
+
+   cd ~/Downloads
+   unzip -p scout-app-v10-34-sender-speed-signature.zip '*/DEPLOY_V10_34_SAFE_GIT_BASH.sh' > DEPLOY_V10_34_SAFE_GIT_BASH.sh
+   chmod +x DEPLOY_V10_34_SAFE_GIT_BASH.sh
+   bash DEPLOY_V10_34_SAFE_GIT_BASH.sh
+
+5. Wait for the script to say SUCCESS.
+6. Open Vercel and wait for the newest deployment to become Ready.
+7. Do not run SQL.
+8. In Scout Messages, confirm the delay reads 3 seconds.
+9. Select 2 connected sender accounts and send a 6-contact test batch.
+10. Confirm each account sends about once every 3 seconds and the recipient sees one signature.
+11. After the small test passes, use the larger batch.

@@ -158,11 +158,24 @@ export function appendSignatureToText(body: string, identity: SignatureIdentity)
   return `${cleanBody}\n\n${sig}`.trim();
 }
 
+function compactSignatureText(value: string) {
+  return normalizeNewlines(value).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 export function buildHtmlBody(body: string, identity: SignatureIdentity) {
   const bodyHtml = textToHtml(body);
   if (!shouldAppendSignature(identity)) return bodyHtml;
   const sig = signatureHtml(identity);
   if (!sig) return bodyHtml;
+
+  // Signature application must be idempotent. The scheduled sender used to
+  // pass a body that already contained the plain signature, then this HTML
+  // builder appended it again. Gmail normally displays the HTML part, which
+  // made recipients see the signature twice.
+  const existingText = compactSignatureText(htmlToText(bodyHtml));
+  const savedSignatureText = compactSignatureText(signatureText(identity));
+  if (savedSignatureText && existingText.includes(savedSignatureText)) return bodyHtml;
+
   return `${bodyHtml}<br /><br />${sig}`;
 }
 
