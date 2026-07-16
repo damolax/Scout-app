@@ -442,7 +442,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     { title: 'Import your lead list', href: '/upload', done: totalBusinesses > 0, hint: 'Upload CSV leads before searching or sending.' },
     { title: 'Find emails with Auto Scout', href: '/auto-scout', done: totalResearchDoneAll > 0, hint: 'Scout checks websites for missing emails.' },
     { title: 'Get trusted emails ready', href: '/verify', done: currentReady > 0, hint: 'Trusted leads are the safe list for sending.' },
-    { title: 'Send your first message', href: '/message', done: totalSentAll > 0, hint: 'Send Now works while Scout is open.' },
+    { title: 'Send your first message', href: '/message', done: totalSentAll > 0, hint: 'Send Now enters the safe queue and continues without keeping the page open.' },
     { title: 'Check real replies', href: '/replies', done: periodReplies > 0, hint: 'Scout shows human-looking replies separately from auto messages.' },
     { title: 'Respond to a prospect from Scout', href: '/replies', done: manualRepliesAll > 0, hint: 'Open a reply and send your answer from Scout.' },
     { title: 'Send due follow-ups', href: '/message', done: dueFollowups === 0 && totalSentAll > 0, hint: 'After 72 hours, choose a follow-up template and send due follow-ups.' },
@@ -510,7 +510,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
         <KpiCard title={`Auto Scout Found Emails (${period.shortLabel})`} value={periodFoundEmails} previous={previous ? prevFoundEmails : undefined} compareLabel={period.compareLabel} />
         <KpiCard title={`Auto Scout Completed (${period.shortLabel})`} value={periodResearchDone} previous={previous ? prevResearchDone : undefined} compareLabel={period.compareLabel} />
         <KpiCard title="Due Follow-ups" value={dueFollowups} helper="People you messaged 72+ hours ago who have not replied yet." />
-        <KpiCard title="Saved Sends" value={scheduled} helper="Messages saved to send later while Scout is open." />
+        <KpiCard title="Saved Sends" value={scheduled} helper="Messages saved for the central worker to send at the selected time." />
       </div>
 
       <SetupChecklist tasks={setupTasks} />

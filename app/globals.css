@@ -600,3 +600,35 @@ code { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-
   .sender-limits-grid { grid-template-columns: 1fr; min-width: 220px; }
   .sender-limit-input { min-width: 220px; }
 }
+
+/* v10.35 public verification pages */
+.public-shell { min-height: 100vh; max-width: 1240px; margin: 0 auto; padding: 0 28px; }
+.public-header { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:22px 0; border-bottom:1px solid var(--line); }
+.public-brand { display:flex; align-items:center; gap:12px; }
+.public-brand span:last-child { display:grid; gap:2px; }
+.public-brand small { color:var(--muted); font-size:12px; }
+.public-nav { display:flex; align-items:center; gap:18px; color:var(--muted); font-weight:750; }
+.public-hero { min-height: 68vh; display:grid; grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr); align-items:center; gap:46px; padding:70px 0 46px; }
+.public-hero h1, .public-article h1 { font-size:clamp(38px,6vw,68px); line-height:1.02; margin:18px 0; letter-spacing:-.035em; }
+.public-hero p, .public-lead { color:var(--muted); font-size:18px; line-height:1.7; }
+.public-feature-card { padding:26px; }
+.public-feature-card li, .public-article li { margin:10px 0; line-height:1.55; }
+.public-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; padding:12px 0 64px; }
+.public-grid .card { padding:22px; }
+.public-grid p { color:var(--muted); line-height:1.55; }
+.public-article { max-width:860px; margin:0 auto; padding:64px 0 90px; }
+.public-article h1 { font-size:clamp(38px,6vw,58px); }
+.public-article h2 { margin-top:34px; }
+.public-article p, .public-article li { color:#c4d2e4; line-height:1.72; }
+.public-footer { display:flex; justify-content:space-between; gap:24px; padding:24px 0 34px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; }
+.public-footer-links { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:14px; }
+@media (max-width: 800px) {
+  .public-shell { padding:0 16px; }
+  .public-header { align-items:flex-start; }
+  .public-nav { gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+  .public-nav > a:not(.btn) { display:none; }
+  .public-hero { grid-template-columns:1fr; padding-top:44px; }
+  .public-grid { grid-template-columns:1fr; }
+  .public-footer { flex-direction:column; }
+  .public-footer-links { justify-content:flex-start; }
+}

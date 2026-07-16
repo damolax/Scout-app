@@ -95,7 +95,7 @@ const pages = [
     items: [
       ["Open Scout from the app icon", "The APK opens your Scout web app in a phone app wrapper."],
       ["Allow notifications", "Lets the phone show reminders at the top of the screen."],
-      ["Phone reminder", "This reminds you when a saved send is due. It does not secretly send while Scout is closed."],
+      ["Phone reminder", "This is an optional phone reminder. Scheduled email jobs are handled by Scout's central worker even when the page is closed."],
     ],
   },
 ];
@@ -109,7 +109,7 @@ export default function HelpPage() {
       </div>
       <div className="card" style={{ padding: 18 }}>
         <h3>The simple rule</h3>
-        <p className="muted">Scout finds leads, sends emails, watches replies, and helps you follow up. If you want Scout to send, keep Scout open.</p>
+        <p className="muted">Scout finds leads, queues email jobs, and helps you follow up. After you click Send, the central worker can continue even when you close the page.</p>
       </div>
       {pages.map((page) => (
         <div className="card" style={{ padding: 18 }} key={page.title}>

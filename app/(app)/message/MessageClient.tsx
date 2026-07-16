@@ -8,6 +8,7 @@ import { emitLiveActivity } from "@/lib/live-activity-client";
 import { applyCountryFilter, businessMatchesCountry, extractBusinessCountries } from "@/lib/country-location";
 import { resolveBusinessLanguage, resolveTemplateContent } from "@/lib/template-language";
 import { businessIdentityKeys } from "@/lib/normalize";
+import { loadAllSafeGmailAccounts } from "@/lib/load-safe-gmail-accounts-client";
 import {
   Business,
   GmailAccount,
@@ -16,6 +17,31 @@ import {
   MessageTemplate,
   Workspace,
 } from "@/lib/types";
+
+
+function startOfTodayInTimezone(timeZone: string) {
+  try {
+    const now = new Date();
+    const dateParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(now);
+    const part = (type: string) => Number(dateParts.find((item) => item.type === type)?.value || 0);
+    const localMidnightAsUtc = Date.UTC(part('year'), part('month') - 1, part('day'), 0, 0, 0);
+    const probe = new Date(localMidnightAsUtc);
+    const probeParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(probe);
+    const probePart = (type: string) => Number(probeParts.find((item) => item.type === type)?.value || 0);
+    const representedAsUtc = Date.UTC(probePart('year'), probePart('month') - 1, probePart('day'), probePart('hour'), probePart('minute'), probePart('second'));
+    return new Date(localMidnightAsUtc - (representedAsUtc - localMidnightAsUtc));
+  } catch {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  }
+}
 
 type SendLogRow = {
   id: string;
@@ -403,9 +429,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [senderRunLimits, setSenderRunLimits] = useState<
     Record<string, string>
   >({});
-  const [senderLast24h, setSenderLast24h] = useState<Record<string, number>>(
-    {},
-  );
+  const [senderLast24h, setSenderLast24h] = useState<Record<string, number>>({});
+  const [senderSentToday, setSenderSentToday] = useState<Record<string, number>>({});
   const [specificSenderId, setSpecificSenderId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -436,7 +461,6 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [stopBusyId, setStopBusyId] = useState("");
-  const [autoRunSchedules, setAutoRunSchedules] = useState(true);
   const [scheduleRunnerBusy, setScheduleRunnerBusy] = useState(false);
   const scheduleRunnerRef = useRef(false);
   const refreshInFlightRef = useRef(false);
@@ -494,19 +518,19 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const selectedAudienceCategory =
     categories.find((c) => c.id === audienceCategoryId) || null;
   function senderDailyLimit(account: GmailAccount) {
-    const limit = Number(account.daily_limit || 450);
-    return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 450;
+    const limit = Number(account.daily_limit || 250);
+    return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 250;
   }
   function senderRemainingToday(account: GmailAccount) {
     const daily = senderDailyLimit(account);
     if (!Number.isFinite(daily)) return Number.POSITIVE_INFINITY;
-    const used = Number(senderLast24h[account.id] || account.sent_today || 0);
+    const used = Math.max(Number(senderSentToday[account.id] || account.sent_today || 0), Number(senderLast24h[account.id] || 0));
     return Math.max(0, daily - Math.max(0, used));
   }
   function senderAvailable(account: GmailAccount) {
     return ["connected", "ready"].includes(String(account.status || "")) &&
       !isPaused(account) &&
-      Boolean(account.access_token || account.refresh_token) &&
+      account.has_credentials !== false &&
       senderRemainingToday(account) > 0;
   }
   const connectedAccounts = accounts.filter(senderAvailable);
@@ -569,26 +593,18 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   }
 
   async function loadAccounts() {
-    const { data, error: loadError } = await supabase
-      .from("gmail_accounts")
-      .select("*")
-      .eq("workspace_id", workspace.id)
-      .order("created_at", { ascending: false });
-    if (loadError) throw loadError;
-    const rows = (data || []) as GmailAccount[];
+    const rows = await loadAllSafeGmailAccounts(workspace.id);
     setAccounts(rows);
     setSelectedAccounts((current) => {
       const next: Record<string, boolean> = {};
       for (const account of rows)
         next[account.id] = current[account.id] ??
-          (["connected", "ready"].includes(String(account.status || "")) && !isPaused(account));
+          (["connected", "ready"].includes(String(account.status || "")) && !isPaused(account) && account.has_credentials !== false);
       return next;
     });
     if (!specificSenderId && rows[0]?.id) setSpecificSenderId(rows[0].id);
-
-    const counts: Record<string, number> = {};
-    for (const account of rows) counts[account.id] = Math.max(0, Number(account.sent_today || 0));
-    setSenderLast24h(counts);
+    setSenderLast24h(Object.fromEntries(rows.map((account) => [account.id, Math.max(0, Number(account.sent_rolling_24h || 0))])));
+    setSenderSentToday(Object.fromEntries(rows.map((account) => [account.id, Math.max(0, Number(account.sent_today || 0))])));
   }
 
   async function loadAvailableLocations() {
@@ -825,27 +841,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       void Promise.allSettled([loadSchedules(), loadRecentSent()]);
       accountTick += 1;
       if (accountTick >= 4) { accountTick = 0; loadAccounts().catch(() => undefined); }
-    }, 30000);
+    }, 60000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, busy, loading]);
 
-  useEffect(() => {
-    if (!workspace.id || !autoRunSchedules) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      if (busy || loading || scheduleRunnerBusy || scheduleRunnerRef.current) return;
-      const now = Date.now();
-      const hasDueSchedule = schedules.some(
-        (schedule) =>
-          String(schedule.status || "") === "scheduled" &&
-          new Date(schedule.scheduled_for).getTime() <= now,
-      );
-      if (hasDueSchedule) runDueSchedulesFromApp({ silent: true }).catch(() => undefined);
-    }, SCHEDULE_RUNNER_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace.id, autoRunSchedules, busy, loading, scheduleRunnerBusy, schedules]);
+  // v10.35.1 Scale Guard: scheduled jobs are claimed by the central worker.
+  // The browser no longer polls and starts due campaigns in every open tab.
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1515,7 +1517,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     });
     setSelectedContacts({});
     setStatus(
-      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). Keep Scout open while it sends. Job: ${scheduleId}`,
+      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). You can close Scout; the central worker continues safely. Job: ${scheduleId}`,
     );
     await Promise.allSettled([loadSchedules(), loadRecentSent(), loadAccounts()]);
   }
@@ -1612,7 +1614,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         throw new Error(diagnostic);
       }
 
-      const batchId = `scout_v830_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const batchId = `scout_v1035_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const runId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now().toString(16).padStart(8, '0')}-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12, '0').slice(0, 12)}`;
       const { error: batchError } = await supabase
         .from("outreach_batches")
         .insert({
@@ -1632,6 +1637,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             ),
             dryRun,
             delayMs,
+            runId,
             templateMode,
             senderMode,
             categoryId,
@@ -1658,7 +1664,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       let stopped = false;
       const requested = contacts.length;
       setStatus(
-        `Sending now: 0 / ${requested.toLocaleString()} started. Keep Scout open until it finishes.`,
+        `Sending now: 0 / ${requested.toLocaleString()} started. You can close Scout; the central worker continues safely.`,
       );
       emitLiveActivity({
         kind: "send",
@@ -1720,6 +1726,11 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           body: JSON.stringify({
             workspace_id: workspace.id,
             business_id: business.id,
+            template_id: template.id,
+            batch_id: batchId,
+            run_id: runId,
+            run_limit: Number.isFinite(senderCap(account)) ? senderCap(account) : undefined,
+            is_follow_up: !!options?.isFollowUp,
             gmail_account_id: account.id,
             to: payload.email,
             subject: payload.subject,
@@ -1774,15 +1785,6 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             countText: `${attempted.toLocaleString()} / ${requested.toLocaleString()}`,
           });
           continue;
-        }
-
-        if (json?.access_token) {
-          await supabase
-            .from("gmail_accounts")
-            .update({ access_token: json.access_token })
-            .eq("workspace_id", workspace.id)
-            .eq("id", account.id);
-          account.access_token = json.access_token;
         }
 
         if (limitHit) {
@@ -1897,18 +1899,22 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             subject: payload.subject,
             gmailMessageId: result.gmailMessageId || "",
           });
-          await persistSendOutcome({
-            business,
-            template,
-            account,
-            result: { ...result, status: statusText },
-            batchId,
-            subject: payload.subject,
-            body: payload.message,
-            attachments: payload.attachments,
-            dryRun,
-            isFollowUp: options?.isFollowUp,
-          });
+          if (!json?.persisted) {
+            await persistSendOutcome({
+              business,
+              template,
+              account,
+              result: { ...result, status: statusText },
+              batchId,
+              subject: payload.subject,
+              body: payload.message,
+              attachments: payload.attachments,
+              dryRun,
+              isFollowUp: options?.isFollowUp,
+            });
+          } else if (statusText === "sent") {
+            account.sent_today = Number(account.sent_today || 0) + 1;
+          }
           if (statusText === "sent") {
             sentBySender[account.id] = (sentBySender[account.id] || 0) + 1;
             if (senderCap(account) <= 0) {
@@ -1948,18 +1954,22 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             status: statusText,
             reason,
           });
-          await persistSendOutcome({
-            business,
-            template,
-            account,
-            result: { ...result, status: statusText },
-            batchId,
-            subject: payload.subject,
-            body: payload.message,
-            attachments: payload.attachments,
-            dryRun,
-            isFollowUp: options?.isFollowUp,
-          });
+          if (!json?.persisted) {
+            await persistSendOutcome({
+              business,
+              template,
+              account,
+              result: { ...result, status: statusText },
+              batchId,
+              subject: payload.subject,
+              body: payload.message,
+              attachments: payload.attachments,
+              dryRun,
+              isFollowUp: options?.isFollowUp,
+            });
+          } else if (statusText === "sent") {
+            account.sent_today = Number(account.sent_today || 0) + 1;
+          }
           emitLiveActivity({
             kind: "send",
             status: statusText || "skipped",
@@ -2089,7 +2099,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         .single();
       if (insertError) throw insertError;
       if (insertedSchedule) setLastSavedSchedule(insertedSchedule as MessageSchedule);
-      setStatus("Schedule saved. Saved. Keep Scout open when it is time to send, or add a phone reminder so your phone reminds you.");
+      setStatus("Schedule saved. The central worker will start it automatically at the selected time.");
       await loadSchedules();
     } catch (err) {
       setError(formatError(err));
@@ -2218,7 +2228,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ limit: 1, workspaceId: workspace.id, source: "open_app_parallel_sender_runner" }),
+          body: JSON.stringify({ limit: 1, workspaceId: workspace.id, source: "manual_due_send_check" }),
         },
       );
       if (!response.ok || json?.success === false)
@@ -2241,7 +2251,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       if (Number(json.ran || 0) > 0 || !options?.silent) {
         setStatus(
           Number(json.ran || 0) > 0
-            ? `Due send processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. Keep Scout open while it sends.`
+            ? `Due send processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. You can close Scout; the central worker continues safely.`
             : "No due schedules right now.",
         );
       }
@@ -2323,11 +2333,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   }
 
   function senderCountLine(account: GmailAccount) {
-    const sent = Number(senderLast24h[account.id] || 0);
-    const limit = Number(account.daily_limit || 450);
-    return limit > 0
-      ? `${sent.toLocaleString()} sent in last 24h / ${limit.toLocaleString()} daily limit`
-      : `${sent.toLocaleString()} sent in last 24h`;
+    const today = Number(senderSentToday[account.id] || account.sent_today || 0);
+    const rolling = Number(senderLast24h[account.id] || 0);
+    const limit = Number(account.daily_limit || 250);
+    return `${today.toLocaleString()} sent today / ${limit.toLocaleString()} daily limit · ${rolling.toLocaleString()} rolling 24h`;
   }
 
   const activeSchedules = schedules.filter((s) => ["scheduled", "due", "running"].includes(String(s.status || "")) && !s.stop_requested);
@@ -2524,17 +2533,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             />
           </div>
           <div>
-            <label className="label">Delay between emails per sender (seconds)</label>
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={60}
-              step={1}
-              value={Math.max(1, Math.round(delayMs / 1000))}
-              onChange={(e) => setDelayMs(Math.max(1, Number(e.target.value || 3)) * 1000)}
-            />
-            <p className="muted" style={{ marginTop: 6 }}>Each selected Gmail account sends on its own lane. With 3 seconds selected, every sender can send one email every 3 seconds.</p>
+            <label className="label">Sending safety</label>
+            <div className="notice">Scout automatically uses each Gmail account’s saved mode: Warm-up, Normal, or Fast. Change it in Settings only when needed.</div>
           </div>
         </div>
 
@@ -2605,7 +2605,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 {connectedAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.email} ·{" "}
-                    {Number(senderLast24h[a.id] || 0).toLocaleString()} used today
+                    {Number(senderSentToday[a.id] || a.sent_today || 0).toLocaleString()} sent today
                   </option>
                 ))}
               </select>
@@ -3062,14 +3062,9 @@ Click <strong>Run Due Sends Now</strong> to start.
               />
             </div>
           </div>
-          <label className="checkbox-row" style={{ marginTop: 12 }}>
-            <input
-              type="checkbox"
-              checked={autoRunSchedules}
-              onChange={(e) => setAutoRunSchedules(e.target.checked)}
-            />{" "}
-            Start saved sends automatically while Scout is open
-          </label>
+          <div className="notice" style={{ marginTop: 12 }}>
+            Saved sends start through Scout&apos;s central worker. You do not need to keep this page open.
+          </div>
           <div className="actions" style={{ marginTop: 12 }}>
             <button className="btn secondary" type="button" onClick={enableScheduleNotifier}>
               {scheduleReminderEnabled && notificationPermission === "granted" ? "App notifier on" : "Enable app notifier"}

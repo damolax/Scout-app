@@ -3,7 +3,9 @@ export const maxDuration = 120;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { createClient } from '@/lib/supabase-server';
 import { signatureHtml, signatureText } from '@/lib/email-signature';
+import { featureFlags } from '@/lib/feature-flags';
 
 type AnyRow = Record<string, any>;
 
@@ -65,13 +67,20 @@ export async function POST(request: NextRequest) {
     const workspaceId = String(input.workspace_id || '').trim();
     const accountId = String(input.gmail_account_id || '').trim();
     const applyAll = Boolean(input.apply_all || input.applyAll);
-    const syncToGmail = Boolean(input.sync_to_gmail || input.syncToGmail);
+    const syncRequested = Boolean(input.sync_to_gmail || input.syncToGmail);
+    const syncToGmail = syncRequested && featureFlags.gmailNativeSignatureSync;
     const signature_enabled = input.signature_enabled !== false;
     const signature_html = String(input.signature_html || '').trim();
     const signature_text = String(input.signature_text || '').trim();
     const signature_logo_url = String(input.signature_logo_url || input.logo_url || '').trim();
     if (!workspaceId) throw new Error('workspace_id is required.');
     if (!applyAll && !accountId) throw new Error('gmail_account_id is required unless apply_all is true.');
+
+    const sessionClient = await createClient();
+    const { data: { user } } = await sessionClient.auth.getUser();
+    if (!user) return NextResponse.json({ success: false, error: 'Not signed in.' }, { status: 401 });
+    const { data: membership } = await sessionClient.from('workspace_members').select('workspace_id').eq('workspace_id', workspaceId).eq('user_id', user.id).eq('approved', true).maybeSingle();
+    if (!membership) return NextResponse.json({ success: false, error: 'You do not have access to this workspace.' }, { status: 403 });
 
     const supabase = createAdminClient();
 
@@ -106,9 +115,13 @@ export async function POST(request: NextRequest) {
         updated: 0,
         workspace_saved: true,
         results: [],
-        message: syncToGmail
-          ? 'Signature and logo were saved to the workspace, but no Gmail sender accounts are connected yet. Connect Gmail before syncing to Gmail.'
-          : 'Signature and logo were saved to the workspace.'
+        sync_available: featureFlags.gmailNativeSignatureSync,
+        sync_requested: syncRequested,
+        message: syncRequested && !featureFlags.gmailNativeSignatureSync
+          ? 'Signature and logo were saved in Scout. Gmail-native signature sync is available after advanced Google authorization.'
+          : syncToGmail
+            ? 'Signature and logo were saved to the workspace, but no Gmail sender accounts are connected yet. Connect Gmail before syncing to Gmail.'
+            : 'Signature and logo were saved to the workspace.'
       });
     }
 
@@ -166,7 +179,18 @@ export async function POST(request: NextRequest) {
       results.push({ account_id: account.id, email: account.email, sync_status: syncStatus, sync_error: syncError });
     }
 
-    return NextResponse.json({ success: true, updated: results.length, workspace_saved: true, results });
+    return NextResponse.json({
+      success: true,
+      updated: results.length,
+      workspace_saved: true,
+      sync_available: featureFlags.gmailNativeSignatureSync,
+      sync_requested: syncRequested,
+      sync_deferred: syncRequested && !featureFlags.gmailNativeSignatureSync,
+      results,
+      message: syncRequested && !featureFlags.gmailNativeSignatureSync
+        ? 'Saved in Scout. Gmail-native signature sync is temporarily unavailable during send-only Google verification.'
+        : undefined,
+    });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 400 });
   }

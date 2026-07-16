@@ -27,7 +27,7 @@ export async function getCurrentWorkspace(): Promise<{ workspace: Workspace | nu
   // Do not use .single()/.maybeSingle(), and do not use approval as an access gate.
   const { data, error } = await supabase
     .from('workspace_members')
-    .select('role, workspaces(id, name, api_key, app_url, render_backend_url, default_audience_category_id, default_audience_category_name, dork_settings, extension_settings, email_signature_text, email_signature_html, email_logo_url)')
+    .select('role, workspaces(id, name, api_key, app_url, render_backend_url, default_audience_category_id, default_audience_category_name, dork_settings, extension_settings, email_signature_text, email_signature_html, email_logo_url, timezone)')
     .eq('user_id', user.id)
     .order('created_at', { ascending: true })
     .limit(10);

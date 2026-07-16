@@ -26,4 +26,3 @@ This version uses existing tables:
 - `message_schedules`
 - `email_research_jobs`
 - `sent_messages`
-

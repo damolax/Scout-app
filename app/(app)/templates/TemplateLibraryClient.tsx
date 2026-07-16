@@ -12,6 +12,7 @@ const DEFAULT_FOLLOW_UP = `Hi {name},\n\nJust following up on my earlier message
 const DEFAULT_REPLY = `Hi {name},\n\nThanks for getting back to me.\n\nThat makes sense. Based on what you said, I can send a short practical breakdown for {business}.\n\nBest regards,\nOlalekan`;
 
 type TemplateType = 'initial' | 'follow_up' | 'reply';
+type TemplateHealthAlert = { id: string; template_id: string; sent_count: number; real_reply_count: number; alerted_at: string; raw?: Record<string, unknown> | null };
 
 function formatError(error: unknown) {
   if (!error) return 'Unknown error.';
@@ -81,6 +82,7 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
   const [status, setStatus] = useState('Create initial, follow-up, and reply-only templates. Reply templates cannot be used for first-message batches.');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [healthAlerts, setHealthAlerts] = useState<TemplateHealthAlert[]>([]);
 
   const categoryTemplates = templates.filter((t) => (!categoryId || t.category_id === categoryId) && (typeFilter === 'all' || (t.template_type || 'initial') === typeFilter));
   const initialCount = templates.filter((t) => (t.template_type || 'initial') === 'initial').length;
@@ -107,6 +109,19 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setAvailableCountries(Array.from(found).sort((a, b) => a.localeCompare(b)));
   }
 
+  async function loadTemplateHealth() {
+    const response = await fetch(`/api/templates/health?workspace_id=${encodeURIComponent(workspace.id)}`, { cache: 'no-store' });
+    const json = await response.json().catch(() => ({}));
+    if (response.ok && json?.success) setHealthAlerts((json.alerts || []) as TemplateHealthAlert[]);
+  }
+
+  async function dismissHealthAlert(alertId: string) {
+    const response = await fetch('/api/templates/health', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspace_id: workspace.id, alert_id: alertId }) });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || json?.success === false) { setError(json?.error || 'Could not dismiss template warning.'); return; }
+    setHealthAlerts((current) => current.filter((alert) => alert.id !== alertId));
+  }
+
   async function loadAll() {
     setError('');
     const [categoryResult, templateResult] = await Promise.all([
@@ -120,6 +135,7 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setCategories(cats);
     setTemplates(temps);
     if (!categoryId && cats[0]) setCategoryId(cats[0].id);
+    await loadTemplateHealth().catch(() => undefined);
   }
 
   useEffect(() => {
@@ -440,6 +456,15 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     <div className="stack">
       {error ? <div className="error">{error}</div> : null}
       <div className="success">{status}</div>
+
+      {healthAlerts.length ? <div className="card" style={{ padding: 18, borderColor: '#d8a23c' }}>
+        <h3>Template performance suggestion</h3>
+        <p className="muted">Scout only suggests a change; it never edits or disables your template automatically. These figures use replies currently tracked in Scout.</p>
+        {healthAlerts.map((alert) => {
+          const template = templates.find((row) => row.id === alert.template_id);
+          return <div className="notice" key={alert.id} style={{ marginTop: 10 }}><strong>{template?.name || String((alert.raw as any)?.template_name || 'Template')}</strong> has sent {Number(alert.sent_count || 0).toLocaleString()} messages over at least three days without a confirmed real reply. Consider changing the subject or body.<div className="actions" style={{ marginTop: 8 }}><button className="btn secondary mini" type="button" onClick={() => { if (template) loadTemplate(template); }}>Open template</button><button className="btn secondary mini" type="button" onClick={() => dismissHealthAlert(alert.id)}>Dismiss</button></div></div>;
+        })}
+      </div> : null}
 
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Initial</div><div className="num">{initialCount}</div></div>

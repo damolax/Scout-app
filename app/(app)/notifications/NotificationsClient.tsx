@@ -74,11 +74,11 @@ export default function NotificationsClient({ workspace }: { workspace: Workspac
   useEffect(() => {
     load();
     const onRefresh = () => load();
-    const onFocus = () => load();
+    const onFocus = () => { if (document.visibilityState === 'visible') void load(); };
     window.addEventListener('scout-notifications-refresh', onRefresh);
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
-    const timer = window.setInterval(load, 15000);
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 60000);
     return () => {
       window.removeEventListener('scout-notifications-refresh', onRefresh);
       window.removeEventListener('focus', onFocus);

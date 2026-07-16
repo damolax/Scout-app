@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
         userId: user.id,
         type: 'job_started',
         title: `${type === 'follow_up' ? 'Follow-up' : 'Message'} job started`,
-        message: `Scout created a saved job for ${(selectedBusinessIds.length || targetCount).toLocaleString()} contact(s).${teamDuplicatesBlocked ? ` ${teamDuplicatesBlocked.toLocaleString()} team-owned duplicate(s) were blocked.` : ''} Keep Scout open and the in-app schedule runner will continue it.`,
+        message: `Scout created a saved job for ${(selectedBusinessIds.length || targetCount).toLocaleString()} contact(s).${teamDuplicatesBlocked ? ` ${teamDuplicatesBlocked.toLocaleString()} team-owned duplicate(s) were blocked.` : ''} You can close Scout; the central worker will continue it safely.`,
         entityType: 'message_schedule',
         entityId: data.id,
         raw: { schedule_id: data.id, type, targetCount, selectedBusinessCount: selectedBusinessIds.length }

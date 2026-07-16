@@ -9,7 +9,7 @@ export default async function MessagePage() {
     <div className="stack">
       <div className="page-title">
         <h2>Send Emails</h2>
-        <p>Send first emails, send due follow-ups, or save a send for later. Keep Scout open when it is time to send.</p>
+        <p>Send first emails, send due follow-ups, or save a send for later. Scout continues queued work in the background.</p>
       </div>
       <div className="quick-links">
         <Link href="/templates" className="quick-link-card"><strong>Templates</strong><span>Write first emails and follow-up emails.</span></Link>

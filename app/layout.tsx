@@ -1,12 +1,15 @@
 import './globals.css';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Scout App v8 Cloud',
-  description: 'Cloud Scout App with Supabase login, team dedupe, imports, Gmail backend integration, and extension-friendly workflow.',
+  title: 'Scout by We Are Creative Builders',
+  description: 'Scout helps teams manage prospects, prevent duplicate outreach, and send responsibly through connected Gmail accounts.',
   manifest: '/manifest.json',
-  themeColor: '#111827',
   appleWebApp: { capable: true, title: 'Scout', statusBarStyle: 'black-translucent' }
+};
+
+export const viewport: Viewport = {
+  themeColor: '#111827',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

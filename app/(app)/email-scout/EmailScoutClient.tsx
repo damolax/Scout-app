@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { Business, Workspace } from "@/lib/types";
+import { Business, GmailAccount, Workspace } from "@/lib/types";
+import { loadAllSafeGmailAccounts } from "@/lib/load-safe-gmail-accounts-client";
+
+const MANUAL_GMAIL_TOKEN_ENTRY_ENABLED = process.env.NEXT_PUBLIC_MANUAL_GMAIL_TOKEN_ENTRY_ENABLED === "true";
 
 type TemplateRow = {
   id: string;
@@ -26,23 +29,6 @@ type MessageCategory = {
   created_at?: string | null;
 };
 
-type GmailAccount = {
-  id: string;
-  workspace_id: string;
-  email: string;
-  display_name: string | null;
-  status: string;
-  access_token?: string | null;
-  refresh_token?: string | null;
-  client_id?: string | null;
-  expires_at?: string | null;
-  daily_limit?: number | null;
-  sent_today?: number | null;
-  paused_until?: string | null;
-  last_error?: string | null;
-  raw?: Record<string, unknown> | null;
-  created_at: string;
-};
 
 type SendLogRow = {
   id: string;
@@ -122,10 +108,7 @@ const SHORTCODES = [
   "{location}",
   "{source}",
 ];
-const GMAIL_SCOPES = [
-  "https://www.googleapis.com/auth/gmail.send",
-  "https://www.googleapis.com/auth/gmail.readonly",
-].join(" ");
+
 
 function formatError(error: unknown) {
   if (!error) return "Unknown error.";
@@ -439,20 +422,13 @@ export default function EmailScoutClient({
   }
 
   async function loadAccounts() {
-    const { data, error: loadError } = await supabase
-      .from("gmail_accounts")
-      .select("*")
-      .eq("workspace_id", workspace.id)
-      .order("created_at", { ascending: false });
-    if (loadError) throw loadError;
-    const rows = (data || []) as GmailAccount[];
+    const rows = await loadAllSafeGmailAccounts(workspace.id);
     setAccounts(rows);
     setSelectedAccounts((current) => {
       const next: Record<string, boolean> = {};
       for (const account of rows)
-        next[account.id] =
-          current[account.id] ??
-          (account.status === "connected" && !isPaused(account));
+        next[account.id] = current[account.id] ??
+          (account.status === "connected" && !isPaused(account) && account.has_credentials !== false);
       return next;
     });
   }
@@ -589,11 +565,6 @@ export default function EmailScoutClient({
   }, [workspace.id]);
 
   useEffect(() => {
-    handleOauthReturn();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [googleClientId]);
-
-  useEffect(() => {
     if (
       categoryTemplates[0] &&
       !categoryTemplates.some((t) => t.id === templateId)
@@ -603,66 +574,6 @@ export default function EmailScoutClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryId, templates.length]);
 
-  async function handleOauthReturn() {
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    const code = url.searchParams.get("code");
-    const state = url.searchParams.get("state");
-    if (!code || state !== "scout_v815_gmail") return;
-    const clientId =
-      googleClientId ||
-      localStorage.getItem("scout_v815_google_client_id") ||
-      "";
-    if (!clientId) {
-      setError(
-        "Google OAuth returned a code, but Google Client ID is missing. Save the Client ID and reconnect Gmail.",
-      );
-      return;
-    }
-    setBusy(true);
-    try {
-      const redirectUri = getMessageRedirectUri();
-      const response = await fetch("/api/backend/gmail/exchange", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          code,
-          client_id: clientId,
-          redirect_uri: redirectUri,
-        }),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok)
-        throw new Error(
-          json?.error ||
-            json?.message ||
-            `Gmail exchange failed with HTTP ${response.status}`,
-        );
-      await saveGmailAccount({
-        email: json.email,
-        access_token: json.access_token,
-        refresh_token: json.refresh_token,
-        client_id: clientId,
-        expires_in: json.expires_in,
-        status: "connected",
-        raw: { scope: json.scope, connected_at: new Date().toISOString() },
-      });
-      url.searchParams.delete("code");
-      url.searchParams.delete("scope");
-      url.searchParams.delete("state");
-      window.history.replaceState(
-        {},
-        document.title,
-        url.pathname + url.search,
-      );
-      setStatus(`Connected Gmail: ${json.email}`);
-      await loadAccounts();
-    } catch (err) {
-      setError(formatError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function saveGmailAccount(input: {
     email: string;
@@ -696,20 +607,8 @@ export default function EmailScoutClient({
   }
 
   function startGmailOauth() {
-    if (!googleClientId.trim()) {
-      setError("Paste your Google OAuth Client ID first.");
-      return;
-    }
-    localStorage.setItem("scout_v815_google_client_id", googleClientId.trim());
-    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    url.searchParams.set("client_id", googleClientId.trim());
-    url.searchParams.set("redirect_uri", getMessageRedirectUri());
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", GMAIL_SCOPES);
-    url.searchParams.set("access_type", "offline");
-    url.searchParams.set("prompt", "consent");
-    url.searchParams.set("state", "scout_v815_gmail");
-    window.location.href = url.toString();
+    const returnTo = '/email-scout';
+    window.location.href = `/api/gmail/oauth/start?workspace_id=${encodeURIComponent(workspace.id)}&return=${encodeURIComponent(returnTo)}`;
   }
 
   async function addManualAccount() {
@@ -741,46 +640,18 @@ export default function EmailScoutClient({
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/backend/gmail/profile", {
+      const response = await fetch("/api/gmail/profile", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          access_token: account.access_token,
-          refresh_token: account.refresh_token,
-          client_id: account.client_id || googleClientId,
-        }),
+        body: JSON.stringify({ workspace_id: workspace.id, gmail_account_id: account.id }),
       });
       const json = await response.json().catch(() => ({}));
-      if (!response.ok || json?.success === false)
-        throw new Error(
-          json?.error ||
-            json?.message ||
-            `Profile check failed with HTTP ${response.status}`,
-        );
-      const update: Record<string, unknown> = {
-        status: "connected",
-        email: normalizeEmail(json.email || account.email),
-        display_name: normalizeEmail(json.email || account.email),
-        last_error: null,
-      };
-      if (json.access_token) update.access_token = json.access_token;
-      const { error: updateError } = await supabase
-        .from("gmail_accounts")
-        .update(update)
-        .eq("workspace_id", workspace.id)
-        .eq("id", account.id);
-      if (updateError) throw updateError;
-      setStatus(`Verified sender: ${json.email}`);
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Profile check failed with HTTP ${response.status}`);
+      setStatus(`Verified sender: ${json.email || account.email}`);
       await loadAccounts();
     } catch (err) {
-      const msg = formatError(err);
-      setError(msg);
-      await supabase
-        .from("gmail_accounts")
-        .update({ status: "error", last_error: msg })
-        .eq("workspace_id", workspace.id)
-        .eq("id", account.id);
-      await loadAccounts();
+      setError(formatError(err));
+      await loadAccounts().catch(() => undefined);
     } finally {
       setBusy(false);
     }
@@ -1161,7 +1032,7 @@ export default function EmailScoutClient({
           selectedAccounts[a.id] &&
           a.status === "connected" &&
           !isPaused(a) &&
-          (a.access_token || a.refresh_token),
+          a.has_credentials !== false,
       );
       if (!activeAccounts.length)
         throw new Error("Select at least one connected Gmail sender.");
@@ -1217,41 +1088,31 @@ export default function EmailScoutClient({
           `${attempted.toLocaleString()} / ${requested.toLocaleString()} · ${account.email} → ${payload.email}`,
         );
 
-        const response = await fetch(
-          "/api/backend/email-scout/send-selected-batch",
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              contacts: [payload],
-              limit: 1,
-              delayMs,
-              dryRun,
-              senderEmail: account.email,
-              access_token: account.access_token,
-              refresh_token: account.refresh_token,
-              client_id: account.client_id || googleClientId,
-              expires_at: account.expires_at
-                ? new Date(account.expires_at).getTime()
-                : undefined,
-            }),
-          },
-        );
+        const response = await fetch("/api/gmail/send", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            workspace_id: workspace.id,
+            business_id: business.id,
+            template_id: template.id,
+            batch_id: batchId,
+            run_id: batchId,
+            run_limit: Number(account.default_run_limit || 50),
+            is_follow_up: Boolean(options?.isFollowUp),
+            gmail_account_id: account.id,
+            to: payload.email,
+            subject: payload.subject,
+            body: payload.message,
+            attachments: (payload as any).attachments || [],
+            dryRun,
+          }),
+        });
         const json = await response.json().catch(() => ({}));
         const result = ((json?.results || [])[0] || {}) as SendResult;
         const statusText = String(
           result.status || (json?.success ? "sent" : "failed"),
         ).toLowerCase();
         const limitHit = isLimitPayload(json, result);
-
-        if (json?.access_token) {
-          await supabase
-            .from("gmail_accounts")
-            .update({ access_token: json.access_token })
-            .eq("workspace_id", workspace.id)
-            .eq("id", account.id);
-          account.access_token = json.access_token;
-        }
 
         if (!response.ok && limitHit) {
           const reason =
@@ -1835,77 +1696,42 @@ export default function EmailScoutClient({
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Gmail Senders</h3>
-          <div className="grid grid-2">
-            <div>
-              <label className="label">Google OAuth Client ID</label>
-              <input
-                className="input"
-                value={googleClientId}
-                onChange={(e) => setGoogleClientId(e.target.value)}
-                placeholder="Paste once"
-              />
-            </div>
-            <div style={{ display: "flex", alignItems: "end" }}>
-              <button className="btn" type="button" onClick={startGmailOauth}>
-                Connect Gmail
-              </button>
-            </div>
+          <p className="muted">Connect Gmail for sending. Scout uses the verified app setup automatically; users do not need to paste a Google Client ID.</p>
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button className="btn" type="button" onClick={startGmailOauth}>
+              Connect Gmail
+            </button>
           </div>
-          <button
-            className="btn secondary"
-            type="button"
-            style={{ marginTop: 10 }}
-            onClick={() => setShowAdvancedTokens((v) => !v)}
-          >
-            Advanced manual sender
-          </button>
-          {showAdvancedTokens ? (
-            <div className="card" style={{ padding: 12, marginTop: 10 }}>
-              <div className="grid grid-2">
-                <div>
-                  <label className="label">Sender email</label>
-                  <input
-                    className="input"
-                    value={manualEmail}
-                    onChange={(e) => setManualEmail(e.target.value)}
-                  />
+          {MANUAL_GMAIL_TOKEN_ENTRY_ENABLED ? <>
+            <button
+              className="btn secondary"
+              type="button"
+              style={{ marginTop: 10 }}
+              onClick={() => setShowAdvancedTokens((v) => !v)}
+            >
+              Advanced manual sender
+            </button>
+            {showAdvancedTokens ? (
+              <div className="card" style={{ padding: 12, marginTop: 10 }}>
+                <p className="muted">Testing only. Normal users should use Connect Gmail.</p>
+                <div className="grid grid-2">
+                  <div>
+                    <label className="label">Sender email</label>
+                    <input className="input" value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Client ID</label>
+                    <input className="input" value={manualClientId} onChange={(e) => setManualClientId(e.target.value)} />
+                  </div>
                 </div>
-                <div>
-                  <label className="label">Client ID</label>
-                  <input
-                    className="input"
-                    value={manualClientId}
-                    onChange={(e) => setManualClientId(e.target.value)}
-                  />
-                </div>
+                <label className="label" style={{ marginTop: 10 }}>Access token</label>
+                <input className="input" value={manualAccessToken} onChange={(e) => setManualAccessToken(e.target.value)} />
+                <label className="label" style={{ marginTop: 10 }}>Refresh token</label>
+                <input className="input" value={manualRefreshToken} onChange={(e) => setManualRefreshToken(e.target.value)} />
+                <button className="btn secondary" type="button" style={{ marginTop: 10 }} disabled={busy} onClick={addManualAccount}>Add / Update Sender</button>
               </div>
-              <label className="label" style={{ marginTop: 10 }}>
-                Access token
-              </label>
-              <input
-                className="input"
-                value={manualAccessToken}
-                onChange={(e) => setManualAccessToken(e.target.value)}
-              />
-              <label className="label" style={{ marginTop: 10 }}>
-                Refresh token
-              </label>
-              <input
-                className="input"
-                value={manualRefreshToken}
-                onChange={(e) => setManualRefreshToken(e.target.value)}
-              />
-              <button
-                className="btn secondary"
-                type="button"
-                style={{ marginTop: 10 }}
-                disabled={busy}
-                onClick={addManualAccount}
-              >
-                Add / Update Sender
-              </button>
-            </div>
-          ) : null}
+            ) : null}
+          </> : null}
           <div className="table-wrap" style={{ marginTop: 14 }}>
             <table>
               <thead>
@@ -1957,7 +1783,7 @@ export default function EmailScoutClient({
                         type="button"
                         disabled={
                           busy ||
-                          !(account.access_token || account.refresh_token)
+                          account.has_credentials === false
                         }
                         onClick={() => verifySenderProfile(account)}
                       >

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle, Trophy, Users } from 'lucide-react';
+import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle, Trophy, Users, ShieldCheck } from 'lucide-react';
 
 const baseItems = [
   { href: '/dashboard', label: 'Home', icon: BarChart3 },
@@ -22,7 +22,8 @@ const groupedRoutes: Record<string, string[]> = {
   '/settings': ['/settings'],
   '/challenges': ['/challenges'],
   '/help': ['/help'],
-  '/team': ['/team']
+  '/team': ['/team'],
+  '/google-verification': ['/google-verification']
 };
 
 function isActive(pathname: string, href: string) {
@@ -36,6 +37,7 @@ export function AppNav({ isAdmin = false }: { isAdmin?: boolean }) {
     ? [
         ...baseItems.slice(0, 5),
         { href: '/team', label: 'Team', icon: Users },
+        { href: '/google-verification', label: 'Google Verification', icon: ShieldCheck },
         ...baseItems.slice(5)
       ]
     : baseItems;

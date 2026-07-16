@@ -1,7 +1,13 @@
 export const runtime = 'nodejs';
+export const maxDuration = 120;
 
+import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { createClient } from '@/lib/supabase-server';
+import { buildMimeMessage } from '@/lib/email-signature';
+import { finalizeSingleSenderSlot, reserveSingleSenderSlot } from '@/lib/sender-capacity-server';
+import { featureFlags } from '@/lib/feature-flags';
 
 function b64url(input: string) {
   return Buffer.from(input, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -13,10 +19,26 @@ function formatError(error: unknown) {
   try { return JSON.stringify(error); } catch { return String(error); }
 }
 
+async function authorizeWorkspace(workspaceId: string) {
+  const session = await createClient();
+  const { data: { user }, error: userError } = await session.auth.getUser();
+  if (userError || !user) return { error: NextResponse.json({ success: false, error: userError?.message || 'Not signed in.' }, { status: 401 }) };
+  const { data: member, error: memberError } = await session
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', user.id)
+    .eq('approved', true)
+    .maybeSingle();
+  if (memberError) throw memberError;
+  if (!member) return { error: NextResponse.json({ success: false, error: 'You do not have access to this Scout workspace.' }, { status: 403 }) };
+  return { user };
+}
+
 async function refreshAccessToken(refreshToken: string) {
   const clientId = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
-  if (!clientId || !clientSecret) throw new Error('GOOGLE_CLIENT_ID/NEXT_PUBLIC_GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in Vercel.');
+  if (!clientId || !clientSecret) throw new Error('Google OAuth environment variables are missing.');
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -34,145 +56,152 @@ async function ensureAccessToken(supabase: ReturnType<typeof createAdminClient>,
     if (!account.refresh_token) throw new Error(`${account.email} has no refresh token. Reconnect Gmail.`);
     const refreshed = await refreshAccessToken(String(account.refresh_token));
     accessToken = refreshed.access_token;
-    await supabase.from('gmail_accounts').update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), last_error: null }).eq('id', account.id);
+    await supabase.from('gmail_accounts').update({
+      access_token: accessToken,
+      expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', account.id).eq('workspace_id', account.workspace_id);
   }
   return accessToken;
 }
 
-async function sendWithGmail(accessToken: string, from: string, to: string, subject: string, body: string) {
+async function sendWithGmail(accessToken: string, from: string, to: string, subject: string, body: string, identity: any) {
+  const message = buildMimeMessage({ from, to, subject, body, identity });
   const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ raw: b64url([`From: ${from}`, `To: ${to}`, `Subject: ${subject}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', '', body].join('\r\n')) })
+    body: JSON.stringify({ raw: b64url(message.raw) })
   });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(json?.error?.message || json?.error || `Gmail send failed with HTTP ${response.status}`);
   return json as { id?: string; threadId?: string };
 }
 
-async function gmailFetch(accessToken: string, url: string) {
-  const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
-  const json = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(json?.error?.message || json?.error || `Gmail fetch failed with HTTP ${response.status}`);
-  return json;
-}
-
-function placementFromLabels(labelIds: string[] | undefined) {
-  const labels = new Set((labelIds || []).map(String));
-  if (labels.has('SPAM')) return 'spam';
-  if (labels.has('CATEGORY_PROMOTIONS')) return 'promotions';
-  if (labels.has('INBOX')) return 'inbox';
-  return 'not_found';
-}
-
-async function runSeedInboxTest(workspaceId: string) {
-  if (!workspaceId) throw new Error('workspace_id is required.');
-
-  const supabase = createAdminClient();
-  const { data: accounts, error: accountError } = await supabase
-    .from('gmail_accounts')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .in('status', ['connected', 'ready']);
-  if (accountError) throw accountError;
-
-  const readyAccounts = (accounts || []).filter((a: any) => a.access_token || a.refresh_token);
-  const senders = readyAccounts.filter((a: any) => !a.paused_until || new Date(a.paused_until).getTime() <= Date.now());
-  const seeds = readyAccounts.filter((a: any) => Boolean(a.seed_inbox_enabled));
-  if (!senders.length) throw new Error('No connected Gmail senders found.');
-  if (!seeds.length) throw new Error('No seed receiver is saved yet. Turn on Use as seed receiver for at least one connected Gmail account, then click Run seed inbox test now. v8.26 saves the checkbox automatically.');
-  const possiblePairs = senders.flatMap((sender: any) => seeds.map((seed: any) => ({ sender, seed }))).filter(({ sender, seed }: any) => sender.id !== seed.id);
-  if (!possiblePairs.length) throw new Error('Seed inbox testing needs at least 2 connected Gmail accounts: one sender and one seed inbox. Scout does not count sending an account to itself as a useful spam placement test.');
-
-  let sent = 0;
-  let inbox = 0;
-  let spam = 0;
-  let promotions = 0;
-  let notFound = 0;
-  const results: Array<Record<string, unknown>> = [];
-
-  for (const sender of senders) {
-    const senderToken = await ensureAccessToken(supabase, sender);
-    for (const seed of seeds) {
-      if (sender.id === seed.id) continue;
-      const seedEmail = String(seed.seed_test_address || seed.email || '').toLowerCase();
-      if (!seedEmail) continue;
-      const stamp = Date.now();
-      const subject = `[Scout Seed Test ${stamp}] ${sender.email}`;
-      let placement = 'sent_pending_check';
-      let gmailMessageId = '';
-      let gmailThreadId = '';
-      try {
-        const sentMessage = await sendWithGmail(senderToken, String(sender.email), seedEmail, subject, `Scout deliverability seed test. Sender: ${sender.email}. Seed: ${seedEmail}. Stamp: ${stamp}.`);
-        gmailMessageId = sentMessage.id || '';
-        gmailThreadId = sentMessage.threadId || '';
-        sent += 1;
-      } catch (err) {
-        placement = String(formatError(err)).toLowerCase().includes('blocked') ? 'blocked' : 'bounced';
-      }
-
-      if (placement === 'sent_pending_check') {
-        await new Promise((resolve) => setTimeout(resolve, 3500));
-      }
-
-      try {
-        const seedToken = await ensureAccessToken(supabase, seed);
-        const q = encodeURIComponent(`subject:"${subject}" newer_than:1d`);
-        const list = await gmailFetch(seedToken, `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&includeSpamTrash=true&maxResults=1`);
-        const found = list.messages?.[0];
-        if (found?.id) {
-          const msg = await gmailFetch(seedToken, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${found.id}?format=metadata`);
-          placement = placementFromLabels(msg.labelIds || []);
-        } else if (placement === 'sent_pending_check') {
-          placement = 'not_found';
-        }
-      } catch {
-        if (placement === 'sent_pending_check') placement = 'not_found';
-      }
-
-      if (placement === 'inbox') inbox += 1;
-      else if (placement === 'spam') spam += 1;
-      else if (placement === 'promotions') promotions += 1;
-      else if (placement === 'not_found') notFound += 1;
-
-      await supabase.from('seed_inbox_tests').insert({
-        workspace_id: workspaceId,
-        sender_gmail_account_id: sender.id,
-        seed_gmail_account_id: seed.id,
-        sender_email: String(sender.email).toLowerCase(),
-        seed_email: seedEmail,
-        subject,
-        placement,
-        checked_at: new Date().toISOString(),
-        gmail_message_id: gmailMessageId || null,
-        gmail_thread_id: gmailThreadId || null,
-        raw: { source: 'v8.26_seed_test', placement, subject, checked_after_ms: 3500 }
-      });
-
-      const risk = placement === 'spam' ? 'spam_risk' : placement === 'promotions' ? 'promotion_risk' : placement === 'inbox' ? 'seed_inbox_ok' : placement;
-      await supabase.from('gmail_accounts').update({ spam_risk_status: risk, last_seed_result: placement, last_seed_checked_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', sender.id);
-      results.push({ sender: sender.email, seed: seedEmail, placement });
-    }
-  }
-
-  return { success: true, sent, inbox, spam, promotions, not_found: notFound, results };
-}
+const PLACEMENTS = new Set(['inbox', 'promotions', 'spam', 'not_received']);
 
 export async function POST(request: NextRequest) {
+  let reservationId: string | null = null;
+  let admin: ReturnType<typeof createAdminClient> | null = null;
+  let gmailAccepted = false;
   try {
+    if (!featureFlags.placementTests) return NextResponse.json({ success: false, error: 'Placement testing is disabled.' }, { status: 503 });
     const input = await request.json().catch(() => ({}));
-    const workspaceId = String(input.workspace_id || '');
-    return NextResponse.json(await runSeedInboxTest(workspaceId));
-  } catch (err) {
-    return NextResponse.json({ success: false, error: formatError(err) }, { status: 400 });
+    const workspaceId = String(input.workspace_id || '').trim();
+    const action = String(input.action || 'send').trim();
+    if (!workspaceId) throw new Error('workspace_id is required.');
+
+    const authorization = await authorizeWorkspace(workspaceId);
+    if ('error' in authorization) return authorization.error;
+    admin = createAdminClient();
+
+    if (action === 'record') {
+      const testId = String(input.test_id || '').trim();
+      const placement = String(input.placement || '').trim().toLowerCase();
+      if (!testId || !PLACEMENTS.has(placement)) throw new Error('Choose Inbox, Promotions, Spam, or Not received.');
+      const checkedAt = new Date().toISOString();
+      const { data: test, error: testError } = await admin.from('seed_inbox_tests').select('id,sender_gmail_account_id').eq('workspace_id', workspaceId).eq('id', testId).single();
+      if (testError || !test) throw new Error(testError?.message || 'Placement test was not found.');
+      const { error: updateError } = await admin.from('seed_inbox_tests').update({ placement, checked_at: checkedAt }).eq('workspace_id', workspaceId).eq('id', testId);
+      if (updateError) throw updateError;
+      const risk = placement === 'spam' ? 'spam_risk' : placement === 'promotions' ? 'promotion_risk' : placement === 'inbox' ? 'seed_inbox_ok' : 'not_received';
+      const healthStatus = placement === 'inbox' ? 'healthy' : placement === 'promotions' ? 'needs_review' : 'at_risk';
+      await admin.from('gmail_accounts').update({
+        spam_risk_status: risk,
+        last_seed_result: placement,
+        last_seed_checked_at: checkedAt,
+        health_status: healthStatus,
+        ...(placement === 'inbox' ? { last_error: null } : {}),
+      }).eq('workspace_id', workspaceId).eq('id', test.sender_gmail_account_id);
+      return NextResponse.json({ success: true, placement, checked_at: checkedAt });
+    }
+
+    const senderId = String(input.sender_account_id || '').trim();
+    const receiverId = String(input.seed_account_id || '').trim();
+    if (!senderId || !receiverId) throw new Error('Choose one sender and one test receiver.');
+    if (senderId === receiverId) throw new Error('Choose a different inbox as the test receiver.');
+
+    const [{ data: sender, error: senderError }, { data: receiver, error: receiverError }, { data: workspace, error: workspaceError }] = await Promise.all([
+      admin.from('gmail_accounts').select('*').eq('workspace_id', workspaceId).eq('id', senderId).single(),
+      admin.from('gmail_accounts').select('id,email').eq('workspace_id', workspaceId).eq('id', receiverId).single(),
+      admin.from('workspaces').select('id,timezone').eq('id', workspaceId).single(),
+    ]);
+    if (senderError || !sender) throw new Error(senderError?.message || 'Test sender was not found.');
+    if (receiverError || !receiver) throw new Error(receiverError?.message || 'Test receiver was not found.');
+    if (workspaceError || !workspace) throw new Error(workspaceError?.message || 'Scout workspace was not found.');
+    if (!['connected', 'ready'].includes(String(sender.status || ''))) throw new Error('The selected sender is not connected.');
+
+    const runId = randomUUID();
+    const reservation = await reserveSingleSenderSlot(admin, {
+      workspaceId,
+      account: sender,
+      runId,
+      batchId: `placement_test_${runId}`,
+      runLimit: 1,
+      timezone: String(workspace.timezone || 'UTC'),
+    });
+    reservationId = reservation.id;
+    if (!reservation.allowed) {
+      return NextResponse.json({ success: false, code: 'safe_capacity_reached', error: 'This sender has no safe sending capacity remaining today.', capacity_reason: reservation.reason }, { status: 409 });
+    }
+
+    const accessToken = await ensureAccessToken(admin, sender);
+    const stamp = Date.now();
+    const subject = `[Scout placement test ${stamp}] ${sender.email}`;
+    const body = `This is a controlled Scout placement test sent to an inbox you own.\n\nSender: ${sender.email}\nTest receiver: ${receiver.email}\nReference: ${stamp}`;
+    const sentMessage = await sendWithGmail(accessToken, String(sender.email), String(receiver.email), subject, body, sender);
+    gmailAccepted = true;
+    const sentAt = new Date().toISOString();
+
+    const { data: test, error: testError } = await admin.from('seed_inbox_tests').insert({
+      workspace_id: workspaceId,
+      sender_gmail_account_id: sender.id,
+      seed_gmail_account_id: receiver.id,
+      sender_email: String(sender.email).toLowerCase(),
+      seed_email: String(receiver.email).toLowerCase(),
+      subject,
+      placement: 'awaiting_manual_check',
+      gmail_message_id: sentMessage.id || null,
+      gmail_thread_id: sentMessage.threadId || null,
+      raw: { source: 'v10_35_send_only_manual_placement', permission_mode: 'gmail.send_only', reference: stamp },
+    }).select('id,sender_email,seed_email,subject,placement,created_at').single();
+    if (testError) throw testError;
+
+    const { error: sentHistoryError } = await admin.from('sent_messages').insert({
+      workspace_id: workspaceId,
+      gmail_account_id: sender.id,
+      to_email: String(receiver.email).toLowerCase(),
+      from_email: String(sender.email).toLowerCase(),
+      subject,
+      body,
+      provider_message_id: sentMessage.id || null,
+      gmail_thread_id: sentMessage.threadId || null,
+      status: 'sent',
+      delivery_status: 'placement_test_sent',
+      sent_at: sentAt,
+      raw: { source: 'placement_test', schedule_id: runId, reservation_id: reservationId, seed_test_id: test.id },
+    });
+    await admin.from('gmail_accounts').update({
+      last_successful_send_at: sentAt,
+      sent_today: Number(sender.sent_today || 0) + 1,
+      last_error: sentHistoryError ? `Placement test sent but history save failed: ${sentHistoryError.message}` : null,
+      updated_at: sentAt,
+    }).eq('workspace_id', workspaceId).eq('id', sender.id);
+    await finalizeSingleSenderSlot(admin, reservationId, true, sentHistoryError?.message);
+    reservationId = null;
+
+    return NextResponse.json({
+      success: true,
+      sent: 1,
+      test,
+      message: `Test sent to ${receiver.email}. Open that inbox and record where it arrived.`,
+    });
+  } catch (error) {
+    if (admin && reservationId) await finalizeSingleSenderSlot(admin, reservationId, gmailAccepted, formatError(error));
+    return NextResponse.json({ success: false, error: formatError(error) }, { status: 400 });
   }
 }
 
 export async function GET() {
-  try {
-    const workspaceId = process.env.SCOUT_DEFAULT_WORKSPACE_ID || process.env.NEXT_PUBLIC_SCOUT_DEFAULT_WORKSPACE_ID || '00000000-0000-4000-8000-000000000001';
-    return NextResponse.json(await runSeedInboxTest(workspaceId));
-  } catch (err) {
-    return NextResponse.json({ success: false, error: formatError(err) }, { status: 400 });
-  }
+  return NextResponse.json({ success: false, error: 'Placement tests must be started by a signed-in user from Settings.' }, { status: 405 });
 }

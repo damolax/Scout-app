@@ -1,8 +1,11 @@
 export const runtime = 'nodejs';
 
+import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { createClient } from '@/lib/supabase-server';
 import { buildMimeMessage, appendSignatureToText } from '@/lib/email-signature';
+import { finalizeSingleSenderSlot, reserveSingleSenderSlot } from '@/lib/sender-capacity-server';
 
 function b64url(input: string) {
   return Buffer.from(input, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -65,7 +68,25 @@ async function sendReplyWithGmail(accessToken: string, from: string, to: string,
   return json as { id?: string; threadId?: string; labelIds?: string[] };
 }
 
+async function authorizeWorkspace(workspaceId: string) {
+  const session = await createClient();
+  const { data: { user }, error: userError } = await session.auth.getUser();
+  if (userError || !user) return { error: NextResponse.json({ success: false, error: userError?.message || 'Not signed in.' }, { status: 401 }) };
+  const { data: member, error: memberError } = await session
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', user.id)
+    .eq('approved', true)
+    .maybeSingle();
+  if (memberError) throw memberError;
+  if (!member) return { error: NextResponse.json({ success: false, error: 'You do not have access to this Scout workspace.' }, { status: 403 }) };
+  return { user };
+}
+
 export async function POST(request: NextRequest) {
+  let reservationId: string | null = null;
+  let reservationAdmin: ReturnType<typeof createAdminClient> | null = null;
   try {
     const input = await request.json();
     const workspaceId = String(input.workspace_id || '');
@@ -79,7 +100,11 @@ export async function POST(request: NextRequest) {
     if (!workspaceId || !businessId) throw new Error('workspace_id and business_id are required.');
     if (!to || !subject || !body) throw new Error('to, subject, and body are required.');
 
+    const authorization = await authorizeWorkspace(workspaceId);
+    if ('error' in authorization) return authorization.error;
+
     const supabase = createAdminClient();
+    reservationAdmin = supabase;
     const { data: latestSent, error: latestSentError } = await supabase
       .from('sent_messages')
       .select('id,gmail_account_id,gmail_thread_id,subject,to_email,from_email,sent_at')
@@ -90,18 +115,53 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle();
     if (latestSentError) throw latestSentError;
-    if (!latestSent?.gmail_account_id) throw new Error('Scout could not find the Gmail account that sent the original message to this business. Reply from the business page after syncing the conversation again.');
+    if (!latestSent?.gmail_account_id) throw new Error('Scout could not find the Gmail account that sent the original message to this business. Reply from Gmail for now.');
     if (requestedAccountId && requestedAccountId !== latestSent.gmail_account_id) throw new Error('For safety, Scout replies to this business only with the same Gmail account that sent the original message.');
     const accountId = String(latestSent.gmail_account_id);
     const threadId = inputThreadId || String(latestSent.gmail_thread_id || '') || null;
 
-    const [{ data: account, error: accountError }, { data: business, error: businessError }] = await Promise.all([
+    const [{ data: account, error: accountError }, { data: business, error: businessError }, { data: workspace, error: workspaceError }] = await Promise.all([
       supabase.from('gmail_accounts').select('*').eq('workspace_id', workspaceId).eq('id', accountId).single(),
-      supabase.from('businesses').select('id,email,name,status').eq('workspace_id', workspaceId).eq('id', businessId).single()
+      supabase.from('businesses').select('id,email,name,status').eq('workspace_id', workspaceId).eq('id', businessId).single(),
+      supabase.from('workspaces').select('id,timezone').eq('id', workspaceId).single(),
     ]);
     if (accountError || !account) throw new Error(accountError?.message || 'Gmail account not found.');
     if (businessError || !business) throw new Error(businessError?.message || 'Business not found.');
+    if (workspaceError || !workspace) throw new Error(workspaceError?.message || 'Scout workspace not found.');
+
+    const pauseUntil = account.paused_until ? new Date(account.paused_until).getTime() : 0;
+    const providerStatus = String(account.status || '').toLowerCase();
+    if (['limit_hit', 'sender_limited'].includes(providerStatus) && pauseUntil && pauseUntil <= Date.now()) {
+      const { data: recovered } = await supabase.from('gmail_accounts').update({
+        status: 'connected',
+        is_paused: false,
+        paused_reason: null,
+        health_status: 'recovering',
+        last_error: null,
+        updated_at: new Date().toISOString(),
+      }).eq('workspace_id', workspaceId).eq('id', accountId).select('*').single();
+      if (recovered) Object.assign(account, recovered);
+    }
     if (account.status && !['connected', 'ready'].includes(String(account.status))) throw new Error(`Sender is not connected. Current status: ${account.status}`);
+    if (account.is_paused === true || (account.paused_until && new Date(account.paused_until).getTime() > Date.now())) throw new Error('This sender is paused. Open Settings to see the reason.');
+
+    const reservation = await reserveSingleSenderSlot(supabase, {
+      workspaceId,
+      account,
+      runId: randomUUID(),
+      batchId: `manual_reply_${businessId}`,
+      runLimit: 1,
+      timezone: String(workspace.timezone || 'UTC'),
+    });
+    reservationId = reservation.id;
+    if (!reservation.allowed) {
+      return NextResponse.json({
+        success: false,
+        code: 'safe_capacity_reached',
+        error: 'This sender has no safe sending capacity remaining today.',
+        capacity_reason: reservation.reason,
+      }, { status: 409 });
+    }
 
     let accessToken = String(account.access_token || '');
     const expiresAt = account.expires_at ? new Date(account.expires_at).getTime() : 0;
@@ -113,9 +173,20 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const result = await sendReplyWithGmail(accessToken, String(account.email), to, subject, body, threadId, account);
+      let result;
+      try {
+        result = await sendReplyWithGmail(accessToken, String(account.email), to, subject, body, threadId, account);
+      } catch (initialError) {
+        const first = initialError as Error & { status?: number };
+        if (first.status !== 401 || !account.refresh_token) throw initialError;
+        const refreshed = await refreshAccessToken(String(account.refresh_token));
+        accessToken = refreshed.access_token;
+        await supabase.from('gmail_accounts').update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), last_error: null, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', accountId);
+        result = await sendReplyWithGmail(accessToken, String(account.email), to, subject, body, threadId, account);
+      }
+
       const sentAt = new Date().toISOString();
-      await supabase.from('sent_messages').insert({
+      const { error: sentError } = await supabase.from('sent_messages').insert({
         workspace_id: workspaceId,
         business_id: businessId,
         gmail_account_id: accountId,
@@ -130,24 +201,45 @@ export async function POST(request: NextRequest) {
         delivery_status: 'manual_reply_sent',
         is_follow_up: true,
         sent_at: sentAt,
-        raw: { source: 'business_manual_reply', reply_template_id: templateId, gmail: result }
+        raw: { source: 'business_manual_reply', schedule_id: reservation.runId, reservation_id: reservationId, reply_template_id: templateId, sending_mode: account.sending_mode || 'normal', gmail: result },
       });
       await supabase.from('businesses').update({ last_manual_reply_at: sentAt, updated_at: sentAt }).eq('workspace_id', workspaceId).eq('id', businessId);
-      return NextResponse.json({ success: true, gmailMessageId: result.id || '', gmailThreadId: result.threadId || threadId || '' });
+      await supabase.from('gmail_accounts').update({
+        last_successful_send_at: sentAt,
+        sent_today: Number(account.sent_today || 0) + 1,
+        last_error: sentError ? `Reply sent but history save failed: ${sentError.message}` : null,
+        updated_at: sentAt,
+      }).eq('workspace_id', workspaceId).eq('id', accountId);
+      await finalizeSingleSenderSlot(supabase, reservationId, true, sentError?.message);
+      reservationId = null;
+      return NextResponse.json({ success: true, persisted: !sentError, persistence_error: sentError?.message || null, gmailMessageId: result.id || '', gmailThreadId: result.threadId || threadId || '' });
     } catch (sendErr) {
       const err = sendErr as Error & { status?: number; payload?: unknown; limitHit?: boolean; blocked?: boolean };
+      await finalizeSingleSenderSlot(supabase, reservationId, false, err.message);
+      reservationId = null;
       if (err.limitHit) {
         const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-        await supabase.from('gmail_accounts').update({ status: 'limit_hit', paused_until: until, last_error: err.message, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', accountId);
-        return NextResponse.json({ success: false, code: 'limit_hit', error: err.message, senderPausedUntil: until }, { status: 429 });
+        await supabase.from('gmail_accounts').update({
+          status: 'limit_hit',
+          is_paused: true,
+          paused_reason: err.message,
+          paused_until: until,
+          health_status: 'sender_limited',
+          provider_limit_count: Number(account.provider_limit_count || 0) + 1,
+          last_provider_limit_at: new Date().toISOString(),
+          last_error: err.message,
+          updated_at: new Date().toISOString(),
+        }).eq('workspace_id', workspaceId).eq('id', accountId);
+        return NextResponse.json({ success: false, code: 'provider_limit_hit', error: err.message, senderPausedUntil: until }, { status: 429 });
       }
       if (err.blocked) {
-        await supabase.from('gmail_accounts').update({ last_error: err.message, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', accountId);
+        await supabase.from('gmail_accounts').update({ health_status: 'at_risk', last_error: err.message, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', accountId);
         return NextResponse.json({ success: false, code: 'message_blocked', error: err.message }, { status: err.status || 403 });
       }
       throw err;
     }
   } catch (err) {
+    if (reservationAdmin && reservationId) await finalizeSingleSenderSlot(reservationAdmin, reservationId, false, formatError(err));
     return NextResponse.json({ success: false, error: formatError(err) }, { status: 400 });
   }
 }

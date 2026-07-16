@@ -4,6 +4,8 @@ export const maxDuration = 15;
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { formatInboundError, syncGmailInbound } from '@/lib/gmail-inbound-sync';
+import { featureFlags } from '@/lib/feature-flags';
+import { requireWorkspaceAccess, workspaceAccessStatus } from '@/lib/workspace-access-server';
 
 type AnyRecord = Record<string, any>;
 
@@ -41,10 +43,14 @@ function addStats(row: AccountResult, stats: AnyRecord) {
 
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
+  if (!featureFlags.gmailReplySync) {
+    return NextResponse.json({ success: true, skipped: true, reason: 'reply_sync_disabled_for_send_only_google_verification', accountsChecked: 0, totals: { scanned: 0, saved: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, skippedOld: 0, errors: 0 } });
+  }
   try {
     const input = await request.json().catch(() => ({}));
     const workspaceId = String(input.workspace_id || input.workspaceId || '');
     if (!workspaceId) throw new Error('workspaceId is required.');
+    await requireWorkspaceAccess(workspaceId);
 
     // App-open sync must be tiny and new-only. Full sync stays on Replies page.
     const maxResults = Math.max(1, Math.min(num(input.max_results || input.maxResults, 3), 5));
@@ -149,6 +155,7 @@ export async function POST(request: NextRequest) {
     // v10.27: if Supabase is temporarily out of connections, do not make app load feel broken.
     // The next tiny pulse or manual full sync can retry.
     const poolTimeout = message.includes('PGRST003') || /connection pool/i.test(message);
-    return NextResponse.json({ success: !poolTimeout, skipped: poolTimeout, retryLater: poolTimeout, error: message }, { status: poolTimeout ? 200 : 400 });
+    const accessStatus = workspaceAccessStatus(err, poolTimeout ? 200 : 400);
+    return NextResponse.json({ success: poolTimeout, skipped: poolTimeout, retryLater: poolTimeout, error: message }, { status: accessStatus });
   }
 }

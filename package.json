@@ -1,13 +1,16 @@
 {
-  "name": "scout-app-v10-34-sender-speed-signature",
-  "version": "10.34.0",
+  "name": "scout-app-v10-35-1-scale-guard",
+  "version": "10.35.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "tsc --noEmit && next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "validate:v10.35": "node scripts/validate-v10-35.mjs",
+    "validate:v10.35.1": "node scripts/validate-v10-35-1.mjs",
+    "worker:scale-guard": "node scripts/scale-guard-worker.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",
@@ -28,7 +31,7 @@
     "typescript": "6.0.3"
   },
   "engines": {
-    "node": "22.x"
+    "node": ">=22 <25"
   },
-  "description": "Scout App v10.32: stable workspace, signup name, country-assigned translations, reliable uploads and durable messaging."
+  "description": "Scout v10.35.1 Scale Guard: centralized scheduling, platform-wide capacity leases, safe sender pagination, resource-aware polling, and Google verification readiness."
 }

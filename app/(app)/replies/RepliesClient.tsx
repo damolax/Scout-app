@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { GmailAccount, MessageTemplate, Workspace } from '@/lib/types';
+import { loadAllSafeGmailAccounts } from '@/lib/load-safe-gmail-accounts-client';
 import { compactReplyRows as compactUnifiedReplyRows, isUnifiedAutoReply, isUnifiedRealReply } from '@/lib/reply-metrics';
 
 const SYNC_ENDPOINTS = [
@@ -35,6 +36,8 @@ type ReplyRow = {
   gmail_message_id?: string | null;
   gmail_thread_id?: string | null;
   raw?: Record<string, unknown> | null;
+  hidden_at?: string | null;
+  manual_classification?: string | null;
 };
 
 type SentRow = {
@@ -290,7 +293,7 @@ function downloadCsv(name: string, rows: Array<Record<string, unknown>>) {
   URL.revokeObjectURL(url);
 }
 
-export default function RepliesClient({ workspace }: { workspace: Workspace }) {
+export default function RepliesClient({ workspace, replySyncEnabled = false }: { workspace: Workspace; replySyncEnabled?: boolean }) {
   const supabase = useMemo(() => createClient(), []);
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -301,18 +304,23 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   const [selectedAccounts, setSelectedAccounts] = useState<Record<string, boolean>>({});
   const [syncLimit, setSyncLimit] = useState(500);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState('Reply sync is ready. Scout will save every non-bounce inbound message as a reply so you do not miss anything.');
+  const [status, setStatus] = useState(replySyncEnabled
+    ? 'Reply sync is ready for outreach-related replies and delivery notices.'
+    : 'New replies remain in Gmail during send-only verification. Existing Scout reply history is available below.');
   const [error, setError] = useState('');
   const [lastStats, setLastStats] = useState<SyncStats>({ scanned: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, ignored: 0, inserted: 0, errors: [] });
   const [openedReply, setOpenedReply] = useState<ReplyRow | null>(null);
+  const [activeTab, setActiveTab] = useState<'real' | 'auto' | 'delivery' | 'review'>('real');
+  const [replySearch, setReplySearch] = useState('');
+  const [replyPage, setReplyPage] = useState(1);
 
   async function loadAll() {
     setError('');
     const [acct, tmpl, sent, replies, noInbox, sentCount, realReplyCount, autoReplyCount, noInboxCount, unifiedMetrics] = await Promise.all([
-      supabase.from('gmail_accounts').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }),
+      loadAllSafeGmailAccounts(workspace.id),
       supabase.from('templates').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }),
       supabase.from('sent_messages').select('id,business_id,to_email,from_email,subject,template_id,gmail_account_id,batch_id,provider_message_id,gmail_thread_id,delivery_status,sent_at').eq('workspace_id', workspace.id).eq('status', 'sent').order('sent_at', { ascending: false }).limit(1000),
-      supabase.from('reply_history').select('id,business_id,from_email,to_email,subject,snippet,body,classification,is_real_reply,is_auto_reply,is_delivery_failure,is_blocked,is_limit_notice,is_temporary,reply_bucket,received_at,template_id,gmail_account_id,batch_id,gmail_message_id,gmail_thread_id').eq('workspace_id', workspace.id).order('received_at', { ascending: false }).limit(150),
+      supabase.from('reply_history').select('id,business_id,from_email,to_email,subject,snippet,body,classification,is_real_reply,is_auto_reply,is_delivery_failure,is_blocked,is_limit_notice,is_temporary,reply_bucket,received_at,template_id,gmail_account_id,batch_id,gmail_message_id,gmail_thread_id,hidden_at,manual_classification').eq('workspace_id', workspace.id).is('hidden_at', null).order('received_at', { ascending: false }).limit(150),
       supabase.from('no_inbox_records').select('*').eq('workspace_id', workspace.id).order('created_at', { ascending: false }).limit(500),
       supabase.from('sent_messages').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id).eq('status', 'sent'),
       supabase.from('reply_history').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id).eq('is_real_reply', true),
@@ -320,9 +328,9 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
       supabase.from('no_inbox_records').select('*', { count: 'exact', head: true }).eq('workspace_id', workspace.id),
       fetch(`/api/replies/metrics?workspaceId=${encodeURIComponent(workspace.id)}`, { cache: 'no-store' }).then((r) => r.json()).catch(() => null)
     ]);
-    const firstError = acct.error || tmpl.error || sent.error || replies.error || noInbox.error || sentCount.error || realReplyCount.error || autoReplyCount.error || noInboxCount.error;
+    const firstError = tmpl.error || sent.error || replies.error || noInbox.error || sentCount.error || realReplyCount.error || autoReplyCount.error || noInboxCount.error;
     if (firstError) throw firstError;
-    const nextAccounts = (acct.data || []) as GmailAccount[];
+    const nextAccounts = acct as GmailAccount[];
     setAccounts(nextAccounts);
     setTemplates((tmpl.data || []) as MessageTemplate[]);
     setSentRows((sent.data || []) as SentRow[]);
@@ -506,6 +514,20 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   const limitSignals = replyRows.filter((row) => row.is_limit_notice === true || row.classification === 'gmail_limit_notice');
   const ignoredReplies = replyRows.filter((row) => row.is_real_reply !== true && row.is_auto_reply !== true && row.is_delivery_failure !== true && row.is_limit_notice !== true && !['real_reply','auto_reply','no_inbox','message_blocked','bounce_notice','gmail_limit_notice'].includes(String(row.classification || row.reply_bucket || '')));
   const sentCount = trackingCounts.sentTracked || sentRows.length;
+  const tabRows: Record<typeof activeTab, ReplyRow[]> = { real: realReplies, auto: autoReplies, delivery: [...deliverySignals, ...limitSignals], review: ignoredReplies };
+  const searchNeedle = replySearch.trim().toLowerCase();
+  const searchedTabRows = tabRows[activeTab].filter((row) => !searchNeedle || `${row.from_email || ''} ${row.to_email || ''} ${row.subject || ''} ${row.snippet || ''} ${row.classification || ''}`.toLowerCase().includes(searchNeedle));
+  const replyPageCount = Math.max(1, Math.ceil(searchedTabRows.length / 10));
+  const safeReplyPage = Math.min(replyPage, replyPageCount);
+  const pagedTabRows = searchedTabRows.slice((safeReplyPage - 1) * 10, safeReplyPage * 10);
+
+  async function hideDeliveryIssue(row: ReplyRow) {
+    if (!window.confirm('Remove this delivery issue from Scout? This does not delete the Gmail email or restore a genuinely invalid address.')) return;
+    const { error: updateError } = await supabase.from('reply_history').update({ hidden_at: new Date().toISOString() }).eq('workspace_id', workspace.id).eq('id', row.id);
+    if (updateError) { setError(formatError(updateError)); return; }
+    setReplyRows((current) => current.filter((item) => item.id !== row.id));
+    setOpenedReply(null);
+  }
 
   return (
     <div className="stack">
@@ -518,42 +540,17 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
       <div className="card" style={{ padding: 18 }}>
         <div className="actions" style={{ justifyContent: 'space-between' }}>
           <div>
-            <h3 style={{ margin: 0 }}>Reply Sync</h3>
-            <p className="muted" style={{ marginBottom: 0 }}>Click sync to check Gmail. Scout saves every non-bounce inbound message as a reply, so useful messages are not hidden by strict classification.</p>
+            <h3 style={{ margin: 0 }}>{replySyncEnabled ? 'Reply Sync' : 'Replies during Google verification'}</h3>
+            <p className="muted" style={{ marginBottom: 0 }}>{replySyncEnabled ? 'Check connected Gmail accounts for outreach-related replies and delivery notices.' : 'Automatic Gmail reading is temporarily paused so Scout can use the faster send-only Google verification route. New replies remain in Gmail; existing Scout reply history stays available below.'}</p>
           </div>
-          <button className="btn secondary" onClick={() => loadAll().catch((err) => setError(formatError(err)))} disabled={busy}>Refresh</button>
+          <button className="btn secondary" onClick={() => loadAll().catch((err) => setError(formatError(err)))} disabled={busy}>Refresh history</button>
         </div>
-        <div className="grid grid-2" style={{ marginTop: 12 }}>
-          <div>
-            <label className="label">Gmail accounts to check</label>
-            <div className="stack">
-              {accounts.map((account) => (
-                <label className="checkbox-row" key={account.id}>
-                  <input type="checkbox" checked={!!selectedAccounts[account.id]} onChange={(event) => setSelectedAccounts((current) => ({ ...current, [account.id]: event.target.checked }))} />
-                  {account.email} · {account.status}
-                </label>
-              ))}
-              {!accounts.length ? <div className="muted">No Gmail accounts saved yet. Add senders from Message first.</div> : null}
-            </div>
-          </div>
-          <div>
-            <label className="label">Max Gmail messages to scan per account now</label>
-            <input className="input" type="number" min={1} max={500} value={syncLimit} onChange={(event) => setSyncLimit(Number(event.target.value || 100))} />
-            <div className="actions" style={{ marginTop: 12 }}>
-              <button className="btn" disabled={busy} onClick={syncReplies}>{busy ? 'Syncing...' : 'Sync replies + bounces'}</button>
-              {replyRows.length ? <button className="btn secondary" type="button" onClick={() => downloadCsv('scout-replies.csv', realReplies as unknown as Array<Record<string, unknown>>)}>Export replies</button> : null}
-              {noInboxRows.length ? <button className="btn secondary" type="button" onClick={() => downloadCsv('scout-no-inbox.csv', noInboxRows as unknown as Array<Record<string, unknown>>)}>Export no inbox</button> : null}
-            </div>
-          </div>
-        </div>
-        <div className={error ? 'error' : 'notice'} style={{ whiteSpace: 'pre-wrap' }}>{error || status}</div>
-      </div>
-
-      <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Last Sync Scanned</div><div className="num">{lastStats.scanned.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Last Sync Real Replies</div><div className="num">{lastStats.realReplies.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Last Sync Auto Messages</div><div className="num">{lastStats.autoReplies.toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Failures / Limits</div><div className="num">{(lastStats.noInbox + lastStats.blocked + lastStats.bounced + lastStats.limitNotices).toLocaleString()}</div></div>
+        {replySyncEnabled ? <div className="grid grid-2" style={{ marginTop: 12 }}>
+          <div><label className="label">Gmail accounts to check</label><div className="stack">{accounts.map((account) => <label className="checkbox-row" key={account.id}><input type="checkbox" checked={!!selectedAccounts[account.id]} onChange={(event) => setSelectedAccounts((current) => ({ ...current, [account.id]: event.target.checked }))} />{account.email} · {account.status}</label>)}</div></div>
+          <div><label className="label">Maximum messages to scan per account</label><input className="input" type="number" min={1} max={500} value={syncLimit} onChange={(event) => setSyncLimit(Number(event.target.value || 100))} /><div className="actions" style={{ marginTop: 12 }}><button className="btn" disabled={busy} onClick={syncReplies}>{busy ? 'Syncing…' : 'Sync replies + delivery notices'}</button></div></div>
+        </div> : <div className="notice" style={{ marginTop: 12 }}>Users reply directly in Gmail for now. Scout does not request inbox-reading permission in this release.</div>}
+        <div className="actions" style={{ marginTop: 12 }}>{replyRows.length ? <button className="btn secondary" type="button" onClick={() => downloadCsv('scout-replies.csv', realReplies as unknown as Array<Record<string, unknown>>)}>Export real replies</button> : null}{noInboxRows.length ? <button className="btn secondary" type="button" onClick={() => downloadCsv('scout-no-inbox.csv', noInboxRows as unknown as Array<Record<string, unknown>>)}>Export no inbox</button> : null}</div>
+        <div className={error ? 'error' : 'notice'} style={{ whiteSpace: 'pre-wrap', marginTop: 10 }}>{error || status}</div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
@@ -573,39 +570,19 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <h3>Real Replies</h3>
-        <p className="muted">Showing {realReplies.length.toLocaleString()} recent human-looking replies on this page. Official total: {trackingCounts.realReplies.toLocaleString()}.</p>
-        <p className="muted">Click Read to see the exact message the prospect sent. Click Open to reply from the business page.</p>
-        <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Template</th><th>Received</th><th>Message</th></tr></thead><tbody>
-          {realReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{templates.find((t) => t.id === r.template_id)?.name || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td><td><button className="btn secondary mini" type="button" onClick={() => setOpenedReply(r)}>Read</button></td></tr>)}
-          {!realReplies.length ? <tr><td colSpan={7} className="muted">No replies yet.</td></tr> : null}
+        <div className="topbar">
+          <div><h3>Reply history</h3><p className="muted">Newest first, ten items per page. Open any item to read the full saved body.</p></div>
+          <input className="input" style={{ maxWidth: 320 }} value={replySearch} onChange={(event) => { setReplySearch(event.target.value); setReplyPage(1); }} placeholder="Search sender, subject or classification" />
+        </div>
+        <div className="actions" style={{ marginTop: 12 }}>
+          {([['real', `Real Replies (${realReplies.length})`], ['auto', `Auto Replies (${autoReplies.length})`], ['delivery', `Delivery Issues (${deliverySignals.length + limitSignals.length})`], ['review', `Review Needed (${ignoredReplies.length})`]] as const).map(([key, label]) => <button key={key} className={activeTab === key ? 'btn' : 'btn secondary'} type="button" onClick={() => { setActiveTab(key); setReplyPage(1); }}>{label}</button>)}
+        </div>
+        <p className="muted" style={{ marginTop: 10 }}>Showing {pagedTabRows.length ? (safeReplyPage - 1) * 10 + 1 : 0}–{Math.min(safeReplyPage * 10, searchedTabRows.length)} of {searchedTabRows.length.toLocaleString()}.</p>
+        <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Classification</th><th>Received</th><th>Message</th></tr></thead><tbody>
+          {pagedTabRows.map((row) => <tr key={row.id}><td>{row.business_id ? <Link href={`/businesses/${row.business_id}`}>Open</Link> : '-'}</td><td>{row.from_email || '-'}</td><td>{row.subject || '-'}</td><td>{row.manual_classification || row.classification || row.reply_bucket || activeTab}</td><td>{row.received_at ? new Date(row.received_at).toLocaleString() : '-'}</td><td><button className="btn secondary mini" type="button" onClick={() => setOpenedReply(row)}>Read</button>{activeTab === 'delivery' ? <> <button className="btn secondary mini" type="button" onClick={() => hideDeliveryIssue(row)}>Delete from Scout</button></> : null}</td></tr>)}
+          {!pagedTabRows.length ? <tr><td colSpan={6} className="muted">No messages in this section.</td></tr> : null}
         </tbody></table></div>
-      </div>
-
-      <div className="card" style={{ padding: 18 }}>
-        <h3>Auto Messages</h3>
-        <p className="muted">These messages look automated, like ticket receipts, feedback requests, or out-of-office replies. They do not count as Real Replies.</p>
-        <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Snippet</th><th>Received</th></tr></thead><tbody>
-          {autoReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.snippet || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
-          {!autoReplies.length ? <tr><td colSpan={5} className="muted">No auto-like messages yet.</td></tr> : null}
-        </tbody></table></div>
-      </div>
-
-      <div className="card" style={{ padding: 18 }}>
-        <h3>Delivery / Limit Signals</h3>
-        <p className="muted">No-inbox, bounces, message-blocked, and limit notices are not counted as replies.</p>
-        <div className="table-wrap"><table><thead><tr><th>Business</th><th>From</th><th>Subject</th><th>Classification</th><th>Received</th></tr></thead><tbody>
-          {[...deliverySignals, ...limitSignals].slice(0, 100).map((r) => <tr key={r.id}><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>Open</Link> : '-'}</td><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.classification || r.reply_bucket || '-'}</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
-          {![...deliverySignals, ...limitSignals].length ? <tr><td colSpan={5} className="muted">No delivery or limit signals yet.</td></tr> : null}
-        </tbody></table></div>
-      </div>
-
-      <div className="card" style={{ padding: 18 }}>
-        <h3>Other Ignored / Unmatched Signals</h3>
-        <div className="table-wrap"><table><thead><tr><th>From</th><th>Subject</th><th>Classification</th><th>Counts as Response?</th><th>Received</th></tr></thead><tbody>
-          {ignoredReplies.slice(0, 100).map((r) => <tr key={r.id}><td>{r.from_email || '-'}</td><td>{r.subject || '-'}</td><td>{r.classification || r.reply_bucket || '-'}</td><td>No</td><td>{r.received_at ? new Date(r.received_at).toLocaleString() : '-'}</td></tr>)}
-          {!ignoredReplies.length ? <tr><td colSpan={5} className="muted">No ignored/bounce records yet.</td></tr> : null}
-        </tbody></table></div>
+        {replyPageCount > 1 ? <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" type="button" disabled={safeReplyPage <= 1} onClick={() => setReplyPage((value) => Math.max(1, value - 1))}>Previous</button>{Array.from({ length: replyPageCount }, (_, index) => index + 1).filter((value) => value === 1 || value === replyPageCount || Math.abs(value - safeReplyPage) <= 2).map((value) => <button key={value} className={value === safeReplyPage ? 'btn' : 'btn secondary'} type="button" onClick={() => setReplyPage(value)}>{value}</button>)}<button className="btn secondary" type="button" disabled={safeReplyPage >= replyPageCount} onClick={() => setReplyPage((value) => Math.min(replyPageCount, value + 1))}>Next</button></div> : null}
       </div>
 
       {openedReply ? (

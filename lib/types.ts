@@ -25,6 +25,7 @@ export type Workspace = {
   email_signature_text?: string | null;
   email_signature_html?: string | null;
   email_logo_url?: string | null;
+  timezone?: string | null;
 };
 
 export type Business = {
@@ -175,12 +176,20 @@ export type GmailAccount = {
   email: string;
   display_name: string | null;
   status: string;
+  has_credentials?: boolean | null;
   access_token?: string | null;
   refresh_token?: string | null;
   client_id?: string | null;
   expires_at?: string | null;
   daily_limit?: number | null;
   default_run_limit?: number | null;
+  sending_mode?: 'warmup' | 'normal' | 'fast' | string | null;
+  health_status?: 'new' | 'warming' | 'healthy' | 'recovering' | 'at_risk' | 'sender_limited' | 'paused' | 'needs_review' | string | null;
+  warmup_started_at?: string | null;
+  warmup_daily_cap?: number | null;
+  provider_limit_count?: number | null;
+  last_provider_limit_at?: string | null;
+  last_successful_send_at?: string | null;
   account_type?: string | null;
   seed_inbox_enabled?: boolean | null;
   seed_test_address?: string | null;
@@ -188,6 +197,8 @@ export type GmailAccount = {
   last_seed_result?: string | null;
   last_seed_checked_at?: string | null;
   sent_today?: number | null;
+  sent_rolling_24h?: number | null;
+  lifetime_sent?: number | null;
   paused_until?: string | null;
   last_error?: string | null;
   is_paused?: boolean | null;

@@ -36,4 +36,3 @@ Started jobs are no longer only browser loops:
 - If the page closes, the schedule still exists.
 - If a worker times out, a later worker run can resume the schedule.
 - Auto Scout jobs already live in `email_research_jobs`; v8.33 makes the main button use the server worker path.
-
