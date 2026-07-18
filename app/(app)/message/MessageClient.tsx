@@ -1503,7 +1503,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     );
     if (!response.ok || json?.success === false)
       throw new Error(
-        json?.error || `Start job failed with HTTP ${response.status}`,
+        json?.error || json?.startMessage || `Start job failed with HTTP ${response.status}`,
       );
     const scheduleId = json?.schedule?.id || "";
     setProgress(0);
@@ -1516,8 +1516,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       stopped: false,
     });
     setSelectedContacts({});
+    const startState = String(json?.startState || 'queued');
+    const startMessage = String(json?.startMessage || '').trim();
     setStatus(
-      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). Scout will continue in the background. Job: ${scheduleId}`,
+      startState === 'sending'
+        ? `Sending started · ${startMessage} Job: ${scheduleId}`
+        : startState === 'warning'
+          ? `Message sent, but action is required · ${startMessage} Job: ${scheduleId}`
+          : `Job queued · ${startMessage || `Scout will continue ${targetCount.toLocaleString()} contact(s) in the background.`} Job: ${scheduleId}`,
     );
     await Promise.allSettled([loadSchedules(), loadRecentSent(), loadAccounts()]);
   }

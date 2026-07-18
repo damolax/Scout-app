@@ -1375,3 +1375,164 @@ select
   '3 occurrences in 14 days'::text as hard_restriction_rule,
   to_regprocedure('public.reserve_sender_send(uuid,uuid,jsonb)') is not null as sender_safety_ready;
 -- <<< END SCOUT V10.38 FINAL SENDER RECOVERY + THREE-STRIKE PATCH
+
+-- =============================================================================
+-- SCOUT v10.38.2 CENTRAL MESSAGE WORKER REPAIR
+-- Installs the durable Supabase Cron worker used by the GitHub verification app.
+-- The app configures the URL and secret automatically from its Vercel environment.
+-- =============================================================================
+
+create extension if not exists pg_net with schema extensions;
+create extension if not exists pg_cron;
+
+create or replace function public.configure_scout_message_worker(
+  target_app_url text,
+  target_worker_secret text,
+  target_seconds integer default 15
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions, vault, cron, net
+as $$
+declare
+  clean_url text;
+  safe_seconds integer;
+  url_secret_id uuid;
+  worker_secret_id uuid;
+  scheduled_job_id bigint;
+  worker_command text;
+begin
+  clean_url := regexp_replace(trim(coalesce(target_app_url, '')), '/+$', '');
+  safe_seconds := greatest(10, least(60, coalesce(target_seconds, 15)));
+
+  if clean_url !~ '^https://[^[:space:]]+$' then
+    raise exception 'Scout worker app URL must be a valid HTTPS URL.';
+  end if;
+  if length(trim(coalesce(target_worker_secret, ''))) < 24 then
+    raise exception 'Scout worker secret must contain at least 24 characters.';
+  end if;
+
+  select id into url_secret_id
+  from vault.secrets
+  where name = 'scout_message_worker_app_url'
+  order by created_at desc
+  limit 1;
+
+  if url_secret_id is null then
+    perform vault.create_secret(
+      clean_url,
+      'scout_message_worker_app_url',
+      'Scout production app URL used by the central message worker.'
+    );
+  else
+    perform vault.update_secret(
+      url_secret_id,
+      clean_url,
+      'scout_message_worker_app_url',
+      'Scout production app URL used by the central message worker.'
+    );
+  end if;
+
+  select id into worker_secret_id
+  from vault.secrets
+  where name = 'scout_message_worker_secret'
+  order by created_at desc
+  limit 1;
+
+  if worker_secret_id is null then
+    perform vault.create_secret(
+      trim(target_worker_secret),
+      'scout_message_worker_secret',
+      'Private authorization secret for the Scout central message worker.'
+    );
+  else
+    perform vault.update_secret(
+      worker_secret_id,
+      trim(target_worker_secret),
+      'scout_message_worker_secret',
+      'Private authorization secret for the Scout central message worker.'
+    );
+  end if;
+
+  worker_command := $worker$
+    select net.http_post(
+      url := (select decrypted_secret from vault.decrypted_secrets where name = 'scout_message_worker_app_url' order by created_at desc limit 1)
+        || '/api/message/run-schedules',
+      body := jsonb_build_object(
+        'limit', 1,
+        'token', (select decrypted_secret from vault.decrypted_secrets where name = 'scout_message_worker_secret' order by created_at desc limit 1)
+      ),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-schedule-worker-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'scout_message_worker_secret' order by created_at desc limit 1)
+      ),
+      timeout_milliseconds := 10000
+    ) as request_id;
+  $worker$;
+
+  for scheduled_job_id in
+    select jobid from cron.job where jobname = 'scout-message-worker-every-15-seconds'
+  loop
+    perform cron.unschedule(scheduled_job_id);
+  end loop;
+
+  select cron.schedule(
+    'scout-message-worker-every-15-seconds',
+    safe_seconds::text || ' seconds',
+    worker_command
+  ) into scheduled_job_id;
+
+  return jsonb_build_object(
+    'ready', true,
+    'job_id', scheduled_job_id,
+    'job_name', 'scout-message-worker-every-15-seconds',
+    'schedule', safe_seconds::text || ' seconds',
+    'app_url', clean_url
+  );
+end;
+$$;
+
+revoke all on function public.configure_scout_message_worker(text, text, integer) from public, anon, authenticated;
+grant execute on function public.configure_scout_message_worker(text, text, integer) to service_role;
+
+create or replace function public.scout_message_worker_status()
+returns jsonb
+language sql
+security definer
+set search_path = public, vault, cron
+as $$
+  select jsonb_build_object(
+    'ready', exists(
+      select 1 from cron.job
+      where jobname = 'scout-message-worker-every-15-seconds'
+        and active = true
+    ),
+    'job_name', 'scout-message-worker-every-15-seconds',
+    'schedule', coalesce((
+      select schedule from cron.job
+      where jobname = 'scout-message-worker-every-15-seconds'
+      order by jobid desc limit 1
+    ), ''),
+    'active', coalesce((
+      select active from cron.job
+      where jobname = 'scout-message-worker-every-15-seconds'
+      order by jobid desc limit 1
+    ), false),
+    'app_url_configured', exists(
+      select 1 from vault.secrets where name = 'scout_message_worker_app_url'
+    ),
+    'secret_configured', exists(
+      select 1 from vault.secrets where name = 'scout_message_worker_secret'
+    )
+  );
+$$;
+
+revoke all on function public.scout_message_worker_status() from public, anon, authenticated;
+grant execute on function public.scout_message_worker_status() to service_role;
+
+notify pgrst, 'reload schema';
+
+select
+  to_regprocedure('public.configure_scout_message_worker(text,text,integer)') is not null as worker_config_function_ready,
+  to_regprocedure('public.scout_message_worker_status()') is not null as worker_status_function_ready;
