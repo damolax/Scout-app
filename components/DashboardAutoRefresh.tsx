@@ -26,10 +26,10 @@ export default function DashboardAutoRefresh({ generatedAt }: { generatedAt: str
   return (
     <div className="actions" style={{ justifyContent: 'flex-end', gap: 8 }}>
       <span className="muted" style={{ fontSize: 12 }}>
-        Auto-refreshes every 30 seconds · Last refresh {new Date(lastRefresh).toLocaleTimeString()}
+        Updated {new Date(lastRefresh).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
       </span>
-      <button className="btn secondary" type="button" onClick={refresh} disabled={isPending}>
-        {isPending ? 'Refreshing…' : 'Refresh now'}
+      <button className="btn secondary mini" type="button" onClick={refresh} disabled={isPending}>
+        {isPending ? 'Refreshing…' : 'Refresh'}
       </button>
     </div>
   );

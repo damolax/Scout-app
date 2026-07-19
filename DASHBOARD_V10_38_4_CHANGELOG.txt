@@ -1,0 +1,18 @@
+SCOUT GOOGLE-VERIFICATION v10.38.4 — SIMPLE OPERATIONAL DASHBOARD
+
+Dashboard UI corrections:
+- Replaced the crowded analytics-heavy home page with a focused operational dashboard.
+- Compact workspace header with timezone, updated time and Refresh control.
+- One critical worker alert and one combined attention summary.
+- Four primary cards only: Sending, Gmail accounts, Sent today and Replies.
+- Three primary actions only: Send emails, Find missing emails and Review replies.
+- Follow-up action appears only when follow-ups are due.
+- Current activity shows at most five active, queued or recently failed jobs.
+- Raw database JSON is converted into readable messages.
+- Active jobs can be stopped and failed jobs retried directly from Home.
+- Lead totals are reduced to one compact summary.
+- Setup is reduced to one progress line and links to How to Use.
+- Removed analytics filters, full analytics tables, repeated KPIs and full setup checklist from Home.
+
+Database correction:
+- Existing sender_send_reservations tables now receive effective_daily_limit, used_before and reason before the send reservation function uses them.

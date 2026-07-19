@@ -113,7 +113,13 @@ create table if not exists public.sender_send_reservations (
 );
 
 -- Existing installations may already have this table from an older build.
--- CREATE TABLE IF NOT EXISTS does not add missing columns, so add them before indexes/functions use them.
+-- CREATE TABLE IF NOT EXISTS does not add missing columns, so add every field used by the reservation function before indexes/functions use them.
+alter table if exists public.sender_send_reservations add column if not exists effective_daily_limit integer;
+update public.sender_send_reservations set effective_daily_limit = 0 where effective_daily_limit is null;
+alter table if exists public.sender_send_reservations alter column effective_daily_limit set default 0;
+alter table if exists public.sender_send_reservations alter column effective_daily_limit set not null;
+alter table if exists public.sender_send_reservations add column if not exists used_before integer not null default 0;
+alter table if exists public.sender_send_reservations add column if not exists reason text;
 alter table if exists public.sender_send_reservations add column if not exists expires_at timestamptz not null default (now() + interval '10 minutes');
 alter table if exists public.sender_send_reservations add column if not exists dispatch_at timestamptz not null default now();
 alter table if exists public.sender_send_reservations add column if not exists reserved_at timestamptz not null default now();
@@ -1393,7 +1399,7 @@ select
 -- <<< END SCOUT V10.38 FINAL SENDER RECOVERY + THREE-STRIKE PATCH
 
 -- =============================================================================
--- SCOUT v10.38.3 CENTRAL MESSAGE WORKER + DASHBOARD REPAIR
+-- SCOUT v10.38.4 CENTRAL MESSAGE WORKER + DASHBOARD REPAIR
 -- Installs the durable Supabase Cron worker used by the GitHub verification app.
 -- The app configures the URL and secret automatically from its Vercel environment.
 -- =============================================================================
