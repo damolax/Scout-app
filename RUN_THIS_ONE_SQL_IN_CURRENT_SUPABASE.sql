@@ -12,6 +12,10 @@
 
 create extension if not exists pgcrypto;
 
+-- Dashboard timezone is explicit so Today/Yesterday never depend on the Vercel server timezone.
+alter table if exists public.workspaces add column if not exists timezone text not null default 'UTC';
+update public.workspaces set timezone = 'UTC' where timezone is null or btrim(timezone) = '';
+
 alter table if exists public.gmail_accounts add column if not exists deployment_cap integer not null default 100;
 alter table if exists public.gmail_accounts add column if not exists deployment_run_cap integer not null default 50;
 alter table if exists public.gmail_accounts add column if not exists health_stage text not null default 'assessment';
@@ -72,6 +76,8 @@ create table if not exists public.email_verifications (
   primary key (workspace_id, email)
 );
 
+alter table if exists public.email_verifications add column if not exists expires_at timestamptz not null default (now() + interval '7 days');
+
 create index if not exists email_verifications_status_idx on public.email_verifications(workspace_id, status, expires_at);
 
 create table if not exists public.sender_health_events (
@@ -105,6 +111,16 @@ create table if not exists public.sender_send_reservations (
   released_at timestamptz,
   raw jsonb not null default '{}'::jsonb
 );
+
+-- Existing installations may already have this table from an older build.
+-- CREATE TABLE IF NOT EXISTS does not add missing columns, so add them before indexes/functions use them.
+alter table if exists public.sender_send_reservations add column if not exists expires_at timestamptz not null default (now() + interval '10 minutes');
+alter table if exists public.sender_send_reservations add column if not exists dispatch_at timestamptz not null default now();
+alter table if exists public.sender_send_reservations add column if not exists reserved_at timestamptz not null default now();
+alter table if exists public.sender_send_reservations add column if not exists finalized_at timestamptz;
+alter table if exists public.sender_send_reservations add column if not exists released_at timestamptz;
+alter table if exists public.sender_send_reservations add column if not exists raw jsonb not null default '{}'::jsonb;
+update public.sender_send_reservations set expires_at = now() where expires_at is null;
 
 create index if not exists sender_reservations_account_time_idx
 on public.sender_send_reservations(gmail_account_id, reserved_at desc);
@@ -1377,7 +1393,7 @@ select
 -- <<< END SCOUT V10.38 FINAL SENDER RECOVERY + THREE-STRIKE PATCH
 
 -- =============================================================================
--- SCOUT v10.38.2 CENTRAL MESSAGE WORKER REPAIR
+-- SCOUT v10.38.3 CENTRAL MESSAGE WORKER + DASHBOARD REPAIR
 -- Installs the durable Supabase Cron worker used by the GitHub verification app.
 -- The app configures the URL and secret automatically from its Vercel environment.
 -- =============================================================================
@@ -1502,29 +1518,39 @@ language sql
 security definer
 set search_path = public, vault, cron
 as $$
+  with worker_job as (
+    select jobid, schedule, active
+    from cron.job
+    where jobname = 'scout-message-worker-every-15-seconds'
+    order by jobid desc
+    limit 1
+  ), latest_run as (
+    select d.status, d.return_message, d.start_time, d.end_time
+    from cron.job_run_details d
+    join worker_job j on j.jobid = d.jobid
+    order by d.start_time desc
+    limit 1
+  ), latest_success as (
+    select d.end_time
+    from cron.job_run_details d
+    join worker_job j on j.jobid = d.jobid
+    where d.status = 'succeeded'
+    order by d.start_time desc
+    limit 1
+  )
   select jsonb_build_object(
-    'ready', exists(
-      select 1 from cron.job
-      where jobname = 'scout-message-worker-every-15-seconds'
-        and active = true
-    ),
+    'ready', coalesce((select active from worker_job), false)
+      and exists(select 1 from vault.secrets where name = 'scout_message_worker_app_url')
+      and exists(select 1 from vault.secrets where name = 'scout_message_worker_secret'),
     'job_name', 'scout-message-worker-every-15-seconds',
-    'schedule', coalesce((
-      select schedule from cron.job
-      where jobname = 'scout-message-worker-every-15-seconds'
-      order by jobid desc limit 1
-    ), ''),
-    'active', coalesce((
-      select active from cron.job
-      where jobname = 'scout-message-worker-every-15-seconds'
-      order by jobid desc limit 1
-    ), false),
-    'app_url_configured', exists(
-      select 1 from vault.secrets where name = 'scout_message_worker_app_url'
-    ),
-    'secret_configured', exists(
-      select 1 from vault.secrets where name = 'scout_message_worker_secret'
-    )
+    'schedule', coalesce((select schedule from worker_job), ''),
+    'active', coalesce((select active from worker_job), false),
+    'app_url_configured', exists(select 1 from vault.secrets where name = 'scout_message_worker_app_url'),
+    'secret_configured', exists(select 1 from vault.secrets where name = 'scout_message_worker_secret'),
+    'last_run_status', coalesce((select status from latest_run), ''),
+    'last_run_at', (select coalesce(end_time, start_time) from latest_run),
+    'last_success_at', (select end_time from latest_success),
+    'last_message', coalesce((select return_message from latest_run), '')
   );
 $$;
 

@@ -24,6 +24,7 @@ export type Workspace = {
   email_signature_text?: string | null;
   email_signature_html?: string | null;
   email_logo_url?: string | null;
+  timezone?: string | null;
 };
 
 export type Business = {

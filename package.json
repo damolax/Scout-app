@@ -1,6 +1,6 @@
 {
   "name": "scout-app-v10-38-google-verification",
-  "version": "10.38.2",
+  "version": "10.38.3",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -30,5 +30,5 @@
   "engines": {
     "node": "20.x"
   },
-  "description": "Scout App v10.38.2 Google verification build: fixed durable message worker, truthful job status, send-only OAuth, public policy pages, adaptive sender health, and automatic pacing."
+  "description": "Scout App v10.38.3 Google verification build: dashboard operational audit, fixed durable message worker, truthful job status, send-only OAuth, public policy pages, adaptive sender health, and automatic pacing."
 }

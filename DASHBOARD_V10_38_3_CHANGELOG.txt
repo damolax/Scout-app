@@ -1,0 +1,24 @@
+SCOUT GOOGLE-VERIFICATION v10.38.3 — DASHBOARD APPROVAL BUILD
+
+Dashboard corrections:
+- Database failures display exact errors instead of false zeros.
+- Workspace timezone controls Today and Yesterday; UTC is the safe default.
+- Dashboard refreshes every 30 seconds and has a manual Refresh button.
+- Verified send counts require a stored Gmail provider message ID.
+- Fixed calendar-day and rolling-24-hour send totals are both shown.
+- Central worker status, last successful worker run and latest verified send are visible.
+- Gmail states are separated: connected, available, cooling down, paused, restricted and reconnect required.
+- Active, queued, completed, stopped and failed jobs are separated.
+- Recent jobs show progress, sent/failed totals, heartbeat and exact error.
+- Follow-ups show due, running, scheduled later, queued, stopped and blocked states.
+- Contactable statuses are shared with Message: ready, found and connected.
+- Duplicates, invalid/blocked, unsubscribed and other suppressed contacts are separated.
+- Auto Scout candidate wording no longer claims that every candidate is usable.
+- Setup checklist uses all-time completion evidence and no longer becomes incomplete when a period changes.
+- Performance includes referenced archived/deleted templates and warns if detail retrieval reaches its safety ceiling.
+
+Database corrections in RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql:
+- Adds sender_send_reservations.expires_at before indexes/functions use it.
+- Adds email_verifications.expires_at for older installations.
+- Adds workspaces.timezone with UTC default.
+- Extends worker status with latest run, latest success and return message.
