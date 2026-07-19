@@ -29,7 +29,7 @@ export async function GET() {
   const checks = {
     success: true,
     app: 'ok',
-    version: '10.38.4',
+    version: '10.38.5',
     supabaseUrl: has('NEXT_PUBLIC_SUPABASE_URL'),
     supabaseAnon: has('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
     supabaseServerSecret: has('SUPABASE_SECRET_KEY') || has('SUPABASE_SERVICE_ROLE_KEY'),

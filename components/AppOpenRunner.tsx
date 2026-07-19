@@ -113,14 +113,18 @@ export function AppOpenRunner({ workspaceId }: { workspaceId?: string | null }) 
         const sent = results.reduce((sum, row) => sum + Number(row.sent || 0), 0);
         const failed = results.reduce((sum, row) => sum + Number(row.failed || 0), 0);
         const skipped = results.reduce((sum, row) => sum + Number(row.skipped || 0), 0);
-        emitLiveActivity({
-          kind: "schedule",
-          status: "running",
-          title: "Due schedule running",
-          message: `Open app runner processed ${ran} due schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}.`,
-          countText: `${sent} sent`,
-          createdAt: new Date().toISOString(),
-        });
+        // The current-job card already shows that a schedule is waiting. Do not flood Live Work
+        // with a new event every five seconds when no message was sent and nothing failed.
+        if (sent > 0 || failed > 0 || skipped > 0) {
+          emitLiveActivity({
+            kind: "schedule",
+            status: failed > 0 ? "failed" : sent > 0 ? "sent" : "running",
+            title: sent > 0 ? "Schedule progress" : failed > 0 ? "Schedule issue" : "Schedule update",
+            message: `Processed ${ran} due schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}.`,
+            countText: sent > 0 ? `${sent} sent` : failed > 0 ? `${failed} failed` : `${skipped} skipped`,
+            createdAt: new Date().toISOString(),
+          });
+        }
       }
     } finally {
       busyRef.current = false;

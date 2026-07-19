@@ -1399,7 +1399,7 @@ select
 -- <<< END SCOUT V10.38 FINAL SENDER RECOVERY + THREE-STRIKE PATCH
 
 -- =============================================================================
--- SCOUT v10.38.4 CENTRAL MESSAGE WORKER + DASHBOARD REPAIR
+-- SCOUT v10.38.5 CENTRAL MESSAGE WORKER + DASHBOARD REPAIR
 -- Installs the durable Supabase Cron worker used by the GitHub verification app.
 -- The app configures the URL and secret automatically from its Vercel environment.
 -- =============================================================================
