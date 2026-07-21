@@ -9,12 +9,10 @@ export function AppShellClient({
   children,
   workspaceName,
   userEmail,
-  isAdmin = false,
 }: {
   children: React.ReactNode;
   workspaceName?: string | null;
   userEmail?: string | null;
-  isAdmin?: boolean;
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -45,7 +43,7 @@ export function AppShellClient({
             <p>{workspaceName || 'No workspace'}</p>
           </div>
         </div>
-        <AppNav isAdmin={isAdmin} />
+        <AppNav />
         <div style={{ marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
           <p className="muted" style={{ fontSize: 12, wordBreak: 'break-word' }}>{userEmail}</p>
           <SignOutButton />

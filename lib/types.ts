@@ -17,7 +17,6 @@ export type Workspace = {
   name: string;
   api_key?: string | null;
   app_url?: string | null;
-  render_backend_url?: string | null;
   default_audience_category_id?: string | null;
   default_audience_category_name?: string | null;
   dork_settings?: Record<string, unknown> | null;
@@ -53,6 +52,12 @@ export type Business = {
   social_links?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+  email_verification_status?: string | null;
+  email_verification_level?: string | null;
+  email_verified_at?: string | null;
+  email_verification_reason?: string | null;
+  email_role_label?: string | null;
+  email_mx_hosts?: string[] | null;
 };
 
 export type CsvBusinessInput = {
@@ -176,20 +181,12 @@ export type GmailAccount = {
   email: string;
   display_name: string | null;
   status: string;
-  has_credentials?: boolean | null;
   access_token?: string | null;
   refresh_token?: string | null;
   client_id?: string | null;
   expires_at?: string | null;
   daily_limit?: number | null;
   default_run_limit?: number | null;
-  sending_mode?: 'warmup' | 'normal' | 'fast' | string | null;
-  health_status?: 'new' | 'warming' | 'healthy' | 'recovering' | 'at_risk' | 'sender_limited' | 'paused' | 'needs_review' | string | null;
-  warmup_started_at?: string | null;
-  warmup_daily_cap?: number | null;
-  provider_limit_count?: number | null;
-  last_provider_limit_at?: string | null;
-  last_successful_send_at?: string | null;
   account_type?: string | null;
   seed_inbox_enabled?: boolean | null;
   seed_test_address?: string | null;
@@ -197,12 +194,27 @@ export type GmailAccount = {
   last_seed_result?: string | null;
   last_seed_checked_at?: string | null;
   sent_today?: number | null;
-  sent_rolling_24h?: number | null;
-  lifetime_sent?: number | null;
   paused_until?: string | null;
   last_error?: string | null;
   is_paused?: boolean | null;
   paused_reason?: string | null;
+  pause_kind?: string | null;
+  safety_override_until?: string | null;
+  safety_override_warning?: string | null;
+  safety_override_acknowledged_at?: string | null;
+  safety_override_active?: boolean | null;
+  pause_issue_key?: string | null;
+  pause_issue_count?: number | null;
+  pause_issue_window_started_at?: string | null;
+  pause_issue_window_ends_at?: string | null;
+  pause_issue_last_at?: string | null;
+  hard_restriction_active?: boolean | null;
+  hard_restricted_until?: string | null;
+  hard_restriction_reason?: string | null;
+  hard_restriction_count?: number | null;
+  connection_status?: string | null;
+  connection_verified_at?: string | null;
+  connection_error?: string | null;
   raw?: Record<string, unknown> | null;
   signature_enabled?: boolean | null;
   signature_text?: string | null;
@@ -214,6 +226,24 @@ export type GmailAccount = {
   gmail_signature_sync_error?: string | null;
   created_at: string;
   updated_at?: string | null;
+  deployment_cap?: number | null;
+  deployment_run_cap?: number | null;
+  health_stage?: string | null;
+  health_cap?: number | null;
+  health_reason?: string | null;
+  successful_sends?: number | null;
+  lifetime_sent?: number | null;
+  permanent_bounces?: number | null;
+  temporary_failures?: number | null;
+  provider_limit_events?: number | null;
+  blocked_events?: number | null;
+  real_replies?: number | null;
+  last_provider_limit_at?: string | null;
+  clean_since?: string | null;
+  next_eligible_at?: string | null;
+  last_sent_at?: string | null;
+  last_health_review_at?: string | null;
+  last_stage_change_at?: string | null;
 };
 
 

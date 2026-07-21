@@ -129,6 +129,7 @@ async function refreshAccessToken(refreshToken: string) {
   if (!clientId || !clientSecret) throw new Error('GOOGLE_CLIENT_ID/NEXT_PUBLIC_GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in Vercel.');
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
+    signal: AbortSignal.timeout(12000),
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' })
   });
@@ -138,7 +139,10 @@ async function refreshAccessToken(refreshToken: string) {
 }
 
 async function gmailJson(accessToken: string, url: string) {
-  const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+  const response = await fetch(url, {
+    headers: { authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(12000)
+  });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(json?.error?.message || json?.error || `Gmail request failed with HTTP ${response.status}`);
   return json;
@@ -620,63 +624,136 @@ async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any
   }
 }
 
-function buildQuery(mode: SyncMode, days: number) {
-  if (mode === 'bounces') {
-    return `newer_than:${days}d (from:mailer-daemon OR from:postmaster OR from:"Mail Delivery Subsystem" OR subject:Undelivered OR subject:"Delivery Status Notification" OR subject:"Message blocked" OR "address not found" OR "message blocked" OR "user unknown" OR "recipient address rejected")`;
+async function recentScoutSentRows(
+  supabase: SupabaseClient<any, any, any>,
+  workspaceId: string,
+  accountId: string,
+  days: number,
+  limit: number,
+) {
+  const since = new Date(Date.now() - Math.max(1, days) * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('sent_messages')
+    .select(SENT_COLUMNS)
+    .eq('workspace_id', workspaceId)
+    .eq('gmail_account_id', accountId)
+    .eq('status', 'sent')
+    .gte('sent_at', since)
+    .order('sent_at', { ascending: false })
+    .limit(Math.max(1, Math.min(limit, 2000)));
+  if (error) throw error;
+  return (data || []) as AnyRecord[];
+}
+
+function addStats(stats: InboundStats, classification: Classification) {
+  if (classification.isRealReply) stats.realReplies += 1;
+  else if (classification.isAutoReply) stats.autoReplies += 1;
+  else if (classification.noInbox) stats.noInbox += 1;
+  else if (classification.blocked) stats.blocked += 1;
+  else if (classification.classification === 'bounce_notice') stats.bounced += 1;
+  else if (classification.limitNotice) stats.limitNotices += 1;
+  else if (classification.temporary) stats.temporary += 1;
+  else if (classification.classification === 'unmatched_inbound') stats.unmatched += 1;
+  else stats.ignored += 1;
+}
+
+async function processScopedMessage(
+  supabase: SupabaseClient<any, any, any>,
+  workspaceId: string,
+  accountId: string,
+  accountEmail: string,
+  gmailMessage: AnyRecord,
+  mode: SyncMode,
+  stats: InboundStats,
+) {
+  const normalized = normalizeGmailMessage(gmailMessage);
+  const sentMatch = await findSentMatch(supabase, workspaceId, normalized);
+  if (!sentMatch || String(sentMatch.gmail_account_id || '') !== accountId) {
+    stats.ignored += 1;
+    return;
   }
-  return `newer_than:${days}d -from:me -in:sent`;
+  stats.matched += 1;
+  const classification = classifyInbound(normalized, sentMatch, accountEmail);
+  if (classification.ignored || classification.classification === 'unmatched_inbound') {
+    stats.ignored += 1;
+    return;
+  }
+  if (mode === 'bounces' && !classification.noInbox && !classification.blocked && classification.classification !== 'bounce_notice' && !classification.temporary) {
+    stats.ignored += 1;
+    return;
+  }
+  await applyClassificationUpdates(supabase, workspaceId, normalized, sentMatch, classification, accountId, accountEmail);
+  stats.saved += 1;
+  addStats(stats, classification);
+}
+
+function bounceSearchQuery(days: number, recipients: string[]) {
+  const recipientTerms = recipients.map((email) => `"${email.replace(/"/g, '')}"`).join(' ');
+  return `newer_than:${days}d (from:mailer-daemon OR from:postmaster OR from:"Mail Delivery Subsystem" OR subject:Undelivered OR subject:"Delivery Status Notification" OR subject:"Message blocked") {${recipientTerms}}`;
 }
 
 export async function syncGmailInbound({ supabase, workspaceId, accountId, maxResults = 100, mode, days = 30, newOnly = false, deadlineMs }: SyncParams): Promise<InboundStats> {
   if (!workspaceId || !accountId) throw new Error('workspace_id and gmail_account_id are required.');
   const startedAt = Date.now();
-  const limit = Math.max(1, Math.min(Number(maxResults || 100), newOnly ? 25 : 500));
+  const limit = Math.max(1, Math.min(Number(maxResults || 100), newOnly ? 50 : 500));
   const { data: account, error: accountError } = await supabase.from('gmail_accounts').select('*').eq('workspace_id', workspaceId).eq('id', accountId).single();
   if (accountError || !account) throw new Error(accountError?.message || 'Gmail account not found.');
 
   const accessToken = await ensureAccessToken(supabase, workspaceId, account as AnyRecord);
-  const query = encodeURIComponent(buildQuery(mode, Math.max(1, Math.min(Number(days || 30), newOnly ? 14 : 90))));
-  const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=${limit}&includeSpamTrash=true`;
-  const list = await gmailJson(accessToken, listUrl);
-  let messages: Array<{ id: string; threadId?: string }> = Array.isArray(list.messages) ? list.messages : [];
+  const accountEmail = String((account as AnyRecord).email || '').toLowerCase();
+  const sentRows = await recentScoutSentRows(supabase, workspaceId, accountId, Math.max(1, Math.min(Number(days || 30), 90)), 2000);
+  const stats: InboundStats = { success: true, scanned: 0, saved: 0, matched: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, temporary: 0, ignored: 0, unmatched: 0, accountEmail };
 
-  const stats: InboundStats = { success: true, scanned: 0, saved: 0, matched: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, temporary: 0, ignored: 0, unmatched: 0, accountEmail: String((account as AnyRecord).email || '') };
-
-  if (newOnly && messages.length) {
-    const existingIds = await existingInboundMessageIds(supabase, workspaceId, messages.map((item) => String(item.id || '')));
-    const before = messages.length;
-    messages = messages.filter((item) => item.id && !existingIds.has(String(item.id)));
-    stats.ignored += before - messages.length;
+  if (!sentRows.length) {
+    await supabase.from('gmail_accounts').update({ last_error: null, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', accountId);
+    return stats;
   }
 
-  for (const item of messages) {
-    if (deadlineMs && Date.now() - startedAt > deadlineMs) {
-      stats.ignored += 1;
-      break;
-    }
-    stats.scanned += 1;
-    const gmailMessage = await gmailJson(accessToken, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(item.id)}?format=full`);
-    const normalized = normalizeGmailMessage(gmailMessage);
-    const sentMatch = await findSentMatch(supabase, workspaceId, normalized);
-    if (sentMatch) stats.matched += 1;
-    const classification = classifyInbound(normalized, sentMatch, String((account as AnyRecord).email || ''));
+  const processedMessageIds = new Set<string>();
+  const knownOutboundIds = new Set(sentRows.map((row) => String(row.provider_message_id || '')).filter(Boolean));
 
-    if (mode === 'bounces' && !classification.noInbox && !classification.blocked && classification.classification !== 'bounce_notice' && !classification.temporary) {
-      stats.ignored += 1;
-      continue;
+  if (mode === 'replies') {
+    const threadIds = Array.from(new Set(sentRows.map((row) => String(row.gmail_thread_id || '')).filter(Boolean))).slice(0, limit);
+    for (const threadId of threadIds) {
+      if (deadlineMs && Date.now() - startedAt > deadlineMs) break;
+      const thread = await gmailJson(accessToken, `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`);
+      const threadMessages = Array.isArray(thread.messages) ? thread.messages : [];
+      const candidateIds = threadMessages
+        .map((message: AnyRecord) => String(message.id || ''))
+        .filter((id: string) => id && !knownOutboundIds.has(id));
+      const existingIds = newOnly && candidateIds.length
+        ? await existingInboundMessageIds(supabase, workspaceId, candidateIds)
+        : new Set<string>();
+      for (const gmailMessage of threadMessages) {
+        if (deadlineMs && Date.now() - startedAt > deadlineMs) break;
+        const id = String(gmailMessage.id || '');
+        if (!id || knownOutboundIds.has(id) || processedMessageIds.has(id) || existingIds.has(id)) continue;
+        processedMessageIds.add(id);
+        stats.scanned += 1;
+        await processScopedMessage(supabase, workspaceId, accountId, accountEmail, gmailMessage, mode, stats);
+      }
     }
-
-    await applyClassificationUpdates(supabase, workspaceId, normalized, sentMatch, classification, accountId, String((account as AnyRecord).email || ''));
-    stats.saved += 1;
-    if (classification.isRealReply) stats.realReplies += 1;
-    else if (classification.isAutoReply) stats.autoReplies += 1;
-    else if (classification.noInbox) stats.noInbox += 1;
-    else if (classification.blocked) stats.blocked += 1;
-    else if (classification.classification === 'bounce_notice') stats.bounced += 1;
-    else if (classification.limitNotice) stats.limitNotices += 1;
-    else if (classification.temporary) stats.temporary += 1;
-    else if (classification.classification === 'unmatched_inbound') stats.unmatched += 1;
-    else stats.ignored += 1;
+  } else {
+    const recipients = Array.from(new Set(sentRows.map((row) => normalizeEmail(row.to_email)).filter(Boolean))).slice(0, 200);
+    for (let index = 0; index < recipients.length && stats.scanned < limit; index += 20) {
+      if (deadlineMs && Date.now() - startedAt > deadlineMs) break;
+      const chunk = recipients.slice(index, index + 20);
+      const query = encodeURIComponent(bounceSearchQuery(Math.max(1, Math.min(Number(days || 30), 90)), chunk));
+      const list = await gmailJson(accessToken, `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=${Math.min(50, limit - stats.scanned)}&includeSpamTrash=true`);
+      const messageRefs: Array<{ id: string }> = Array.isArray(list.messages) ? list.messages : [];
+      const ids = messageRefs.map((item) => String(item.id || '')).filter(Boolean);
+      const existingIds = newOnly && ids.length ? await existingInboundMessageIds(supabase, workspaceId, ids) : new Set<string>();
+      for (const item of messageRefs) {
+        if (deadlineMs && Date.now() - startedAt > deadlineMs) break;
+        const id = String(item.id || '');
+        if (!id || processedMessageIds.has(id) || existingIds.has(id)) continue;
+        processedMessageIds.add(id);
+        const gmailMessage = await gmailJson(accessToken, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`);
+        stats.scanned += 1;
+        await processScopedMessage(supabase, workspaceId, accountId, accountEmail, gmailMessage, mode, stats);
+        if (stats.scanned >= limit) break;
+      }
+    }
   }
 
   await supabase.from('gmail_accounts').update({ last_error: null, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', accountId);

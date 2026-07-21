@@ -1,0 +1,24 @@
+SCOUT v10.38.9 — AUDIT RESULTS
+
+PAGE-SPECIFIC CHECKS
+- Broken /operations link removed: PASS
+- No active reply-sync button or syncReplies client function: PASS
+- Reply query selects raw message data: PASS
+- Load errors are visibly rendered with Retry: PASS
+- Business names/email are fetched and displayed: PASS
+- Search, reply-type, template, and sender filters: PASS
+- Export wording accurately says visible rows: PASS
+- Automatic, delivery, and other signals moved into three closed details sections: PASS
+- Sample-based template/sender performance tables removed: PASS
+
+BUILD CHECKS
+- npm ci: PASS
+- npm run typecheck: PASS
+- npm run build: PASS
+- Next.js routes/pages generated: 53/53
+- /replies route generated: PASS
+- deployment script bash syntax: PASS
+- ZIP integrity: PASS (recorded after packaging)
+
+LIVE-CLOUD LIMITATION
+A source build cannot prove the user's live Supabase data, RLS policies, environment variables, Gmail OAuth, or Vercel project configuration. After Vercel deploys, open /replies and perform the six visual checks in EXACT_DEPLOY_STEPS_V10_38_9.txt.

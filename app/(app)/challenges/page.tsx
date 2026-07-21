@@ -60,7 +60,7 @@ const sendSteps = [
   'Choose the audience and country you want.',
   'Choose the correct first-message template.',
   'Choose one sender or rotate many Gmail accounts.',
-  'Click Send Now. Scout queues the job safely, so you can close the page.'
+  'Click Send Now and keep Scout open while it sends.'
 ];
 
 const trustedEmailSteps = [
@@ -76,8 +76,8 @@ const challenges: Challenge[] = [
   ...milestones('starter-sent', 'First delivery goal', '📨', 'deliveredMessages', [250, 1000], sendSteps, { easy: 250, growth: 1000, boss: 1000 }),
   ...milestones('starter-replies', 'First reply goal', '💬', 'realReplies', [1, 5], [
     'Send useful emails to the right leads.',
-    'Open Gmail to read new replies during send-only verification.',
-    'Existing saved replies remain visible in Scout.',
+    'Go to Replies later.',
+    'Sync replies.',
     'Only human-looking replies count here. Ticket receipts and auto messages do not count.'
   ], { easy: 1, growth: 5, boss: 5 }),
   ...milestones('starter-trusted', 'First trusted emails', '🔎', 'trustedEmails', [500, 1000], trustedEmailSteps, { easy: 500, growth: 1000, boss: 1000 }),
@@ -99,20 +99,20 @@ const challenges: Challenge[] = [
     'Go to Send Emails early in the day.',
     'Use many healthy Gmail accounts.',
     'Use safe delays and sender limits.',
-    'Scout continues queued sends through the central worker.'
+    'Keep Scout open while sending.'
   ], { easy: 0, growth: 10000, boss: 50000 }),
 
   // Replies. Auto replies are removed from challenges.
   ...milestones('real-replies-today', 'Get replies in one day', '🔥', 'realRepliesToday', [10, 20, 30, 50, 100], [
     'Send useful messages to a clean list.',
-    'Check Gmail for new replies during send-only verification.',
-    'Existing saved Scout reply history remains available.',
-    'Every confirmed human reply counts here.'
+    'Check Replies after sending.',
+    'Sync replies.',
+    'Every non-bounce reply counts here.'
   ], { easy: 0, growth: 30, boss: 100 }),
   ...milestones('real-replies', 'Get replies', '🏆', 'realReplies', [10, 20, 30, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000], [
     'Send useful emails to the right leads.',
     'Keep your message simple and specific.',
-    'Read new replies in Gmail during send-only verification.',
+    'Go to Replies and sync replies.',
     'Auto messages, bounces, and no-inbox messages do not count here.'
   ], { easy: 0, growth: 100, boss: 2500 }),
 
@@ -157,7 +157,7 @@ const challenges: Challenge[] = [
     'Choose audience, template, sender, and count.',
     'Pick a date and time.',
     'Save the schedule.',
-    'Scout’s central worker handles the send at the selected time.'
+    'Open Scout when it is time and run due sends.'
   ], { easy: 0, growth: 100, boss: 500 })
 ];
 

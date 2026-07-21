@@ -487,7 +487,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
           </div>
           <button className="btn secondary" type="button" disabled={loading || busy} onClick={refresh}>Refresh</button>
         </div>
-
+        
         {busy ? <div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div> : null}
         <div className={error ? 'error' : 'success'} style={{ marginTop: 12 }}>{error || message}</div>
       </div>

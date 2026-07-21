@@ -18,6 +18,8 @@ function download(filename: string, content: string, type = 'application/json') 
 export default function DataSafetyClient({ workspace }: { workspace: Workspace }) {
   const supabase = useMemo(() => createClient(), []);
   const [status, setStatus] = useState('Ready.');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   function exportLocalScoutedHistory() {
     const key = 'scout_team_scouted_local_v64';
@@ -107,6 +109,29 @@ export default function DataSafetyClient({ workspace }: { workspace: Workspace }
     setStatus(`Done. Added ${inserted} new scouted-history records to Supabase. Duplicates were skipped.`);
   }
 
+
+  async function deleteScoutAccount() {
+    if (deleteConfirmation !== 'DELETE') {
+      setStatus('Type DELETE exactly before permanent deletion.');
+      return;
+    }
+    if (!window.confirm('Permanently delete this Scout account, workspace, Gmail connections, tokens, messages, replies, templates, and settings? This cannot be undone.')) return;
+    setDeleting(true);
+    setStatus('Deleting Scout account…');
+    try {
+      const response = await fetch('/api/account/delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmation: deleteConfirmation }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Deletion failed with HTTP ${response.status}`);
+      window.location.href = '/login?deleted=1';
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setDeleting(false);
+    }
+  }
   async function exportCloudData() {
     setStatus('Exporting cloud scout history and current businesses...');
     const [history, businesses] = await Promise.all([
@@ -136,6 +161,15 @@ export default function DataSafetyClient({ workspace }: { workspace: Workspace }
         <h3>Cloud Backup</h3>
         <p className="muted">Download your Supabase current queue and team scouted history.</p>
         <button className="btn secondary" onClick={exportCloudData}>Download cloud backup</button>
+      </div>
+
+
+      <div className="card" style={{ padding: 18 }}>
+        <h3>Permanent account deletion</h3>
+        <p className="muted">This removes your Scout authentication account, workspace, Gmail connections and tokens, templates, jobs, sent history, reply history, and settings. An anonymized prospect fingerprint may remain only to prevent duplicate outreach.</p>
+        <label className="label">Type DELETE exactly</label>
+        <input className="input" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} placeholder="DELETE" />
+        <div className="actions" style={{ marginTop: 12 }}><button className="btn secondary" disabled={deleting || deleteConfirmation !== 'DELETE'} onClick={deleteScoutAccount}>{deleting ? 'Deleting…' : 'Delete my Scout account permanently'}</button></div>
       </div>
 
       <div className="notice">{status}</div>

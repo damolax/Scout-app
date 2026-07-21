@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { fetchUnifiedReplyMetrics } from '@/lib/reply-metrics';
+import { requireWorkspaceAccess } from '@/lib/require-workspace-access';
 
 const STAGES = [
   { name: 'Novice', min: 0 },
@@ -44,6 +45,11 @@ function stageFor(points: number) {
 export async function GET(request: NextRequest) {
   const workspaceId = request.nextUrl.searchParams.get('workspaceId') || '';
   if (!workspaceId) return NextResponse.json({ success: false, error: 'workspaceId is required.' }, { status: 400 });
+  try {
+    await requireWorkspaceAccess(workspaceId);
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error?.message || 'Unauthorized.' }, { status: Number(error?.status || 403) });
+  }
   const supabase = createAdminClient();
   const today = new Date();
   today.setHours(0, 0, 0, 0);

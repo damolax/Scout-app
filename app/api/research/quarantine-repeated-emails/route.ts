@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { requireWorkspaceAccess } from '@/lib/require-workspace-access';
 import { duplicateEmailRisk } from '@/lib/repeated-email-guard';
 
 function errorMessage(error: unknown) {
@@ -19,6 +20,7 @@ export async function POST(request: NextRequest) {
     const workspaceId = String(body.workspaceId || '').trim();
     const limit = Math.max(1, Math.min(50000, Number(body.limit || 10000)));
     if (!workspaceId) return NextResponse.json({ success: false, error: 'workspaceId is required.' }, { status: 400 });
+    await requireWorkspaceAccess(workspaceId);
 
     const supabase = createAdminClient();
     const { data: rows, error } = await supabase

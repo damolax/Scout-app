@@ -10,7 +10,10 @@ export async function GET() {
     client_id_configured: Boolean(clientId),
     client_secret_configured: Boolean(clientSecret),
     redirect_path: '/api/gmail/oauth/callback',
-    required_scopes: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/gmail.send'],
-    authorization_mode: 'send_only_verification'
+    required_scopes: [
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.settings.basic'
+    ]
   });
 }

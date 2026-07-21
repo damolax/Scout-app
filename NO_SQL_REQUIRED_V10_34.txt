@@ -1,4 +1,0 @@
-Scout v10.34 is a code-only sender update.
-
-DO NOT run any SQL for this version.
-Deploy the ZIP to GitHub, wait for Vercel to become Ready, then test with a small batch.

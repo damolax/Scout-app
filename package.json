@@ -1,16 +1,13 @@
 {
-  "name": "scout-app-v10-35-1-scale-guard",
-  "version": "10.35.1",
+  "name": "scout-app-v10-38-google-verification",
+  "version": "10.38.9",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "tsc --noEmit && next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit",
-    "validate:v10.35": "node scripts/validate-v10-35.mjs",
-    "validate:v10.35.1": "node scripts/validate-v10-35-1.mjs",
-    "worker:scale-guard": "node scripts/scale-guard-worker.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",
@@ -31,7 +28,7 @@
     "typescript": "6.0.3"
   },
   "engines": {
-    "node": ">=22 <25"
+    "node": "20.x"
   },
-  "description": "Scout v10.35.1 Scale Guard: centralized scheduling, platform-wide capacity leases, safe sender pagination, resource-aware polling, and Google verification readiness."
+  "description": "Scout App v10.38.9 audited Google verification build: compact staged follow-ups and a simplified reply inbox with visible errors, business names, filters, accurate export wording, and send-only OAuth safety."
 }

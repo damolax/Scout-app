@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
 import { createAppNotification } from '@/lib/notifications';
 import { businessIdentityKeys } from '@/lib/normalize';
+import { ensureMessageWorker, workerSecret } from '@/lib/message-worker';
+import { featureFlags } from '@/lib/feature-flags';
 
 function formatError(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -31,6 +33,13 @@ export async function POST(request: NextRequest) {
     if (!member?.length) return NextResponse.json({ success: false, error: 'You do not belong to this workspace.' }, { status: 403 });
 
     const type = String(body.type || 'initial') === 'follow_up' ? 'follow_up' : 'initial';
+    if (type === 'follow_up' && !featureFlags.gmailReplySync) {
+      return NextResponse.json({
+        success: false,
+        disabled: true,
+        error: 'Follow-up sending is disabled in this send-only Google-verification build because reply reading is not enabled.'
+      }, { status: 403 });
+    }
     const targetCount = Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(body.targetCount || 1000)));
     let selectedBusinessIds = Array.isArray(body.selectedBusinessIds) ? body.selectedBusinessIds.map(String).filter(Boolean).slice(0, targetCount) : [];
     let teamDuplicatesBlocked = 0;
@@ -65,7 +74,7 @@ export async function POST(request: NextRequest) {
       teamDuplicatesBlocked = Math.max(0, selectedBusinessIds.length - allowedIds.size);
       selectedBusinessIds = selectedBusinessIds.filter((id: string) => allowedIds.has(id));
       if (!selectedBusinessIds.length) {
-        return NextResponse.json({ success: false, code: 'team_duplicate_blocked', error: 'All selected leads are already owned by another Scout team member.', teamDuplicatesBlocked }, { status: 409 });
+        return NextResponse.json({ success: false, code: 'team_duplicate_blocked', error: 'All selected leads are already owned by another Scout user in this deployment.', teamDuplicatesBlocked }, { status: 409 });
       }
     }
     const selectedSenderIds = Array.isArray(body.selectedSenderIds) ? body.selectedSenderIds.map(String).filter(Boolean) : [];
@@ -91,9 +100,17 @@ export async function POST(request: NextRequest) {
       dry_run: Boolean(body.dryRun),
       allow_high_risk_send: Boolean(body.allowHighRiskSend),
       followup_segment: type === 'follow_up' ? String(body.followupSegment || 'all_unanswered') : null,
+      followup_stage: type === 'follow_up' ? Math.min(2, Math.max(1, Number(body.followupStage || 1))) : null,
+      followup_after_hours: type === 'follow_up' ? Math.min(720, Math.max(1, Number(body.followupAfterHours || 72))) : null,
+      followup_audience_category_id: type === 'follow_up' ? (body.followupAudienceCategoryId || null) : null,
+      followup_country: type === 'follow_up' ? String(body.followupCountry || '') : '',
+      missing_translation_action: type === 'follow_up' && ['stop', 'exclude', 'english'].includes(String(body.missingTranslationAction || 'stop'))
+        ? String(body.missingTranslationAction || 'stop')
+        : 'english',
       due_business_ids: type === 'follow_up' ? selectedBusinessIds : [],
       team_duplicates_blocked_before_job: teamDuplicatesBlocked,
-      delay_ms: Math.max(1000, Math.min(60000, Number(body.delayMs || (body.raw && body.raw.delay_ms) || 3000))),
+      delay_ms: 0,
+      pacing_mode: 'database_random_90_210_seconds',
       parallel_per_sender: true
     };
 
@@ -117,39 +134,104 @@ export async function POST(request: NextRequest) {
     }).select('*').single();
     if (error) throw error;
 
-    try {
-      await createAppNotification(supabase as any, {
-        workspaceId,
-        userId: user.id,
-        type: 'job_started',
-        title: `${type === 'follow_up' ? 'Follow-up' : 'Message'} job started`,
-        message: `Scout created a saved job for ${(selectedBusinessIds.length || targetCount).toLocaleString()} contact(s).${teamDuplicatesBlocked ? ` ${teamDuplicatesBlocked.toLocaleString()} team-owned duplicate(s) were blocked.` : ''} You can close Scout; the central worker will continue it safely.`,
-        entityType: 'message_schedule',
-        entityId: data.id,
-        raw: { schedule_id: data.id, type, targetCount, selectedBusinessCount: selectedBusinessIds.length }
-      });
-    } catch {}
-
+    const workerSetup = await ensureMessageWorker(request.nextUrl.origin);
 
     const shouldRunNow = body.runNow !== false && scheduleFor.getTime() <= Date.now() + 60_000;
     let workerKick: any = null;
     if (shouldRunNow) {
       const origin = request.nextUrl.origin;
-      const secret = process.env.SCHEDULE_WORKER_SECRET || process.env.CRON_SECRET || process.env.RUN_ALL_WORKER_SECRET || '';
+      const secret = workerSecret();
       const firstRunTargetLimit = Math.max(1, selectedSenderIds.length);
+      const cookie = request.headers.get('cookie') || '';
       try {
         const workerResponse = await fetch(`${origin}/api/message/run-schedules`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json', ...(secret ? { 'x-schedule-worker-secret': secret } : {}) },
-          body: JSON.stringify({ limit: 1, scheduleId: data.id, targetLimit: firstRunTargetLimit, token: secret })
+          headers: {
+            'content-type': 'application/json',
+            ...(cookie ? { cookie } : {}),
+            ...(secret ? { 'x-schedule-worker-secret': secret } : {}),
+          },
+          body: JSON.stringify({
+            limit: 1,
+            scheduleId: data.id,
+            workspaceId,
+            targetLimit: firstRunTargetLimit,
+            token: secret,
+          }),
+          signal: AbortSignal.timeout(55_000),
+          cache: 'no-store',
         });
         workerKick = await workerResponse.json().catch(() => ({ success: workerResponse.ok }));
+        if (!workerResponse.ok && workerKick?.success !== false) {
+          workerKick = { ...workerKick, success: false, error: `Worker returned HTTP ${workerResponse.status}.` };
+        }
       } catch (kickError) {
         workerKick = { success: false, error: kickError instanceof Error ? kickError.message : String(kickError) };
       }
     }
 
-    return NextResponse.json({ success: true, schedule: data, startedWorker: shouldRunNow, workerKick, teamDuplicatesBlocked });
+    const firstResult = Array.isArray(workerKick?.results) ? workerKick.results[0] : null;
+    const firstSent = Math.max(0, Number(firstResult?.sent || 0));
+    const firstAttempted = Math.max(0, Number(firstResult?.attempted || 0));
+    const workerExecutionFailed = Boolean(
+      shouldRunNow &&
+      (workerKick?.success === false || firstResult?.status === 'failed')
+    );
+    const workerFailed = workerExecutionFailed || (!workerSetup.ready && firstSent === 0);
+    const startState = firstSent > 0
+      ? workerSetup.ready ? 'sending' : 'warning'
+      : workerFailed
+        ? 'failed'
+        : 'queued';
+    const startMessage = firstSent > 0
+      ? workerSetup.ready
+        ? `${firstSent.toLocaleString()} message${firstSent === 1 ? '' : 's'} sent. Scout will continue the remaining contacts in the background.`
+        : `${firstSent.toLocaleString()} message${firstSent === 1 ? '' : 's'} sent, but background continuation is not ready: ${workerSetup.error || 'central worker setup failed'}`
+      : workerFailed
+        ? String(firstResult?.reason || workerKick?.error || workerSetup.error || 'The central worker could not start this job.')
+        : firstAttempted > 0
+          ? `The first worker cycle ran. Scout will continue the remaining contacts in the background.`
+          : `The job is queued. Scout will retry automatically when a selected Gmail reaches its next safe sending slot.`;
+
+    try {
+      await createAppNotification(supabase as any, {
+        workspaceId,
+        userId: user.id,
+        type: startState === 'failed' ? 'job_failed' : startState === 'sending' ? 'job_started' : startState === 'warning' ? 'job_warning' : 'job_queued',
+        title: startState === 'failed'
+          ? `${type === 'follow_up' ? 'Follow-up' : 'Message'} job did not start`
+          : startState === 'sending'
+            ? `${type === 'follow_up' ? 'Follow-up' : 'Message'} sending started`
+            : startState === 'warning'
+              ? `${type === 'follow_up' ? 'Follow-up' : 'Message'} sent with worker warning`
+              : `${type === 'follow_up' ? 'Follow-up' : 'Message'} job queued`,
+        message: startMessage,
+        entityType: 'message_schedule',
+        entityId: data.id,
+        raw: {
+          schedule_id: data.id,
+          type,
+          targetCount,
+          selectedBusinessCount: selectedBusinessIds.length,
+          workerKick,
+          workerSetup,
+        }
+      });
+    } catch {}
+
+    return NextResponse.json({
+      success: !workerFailed,
+      error: workerFailed ? startMessage : undefined,
+      schedule: data,
+      startState,
+      startMessage,
+      firstSent,
+      firstAttempted,
+      startedWorker: shouldRunNow,
+      workerKick,
+      workerSetup,
+      teamDuplicatesBlocked,
+    }, { status: workerFailed ? 503 : 200 });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 500 });
   }

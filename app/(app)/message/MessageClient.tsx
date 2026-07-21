@@ -8,7 +8,6 @@ import { emitLiveActivity } from "@/lib/live-activity-client";
 import { applyCountryFilter, businessMatchesCountry, extractBusinessCountries } from "@/lib/country-location";
 import { resolveBusinessLanguage, resolveTemplateContent } from "@/lib/template-language";
 import { businessIdentityKeys } from "@/lib/normalize";
-import { loadAllSafeGmailAccounts } from "@/lib/load-safe-gmail-accounts-client";
 import {
   Business,
   GmailAccount,
@@ -17,31 +16,6 @@ import {
   MessageTemplate,
   Workspace,
 } from "@/lib/types";
-
-
-function startOfTodayInTimezone(timeZone: string) {
-  try {
-    const now = new Date();
-    const dateParts = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(now);
-    const part = (type: string) => Number(dateParts.find((item) => item.type === type)?.value || 0);
-    const localMidnightAsUtc = Date.UTC(part('year'), part('month') - 1, part('day'), 0, 0, 0);
-    const probe = new Date(localMidnightAsUtc);
-    const probeParts = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hourCycle: 'h23',
-    }).formatToParts(probe);
-    const probePart = (type: string) => Number(probeParts.find((item) => item.type === type)?.value || 0);
-    const representedAsUtc = Date.UTC(probePart('year'), probePart('month') - 1, probePart('day'), probePart('hour'), probePart('minute'), probePart('second'));
-    return new Date(localMidnightAsUtc - (representedAsUtc - localMidnightAsUtc));
-  } catch {
-    const now = new Date();
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  }
-}
 
 type SendLogRow = {
   id: string;
@@ -56,10 +30,14 @@ type DueFollowUp = {
   business_id: string;
   business_name: string | null;
   to_email: string;
+  website?: string | null;
   last_sent_at: string;
   last_subject: string | null;
   template_id: string | null;
   gmail_account_id: string | null;
+  followup_stage?: number | null;
+  previous_followups?: number | null;
+  next_eligible_at?: string | null;
   followup_segment?: string | null;
   segment?: string | null;
   reply_state?: string | null;
@@ -98,6 +76,7 @@ type Summary = {
 type TemplateMode = "specific" | "rotate";
 type SenderMode = "specific" | "rotate";
 type MessageKind = "initial" | "follow_up";
+type MissingTranslationAction = "stop" | "exclude" | "english";
 
 const CONTACTABLE_BUSINESS_STATUSES = ["ready", "found", "connected"];
 const LOCATION_RAW_KEYS = [
@@ -137,6 +116,17 @@ const SHORTCODES = [
   "{location}",
   "{source}",
 ];
+
+function templateFollowUpStage(template?: MessageTemplate | null): 1 | 2 {
+  const raw = template?.raw && typeof template.raw === "object" ? template.raw : {};
+  return Number((raw as Record<string, unknown>).followup_stage) === 2 ? 2 : 1;
+}
+
+function templateFollowUpAfterHours(template?: MessageTemplate | null) {
+  const raw = template?.raw && typeof template.raw === "object" ? template.raw : {};
+  const value = Number((raw as Record<string, unknown>).followup_after_hours || 72);
+  return Math.min(720, Math.max(1, Number.isFinite(value) ? Math.round(value) : 72));
+}
 
 function formatError(error: unknown) {
   if (!error) return "Unknown error.";
@@ -316,7 +306,12 @@ function downloadCsv(name: string, rows: Array<Record<string, unknown>>) {
   URL.revokeObjectURL(url);
 }
 
+function hasActiveSafetyOverride(account: GmailAccount) {
+  return Boolean(account.safety_override_until && new Date(account.safety_override_until).getTime() > Date.now());
+}
+
 function isPaused(account: GmailAccount) {
+  if (hasActiveSafetyOverride(account)) return false;
   const status = String(account.status || "").toLowerCase();
   if ((account as any).is_paused === true || ["limit_hit", "paused", "blocked"].includes(status)) return true;
   if (!account.paused_until) return false;
@@ -408,7 +403,7 @@ function scheduleLabel(schedule: Pick<MessageSchedule, "type" | "target_count" |
   return `${count ? count.toLocaleString() : ""} ${type}`.trim();
 }
 
-export default function MessageClient({ workspace }: { workspace: Workspace }) {
+export default function MessageClient({ workspace, replySyncEnabled }: { workspace: Workspace; replySyncEnabled: boolean }) {
   const supabase = useMemo(() => createClient(), []);
   const [categories, setCategories] = useState<MessageCategory[]>([]);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -417,6 +412,10 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [readyTotal, setReadyTotal] = useState(0);
   const [recentSent, setRecentSent] = useState<SendLogRow[]>([]);
   const [dueFollowUps, setDueFollowUps] = useState<DueFollowUp[]>([]);
+  const [dueFollowUpTotal, setDueFollowUpTotal] = useState(0);
+  const [dueFollowUpBusinesses, setDueFollowUpBusinesses] = useState<Business[]>([]);
+  const [selectedDueFollowUps, setSelectedDueFollowUps] = useState<Record<string, boolean>>({});
+  const [dueFollowUpSearch, setDueFollowUpSearch] = useState("");
   const [schedules, setSchedules] = useState<MessageSchedule[]>([]);
   const [locationOptions, setLocationOptions] = useState<LocationOption[]>([]);
 
@@ -429,12 +428,17 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [senderRunLimits, setSenderRunLimits] = useState<
     Record<string, string>
   >({});
-  const [senderLast24h, setSenderLast24h] = useState<Record<string, number>>({});
-  const [senderSentToday, setSenderSentToday] = useState<Record<string, number>>({});
+  const [senderLast24h, setSenderLast24h] = useState<Record<string, number>>(
+    {},
+  );
   const [specificSenderId, setSpecificSenderId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [templateId, setTemplateId] = useState("");
   const [followUpTemplateId, setFollowUpTemplateId] = useState("");
+  const [followUpStage, setFollowUpStage] = useState<1 | 2>(1);
+  const [followUpLimit, setFollowUpLimit] = useState(100);
+  const [followUpSendAll, setFollowUpSendAll] = useState(false);
+  const [missingTranslationAction, setMissingTranslationAction] = useState<MissingTranslationAction>("stop");
   const [templateMode, setTemplateMode] = useState<TemplateMode>("specific");
   const [senderMode, setSenderMode] = useState<SenderMode>("rotate");
   const [businessCategoryFilter, setBusinessCategoryFilter] = useState("");
@@ -444,7 +448,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   );
   const [readySearch, setReadySearch] = useState("");
   const [sendLimit, setSendLimit] = useState(1000);
-  const [delayMs, setDelayMs] = useState(3000);
+  const delayMs = 0; // Scout controls pacing automatically: 90–210s per Gmail and 3–6s across different Gmail accounts.
   const [dryRun, setDryRun] = useState(false);
   const [allowHighRiskSend, setAllowHighRiskSend] = useState(false);
   const [scheduleType, setScheduleType] = useState<"initial" | "follow_up">(
@@ -461,6 +465,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [stopBusyId, setStopBusyId] = useState("");
+  const [autoRunSchedules, setAutoRunSchedules] = useState(true);
   const [scheduleRunnerBusy, setScheduleRunnerBusy] = useState(false);
   const scheduleRunnerRef = useRef(false);
   const refreshInFlightRef = useRef(false);
@@ -472,7 +477,6 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const [showReadyLeads, setShowReadyLeads] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showSavedSends, setShowSavedSends] = useState(false);
-  const [showDueList, setShowDueList] = useState(false);
   const [lastSavedSchedule, setLastSavedSchedule] = useState<MessageSchedule | null>(null);
   const dueReminderRef = useRef<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -501,36 +505,83 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   const categoryTemplates = sendableTemplates.filter(
     (t) => !categoryId || t.category_id === categoryId,
   );
-  const followUpTemplates = templates.filter(
-    (t) => (t.template_type || "initial") === "follow_up" && t.active !== false && (!categoryId || t.category_id === categoryId),
-  );
   const allFollowUpTemplates = templates.filter(
     (t) => (t.template_type || "initial") === "follow_up" && t.active !== false,
+  );
+  const stageFollowUpTemplates = allFollowUpTemplates.filter(
+    (t) => templateFollowUpStage(t) === followUpStage && (!categoryId || t.category_id === categoryId),
+  );
+  const allStageFollowUpTemplates = allFollowUpTemplates.filter(
+    (t) => templateFollowUpStage(t) === followUpStage,
   );
   const currentTemplate =
     sendableTemplates.find((t) => t.id === templateId) ||
     categoryTemplates[0] ||
     sendableTemplates[0];
   const currentFollowUpTemplate =
-    allFollowUpTemplates.find((t) => t.id === followUpTemplateId) ||
-    followUpTemplates[0] ||
-    allFollowUpTemplates[0];
+    allStageFollowUpTemplates.find((t) => t.id === followUpTemplateId) ||
+    stageFollowUpTemplates[0] ||
+    allStageFollowUpTemplates[0];
+  const followUpAfterHours = templateFollowUpAfterHours(currentFollowUpTemplate);
   const selectedAudienceCategory =
     categories.find((c) => c.id === audienceCategoryId) || null;
+  const dueFollowUpBusinessById = useMemo(
+    () => new Map(dueFollowUpBusinesses.map((business) => [business.id, business])),
+    [dueFollowUpBusinesses],
+  );
+  const visibleDueFollowUps = useMemo(() => {
+    const search = dueFollowUpSearch.trim().toLowerCase();
+    return dueFollowUps.filter((row) => {
+      const business = dueFollowUpBusinessById.get(row.business_id);
+      if (!search) return true;
+      return [row.business_name, row.to_email, business?.website, business?.domain, business?.location]
+        .some((value) => String(value || "").toLowerCase().includes(search));
+    });
+  }, [dueFollowUps, dueFollowUpBusinessById, dueFollowUpSearch]);
+  const selectedDueFollowUpIds = Object.keys(selectedDueFollowUps).filter((id) => selectedDueFollowUps[id]);
+  const followUpPreviewRows = (selectedDueFollowUpIds.length
+    ? dueFollowUps.filter((row) => selectedDueFollowUps[row.business_id])
+    : dueFollowUps.slice(0, Math.min(followUpSendAll ? dueFollowUpTotal : followUpLimit, dueFollowUps.length))
+  );
+  const followUpLanguageSummary = useMemo(() => {
+    const counts: Record<string, number> = {};
+    let missing = 0;
+    for (const row of followUpPreviewRows) {
+      const business = dueFollowUpBusinessById.get(row.business_id);
+      if (!business || !currentFollowUpTemplate) continue;
+      const resolved = resolveTemplateContent(currentFollowUpTemplate, business);
+      counts[resolved.languageLabel] = (counts[resolved.languageLabel] || 0) + 1;
+      if (resolved.usedFallback) missing += 1;
+    }
+    const intended = selectedDueFollowUpIds.length
+      ? selectedDueFollowUpIds.length
+      : followUpSendAll
+        ? dueFollowUpTotal
+        : Math.min(dueFollowUpTotal, Math.max(1, followUpLimit));
+    return {
+      counts,
+      missing,
+      checked: followUpPreviewRows.length,
+      intended,
+      complete: followUpPreviewRows.length >= intended,
+    };
+  }, [followUpPreviewRows, dueFollowUpBusinessById, currentFollowUpTemplate, selectedDueFollowUpIds.length, followUpSendAll, dueFollowUpTotal, followUpLimit]);
   function senderDailyLimit(account: GmailAccount) {
-    const limit = Number(account.daily_limit || 250);
-    return Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 250;
+    const deployment = Math.max(1, Number(account.deployment_cap || 250));
+    const health = Math.max(0, Number(account.health_cap ?? deployment));
+    const user = Math.max(1, Number(account.daily_limit || deployment));
+    return Math.max(0, Math.floor(Math.min(deployment, health, user)));
   }
   function senderRemainingToday(account: GmailAccount) {
     const daily = senderDailyLimit(account);
     if (!Number.isFinite(daily)) return Number.POSITIVE_INFINITY;
-    const used = Math.max(Number(senderSentToday[account.id] || account.sent_today || 0), Number(senderLast24h[account.id] || 0));
+    const used = Number(senderLast24h[account.id] || account.sent_today || 0);
     return Math.max(0, daily - Math.max(0, used));
   }
   function senderAvailable(account: GmailAccount) {
     return ["connected", "ready"].includes(String(account.status || "")) &&
       !isPaused(account) &&
-      account.has_credentials !== false &&
+      Boolean(account.access_token || account.refresh_token) &&
       senderRemainingToday(account) > 0;
   }
   const connectedAccounts = accounts.filter(senderAvailable);
@@ -587,24 +638,32 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     );
     setTemplates(rows);
     const firstInitial = rows.find((t) => (t.template_type || "initial") === "initial" && t.active !== false);
-    const firstFollowUp = rows.find((t) => (t.template_type || "initial") === "follow_up" && t.active !== false);
+    const firstFollowUp = rows.find((t) => (t.template_type || "initial") === "follow_up" && t.active !== false && templateFollowUpStage(t) === followUpStage);
     if (!templateId && firstInitial?.id) setTemplateId(firstInitial.id);
     if (!followUpTemplateId && firstFollowUp?.id) setFollowUpTemplateId(firstFollowUp.id);
   }
 
   async function loadAccounts() {
-    const rows = await loadAllSafeGmailAccounts(workspace.id);
+    const { data, error: loadError } = await supabase
+      .from("gmail_accounts")
+      .select("*")
+      .eq("workspace_id", workspace.id)
+      .order("created_at", { ascending: false });
+    if (loadError) throw loadError;
+    const rows = (data || []) as GmailAccount[];
     setAccounts(rows);
     setSelectedAccounts((current) => {
       const next: Record<string, boolean> = {};
       for (const account of rows)
         next[account.id] = current[account.id] ??
-          (["connected", "ready"].includes(String(account.status || "")) && !isPaused(account) && account.has_credentials !== false);
+          (["connected", "ready"].includes(String(account.status || "")) && !isPaused(account));
       return next;
     });
     if (!specificSenderId && rows[0]?.id) setSpecificSenderId(rows[0].id);
-    setSenderLast24h(Object.fromEntries(rows.map((account) => [account.id, Math.max(0, Number(account.sent_rolling_24h || 0))])));
-    setSenderSentToday(Object.fromEntries(rows.map((account) => [account.id, Math.max(0, Number(account.sent_today || 0))])));
+
+    const counts: Record<string, number> = {};
+    for (const account of rows) counts[account.id] = Math.max(0, Number(account.sent_today || 0));
+    setSenderLast24h(counts);
   }
 
   async function loadAvailableLocations() {
@@ -733,11 +792,15 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       target_workspace: workspace.id,
       limit_rows: limitRows,
       followup_segment: followUpSegment,
+      requested_stage: followUpStage,
+      followup_after_hours: followUpAfterHours,
+      target_category_id: audienceCategoryId || null,
+      target_country: countryFilter || "",
     });
     if (dueError) {
       if (isMissingRpcFunction(dueError)) {
         setStatus(
-          "Follow-up RPC is missing in Supabase. Run the v8.39 Supabase SQL once; the rest of Message page will still load.",
+          "The staged follow-up RPC is missing in Supabase. Run RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql once; the rest of Message page will still load.",
         );
         return [];
       }
@@ -747,7 +810,32 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   }
 
   async function loadDueFollowUps() {
-    setDueFollowUps(await fetchDueFollowUps(1000));
+    const [rows, countResult] = await Promise.all([
+      fetchDueFollowUps(1000),
+      supabase.rpc("count_due_followups", {
+        target_workspace: workspace.id,
+        followup_segment: followUpSegment,
+        requested_stage: followUpStage,
+        followup_after_hours: followUpAfterHours,
+        target_category_id: audienceCategoryId || null,
+        target_country: countryFilter || "",
+      }),
+    ]);
+    if (countResult.error) throw countResult.error;
+    setDueFollowUps(rows);
+    setDueFollowUpTotal(Math.max(0, Number(countResult.data || 0)));
+    setSelectedDueFollowUps({});
+    if (!rows.length) {
+      setDueFollowUpBusinesses([]);
+      return;
+    }
+    const { data, error: businessesError } = await supabase
+      .from("businesses")
+      .select("*")
+      .eq("workspace_id", workspace.id)
+      .in("id", rows.map((row) => row.business_id));
+    if (businessesError) throw businessesError;
+    setDueFollowUpBusinesses((data || []) as Business[]);
   }
 
   async function loadSchedules() {
@@ -828,10 +916,19 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   }, [categoryId, templates.length]);
 
   useEffect(() => {
+    const matching = allStageFollowUpTemplates.find((t) => !categoryId || t.category_id === categoryId) || allStageFollowUpTemplates[0];
+    if (matching && !allStageFollowUpTemplates.some((t) => t.id === followUpTemplateId)) {
+      setFollowUpTemplateId(matching.id);
+    }
+    if (!matching) setFollowUpTemplateId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followUpStage, categoryId, templates.length]);
+
+  useEffect(() => {
     if (!workspace.id) return;
     loadDueFollowUps().catch((err) => setError(formatError(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followUpSegment]);
+  }, [followUpSegment, followUpStage, followUpTemplateId, audienceCategoryId, countryFilter]);
 
   useEffect(() => {
     if (!workspace.id) return;
@@ -841,13 +938,27 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       void Promise.allSettled([loadSchedules(), loadRecentSent()]);
       accountTick += 1;
       if (accountTick >= 4) { accountTick = 0; loadAccounts().catch(() => undefined); }
-    }, 60000);
+    }, 30000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, busy, loading]);
 
-  // v10.35.1 Scale Guard: scheduled jobs are claimed by the central worker.
-  // The browser no longer polls and starts due campaigns in every open tab.
+  useEffect(() => {
+    if (!workspace.id || !autoRunSchedules) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (busy || loading || scheduleRunnerBusy || scheduleRunnerRef.current) return;
+      const now = Date.now();
+      const hasDueSchedule = schedules.some(
+        (schedule) =>
+          String(schedule.status || "") === "scheduled" &&
+          new Date(schedule.scheduled_for).getTime() <= now,
+      );
+      if (hasDueSchedule) runDueSchedulesFromApp({ silent: true }).catch(() => undefined);
+    }, SCHEDULE_RUNNER_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.id, autoRunSchedules, busy, loading, scheduleRunnerBusy, schedules]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -988,9 +1099,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   function templatesForSend(kind: MessageKind = "initial") {
     if (kind === "follow_up") {
       if (currentFollowUpTemplate && currentFollowUpTemplate.active !== false) return [currentFollowUpTemplate];
-      return followUpTemplates.length
-        ? followUpTemplates.slice(0, 1)
-        : allFollowUpTemplates.slice(0, 1);
+      return stageFollowUpTemplates.length
+        ? stageFollowUpTemplates.slice(0, 1)
+        : allStageFollowUpTemplates.slice(0, 1);
     }
 
     // Initial-message sending must never rotate or select follow-up/reply templates.
@@ -1154,7 +1265,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       );
       if (guarded.blocked > 0) {
         setStatus(
-          `${guarded.blocked.toLocaleString()} lead${guarded.blocked === 1 ? " was" : "s were"} blocked because another team member owns the business or email.`,
+          `${guarded.blocked.toLocaleString()} lead${guarded.blocked === 1 ? " was" : "s were"} blocked because another Scout user in this deployment owns the business or email.`,
         );
       }
       return guarded.allowed;
@@ -1219,7 +1330,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     );
     if (guarded.blocked > 0) {
       setStatus(
-        `${guarded.blocked.toLocaleString()} lead${guarded.blocked === 1 ? " was" : "s were"} blocked because another team member owns the business or email.`,
+        `${guarded.blocked.toLocaleString()} lead${guarded.blocked === 1 ? " was" : "s were"} blocked because another Scout user in this deployment owns the business or email.`,
       );
     }
     return guarded.allowed;
@@ -1376,15 +1487,6 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         .update({ status: "contacted", updated_at: sentAt })
         .eq("workspace_id", workspace.id)
         .eq("id", business.id);
-      await supabase
-        .from("gmail_accounts")
-        .update({
-          sent_today: Number(account.sent_today || 0) + 1,
-          last_error: null,
-        })
-        .eq("workspace_id", workspace.id)
-        .eq("id", account.id);
-      account.sent_today = Number(account.sent_today || 0) + 1;
     }
   }
 
@@ -1395,6 +1497,8 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       limit?: number;
       messageKind?: MessageKind;
       followupSegment?: string;
+      allDueFollowUps?: boolean;
+      missingTranslationAction?: MissingTranslationAction;
     },
   ) {
     const messageKind: MessageKind =
@@ -1434,9 +1538,11 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         `Safety Check blocked this send because the template risk is HIGH (${guard.score}/100). Fix the template or tick the override checkbox.`,
       );
 
-    const selectedBusinessIds = contactsOverride?.length
-      ? contactsOverride.map((b) => b.id).filter(Boolean)
-      : selectedContactIds;
+    const selectedBusinessIds = options?.allDueFollowUps
+      ? []
+      : contactsOverride?.length
+        ? contactsOverride.map((b) => b.id).filter(Boolean)
+        : selectedContactIds;
     const targetCount =
       selectedBusinessIds.length ||
       Math.max(
@@ -1469,7 +1575,9 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         type: messageKind,
         categoryId,
         templateId:
-          templateMode === "specific" ? templatePool[0]?.id || null : null,
+          messageKind === "follow_up"
+            ? templatePool[0]?.id || null
+            : templateMode === "specific" ? templatePool[0]?.id || null : null,
         targetCount,
         scheduledFor: new Date().toISOString(),
         runNow: true,
@@ -1477,7 +1585,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         selectedBusinessIds,
         selectedSenderIds: senders.map((s) => s.id),
         selectedSenderEmails: senders.map((s) => s.email),
-        templateMode,
+        templateMode: messageKind === "follow_up" ? "specific" : templateMode,
         senderMode,
         senderRunLimits: { ...senderLimitsById, ...senderLimitsByEmail },
         businessCategoryFilter,
@@ -1490,9 +1598,18 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         allowHighRiskSend,
         delayMs,
         followupSegment: options?.followupSegment || followUpSegment,
+        followupStage: messageKind === "follow_up" ? followUpStage : null,
+        followupAfterHours: messageKind === "follow_up" ? followUpAfterHours : null,
+        followupAudienceCategoryId: messageKind === "follow_up" ? (audienceCategoryId || null) : null,
+        followupCountry: messageKind === "follow_up" ? countryFilter : "",
+        missingTranslationAction: messageKind === "follow_up" ? (options?.missingTranslationAction || missingTranslationAction) : "english",
         raw: {
           source: "message_page_durable_send",
           previous_client_loop_disabled: true,
+          all_due_followups: Boolean(options?.allDueFollowUps),
+          followup_stage: messageKind === "follow_up" ? followUpStage : null,
+          followup_after_hours: messageKind === "follow_up" ? followUpAfterHours : null,
+          missing_translation_action: messageKind === "follow_up" ? (options?.missingTranslationAction || missingTranslationAction) : "english",
           delay_ms: delayMs,
           parallel_per_sender: true,
           audience_category_id: audienceCategoryId || null,
@@ -1503,7 +1620,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     );
     if (!response.ok || json?.success === false)
       throw new Error(
-        json?.error || `Start job failed with HTTP ${response.status}`,
+        json?.error || json?.startMessage || `Start job failed with HTTP ${response.status}`,
       );
     const scheduleId = json?.schedule?.id || "";
     setProgress(0);
@@ -1516,8 +1633,14 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       stopped: false,
     });
     setSelectedContacts({});
+    const startState = String(json?.startState || 'queued');
+    const startMessage = String(json?.startMessage || '').trim();
     setStatus(
-      `Durable ${messageKind === "follow_up" ? "follow-up" : "message"} job started for ${targetCount.toLocaleString()} contact(s). You can close Scout; the central worker continues safely. Job: ${scheduleId}`,
+      startState === 'sending'
+        ? `Sending started · ${startMessage} Job: ${scheduleId}`
+        : startState === 'warning'
+          ? `Message sent, but action is required · ${startMessage} Job: ${scheduleId}`
+          : `Job queued · ${startMessage || `Scout will continue ${targetCount.toLocaleString()} contact(s) in the background.`} Job: ${scheduleId}`,
     );
     await Promise.allSettled([loadSchedules(), loadRecentSent(), loadAccounts()]);
   }
@@ -1614,10 +1737,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         throw new Error(diagnostic);
       }
 
-      const batchId = `scout_v1035_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const runId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `${Date.now().toString(16).padStart(8, '0')}-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12, '0').slice(0, 12)}`;
+      const batchId = `scout_v830_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const { error: batchError } = await supabase
         .from("outreach_batches")
         .insert({
@@ -1637,7 +1757,6 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             ),
             dryRun,
             delayMs,
-            runId,
             templateMode,
             senderMode,
             categoryId,
@@ -1664,7 +1783,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       let stopped = false;
       const requested = contacts.length;
       setStatus(
-        `Sending now: 0 / ${requested.toLocaleString()} started. You can close Scout; the central worker continues safely.`,
+        `Sending now: 0 / ${requested.toLocaleString()} started. Keep Scout open until it finishes.`,
       );
       emitLiveActivity({
         kind: "send",
@@ -1726,11 +1845,6 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           body: JSON.stringify({
             workspace_id: workspace.id,
             business_id: business.id,
-            template_id: template.id,
-            batch_id: batchId,
-            run_id: runId,
-            run_limit: Number.isFinite(senderCap(account)) ? senderCap(account) : undefined,
-            is_follow_up: !!options?.isFollowUp,
             gmail_account_id: account.id,
             to: payload.email,
             subject: payload.subject,
@@ -1755,7 +1869,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
           const reason =
             json?.error ||
             result.reason ||
-            "Blocked because this lead already belongs to another team member.";
+            "Blocked because this lead already belongs to another Scout user in this deployment.";
           skipped += 1;
           rowsForDownload.push({
             business: business.name,
@@ -1778,13 +1892,22 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             kind: "send",
             status: "skipped",
             title: "Team duplicate blocked",
-            message: `${payload.email} was not sent because another team member owns the lead.`,
+            message: `${payload.email} was not sent because another Scout user in this deployment owns the lead.`,
             toEmail: payload.email,
             fromEmail: account.email,
             businessName: business.name || "",
             countText: `${attempted.toLocaleString()} / ${requested.toLocaleString()}`,
           });
           continue;
+        }
+
+        if (json?.access_token) {
+          await supabase
+            .from("gmail_accounts")
+            .update({ access_token: json.access_token })
+            .eq("workspace_id", workspace.id)
+            .eq("id", account.id);
+          account.access_token = json.access_token;
         }
 
         if (limitHit) {
@@ -1899,22 +2022,18 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             subject: payload.subject,
             gmailMessageId: result.gmailMessageId || "",
           });
-          if (!json?.persisted) {
-            await persistSendOutcome({
-              business,
-              template,
-              account,
-              result: { ...result, status: statusText },
-              batchId,
-              subject: payload.subject,
-              body: payload.message,
-              attachments: payload.attachments,
-              dryRun,
-              isFollowUp: options?.isFollowUp,
-            });
-          } else if (statusText === "sent") {
-            account.sent_today = Number(account.sent_today || 0) + 1;
-          }
+          await persistSendOutcome({
+            business,
+            template,
+            account,
+            result: { ...result, status: statusText },
+            batchId,
+            subject: payload.subject,
+            body: payload.message,
+            attachments: payload.attachments,
+            dryRun,
+            isFollowUp: options?.isFollowUp,
+          });
           if (statusText === "sent") {
             sentBySender[account.id] = (sentBySender[account.id] || 0) + 1;
             if (senderCap(account) <= 0) {
@@ -1954,22 +2073,18 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             status: statusText,
             reason,
           });
-          if (!json?.persisted) {
-            await persistSendOutcome({
-              business,
-              template,
-              account,
-              result: { ...result, status: statusText },
-              batchId,
-              subject: payload.subject,
-              body: payload.message,
-              attachments: payload.attachments,
-              dryRun,
-              isFollowUp: options?.isFollowUp,
-            });
-          } else if (statusText === "sent") {
-            account.sent_today = Number(account.sent_today || 0) + 1;
-          }
+          await persistSendOutcome({
+            business,
+            template,
+            account,
+            result: { ...result, status: statusText },
+            batchId,
+            subject: payload.subject,
+            body: payload.message,
+            attachments: payload.attachments,
+            dryRun,
+            isFollowUp: options?.isFollowUp,
+          });
           emitLiveActivity({
             kind: "send",
             status: statusText || "skipped",
@@ -2099,7 +2214,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         .single();
       if (insertError) throw insertError;
       if (insertedSchedule) setLastSavedSchedule(insertedSchedule as MessageSchedule);
-      setStatus("Schedule saved. The central worker will start it automatically at the selected time.");
+      setStatus("Schedule saved. Saved. Keep Scout open when it is time to send, or add a phone reminder so your phone reminds you.");
       await loadSchedules();
     } catch (err) {
       setError(formatError(err));
@@ -2194,7 +2309,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     const guarded = await filterTeamSendableContacts(candidates);
     if (guarded.blocked > 0) {
       setStatus(
-        `${guarded.blocked.toLocaleString()} due follow-up${guarded.blocked === 1 ? " was" : "s were"} blocked because another team member owns the lead.`,
+        `${guarded.blocked.toLocaleString()} due follow-up${guarded.blocked === 1 ? " was" : "s were"} blocked because another Scout user in this deployment owns the lead.`,
       );
     }
     return guarded.allowed;
@@ -2202,15 +2317,59 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
   async function sendDueFollowUpsNow() {
     if (busy) return;
-    setBusy(true); setError("");
+    setBusy(true);
+    setError("");
     try {
-      const freshDue = await fetchDueFollowUps(Math.min(Number(sendLimit || 1000), 1000));
-      setDueFollowUps(freshDue);
-      const contacts = await getDueFollowUpBusinesses(Math.min(Number(sendLimit || 1000), freshDue.length || 1000), freshDue);
-      if (!contacts.length) throw new Error("No due follow-up contacts found.");
-      await startDurableSendJob(contacts, { isFollowUp: true, limit: contacts.length, messageKind: "follow_up", followupSegment: followUpSegment });
-    } catch (err) { setError(formatError(err)); }
-    finally { setBusy(false); }
+      if (!replySyncEnabled) {
+        throw new Error("Follow-up sending is disabled in this send-only Google-verification build because Scout cannot safely confirm replies without inbox-reading permission.");
+      }
+      if (!currentFollowUpTemplate) {
+        throw new Error(`Create an active Follow-up ${followUpStage} template first.`);
+      }
+      const { data: dueCountRaw, error: dueCountError } = await supabase.rpc("count_due_followups", {
+        target_workspace: workspace.id,
+        followup_segment: followUpSegment,
+        requested_stage: followUpStage,
+        followup_after_hours: followUpAfterHours,
+        target_category_id: audienceCategoryId || null,
+        target_country: countryFilter || "",
+      });
+      if (dueCountError) throw dueCountError;
+      const dueCount = Math.max(0, Number(dueCountRaw || 0));
+      if (!dueCount) throw new Error("No due follow-up contacts found.");
+      const selectedRows = dueFollowUps.filter((row) => selectedDueFollowUps[row.business_id]);
+      if (selectedRows.length) {
+        const selectedBusinesses = await getDueFollowUpBusinesses(selectedRows.length, selectedRows);
+        if (!selectedBusinesses.length) throw new Error("The selected prospects are no longer eligible for follow-up.");
+        await startDurableSendJob(selectedBusinesses, {
+          isFollowUp: true,
+          limit: selectedBusinesses.length,
+          messageKind: "follow_up",
+          followupSegment: followUpSegment,
+          allDueFollowUps: false,
+          missingTranslationAction,
+        });
+        setStatus(`${selectedBusinesses.length.toLocaleString()} selected Follow-up ${followUpStage} message(s) were added to one background job.`);
+        return;
+      }
+
+      const targetCount = followUpSendAll
+        ? dueCount
+        : Math.min(dueCount, Math.max(1, Math.round(Number(followUpLimit || 100))));
+      await startDurableSendJob(undefined, {
+        isFollowUp: true,
+        limit: targetCount,
+        messageKind: "follow_up",
+        followupSegment: followUpSegment,
+        allDueFollowUps: true,
+        missingTranslationAction,
+      });
+      setStatus(`${targetCount.toLocaleString()} oldest due Follow-up ${followUpStage} message(s) were added to one background job. Scout will use automatic sender rotation and pacing.`);
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function runDueSchedulesFromApp(options?: { silent?: boolean }) {
@@ -2228,7 +2387,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ limit: 1, workspaceId: workspace.id, source: "manual_due_send_check" }),
+          body: JSON.stringify({ limit: 1, workspaceId: workspace.id, source: "open_app_parallel_sender_runner" }),
         },
       );
       if (!response.ok || json?.success === false)
@@ -2251,7 +2410,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       if (Number(json.ran || 0) > 0 || !options?.silent) {
         setStatus(
           Number(json.ran || 0) > 0
-            ? `Due send processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. You can close Scout; the central worker continues safely.`
+            ? `Due send processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. Keep Scout open while it sends.`
             : "No due schedules right now.",
         );
       }
@@ -2327,16 +2486,17 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
   function onCategoryChange(value: string) {
     setCategoryId(value);
     const firstInitial = templates.find((t) => t.category_id === value && (t.template_type || "initial") === "initial" && t.active !== false);
-    const firstFollowUp = templates.find((t) => t.category_id === value && (t.template_type || "initial") === "follow_up" && t.active !== false);
+    const firstFollowUp = templates.find((t) => t.category_id === value && (t.template_type || "initial") === "follow_up" && t.active !== false && templateFollowUpStage(t) === followUpStage);
     if (firstInitial) setTemplateId(firstInitial.id);
     if (firstFollowUp) setFollowUpTemplateId(firstFollowUp.id);
   }
 
   function senderCountLine(account: GmailAccount) {
-    const today = Number(senderSentToday[account.id] || account.sent_today || 0);
-    const rolling = Number(senderLast24h[account.id] || 0);
-    const limit = Number(account.daily_limit || 250);
-    return `${today.toLocaleString()} sent today / ${limit.toLocaleString()} daily limit · ${rolling.toLocaleString()} rolling 24h`;
+    const sent = Number(senderLast24h[account.id] || 0);
+    const limit = senderDailyLimit(account);
+    return limit > 0
+      ? `${sent.toLocaleString()} sent in last 24h / ${limit.toLocaleString()} daily limit`
+      : `${sent.toLocaleString()} sent in last 24h`;
   }
 
   const activeSchedules = schedules.filter((s) => ["scheduled", "due", "running"].includes(String(s.status || "")) && !s.stop_requested);
@@ -2353,6 +2513,26 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
     if (failed) parts.push(`${failed.toLocaleString()} failed`);
     if (skipped) parts.push(`${skipped.toLocaleString()} skipped`);
     return parts.join(" · ");
+  }
+
+  async function continueSchedule(schedule: MessageSchedule) {
+    setStopBusyId(schedule.id);
+    setError("");
+    try {
+      const response = await fetch("/api/message/continue-schedule", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId: workspace.id, scheduleId: schedule.id }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.success === false) throw new Error(json?.error || `Continue failed with HTTP ${response.status}`);
+      setStatus("Sending is live. Scout will continue in the background using its automatic delays.");
+      await loadSchedules();
+    } catch (err) {
+      setError(formatError(err));
+    } finally {
+      setStopBusyId("");
+    }
   }
 
   async function stopSchedule(schedule: MessageSchedule) {
@@ -2442,12 +2622,13 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
       {activeSchedules.length ? (
         <div className="card" style={{ padding: 18 }}>
           <div className="actions" style={{ justifyContent: "space-between" }}>
-            <h3 style={{ margin: 0 }}>Saved sends waiting or running</h3>
+            <h3 style={{ margin: 0 }}>A sending job is still live</h3>
             <div className="actions" style={{ gap: 6 }}>
               {stoppedSchedules.length ? <button className="btn secondary mini" type="button" onClick={deleteStoppedSchedules}>Clear stopped</button> : null}
               <button className="btn secondary mini" type="button" onClick={() => setShowSavedSends((v) => !v)}>{showSavedSends ? "Hide" : "Show"}</button>
             </div>
           </div>
+          <p className="muted">Choose <strong>Continue sending</strong> to keep it live, or <strong>Stop sending</strong> to pause the remaining recipients. Closing Scout does not delete the job.</p>
           {showSavedSends ? <div className="table-wrap">
             <table>
               <thead><tr><th>Type</th><th>Status</th><th>Progress</th><th>Scheduled</th><th>Action</th></tr></thead>
@@ -2458,7 +2639,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                     <td>{job.status}</td>
                     <td>{scheduleProgressText(job)}{job.last_error ? <><br /><span className="error">{job.last_error}</span></> : null}</td>
                     <td>{new Date(job.scheduled_for).toLocaleString()}</td>
-                    <td><div className="actions" style={{ gap: 6 }}><button className="btn secondary" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(job)}>{stopBusyId === job.id ? "Stopping…" : "Stop"}</button><button className="btn secondary" type="button" disabled={Boolean(stopBusyId)} onClick={() => deleteSchedule(job)}>Delete</button></div></td>
+                    <td><div className="actions" style={{ gap: 6 }}><button className="btn" type="button" disabled={Boolean(stopBusyId)} onClick={() => continueSchedule(job)}>{stopBusyId === job.id ? "Working…" : "Continue sending"}</button><button className="btn secondary" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(job)}>{stopBusyId === job.id ? "Working…" : "Stop sending"}</button></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -2533,8 +2714,11 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
             />
           </div>
           <div>
-            <label className="label">Sending safety</label>
-            <div className="notice">Scout automatically uses each Gmail account’s saved mode: Warm-up, Normal, or Fast. Change it in Settings only when needed.</div>
+            <label className="label">Sending delay</label>
+            <div className="notice" style={{ margin: 0 }}>
+              <strong>Automatic — no setting needed</strong><br />
+              The same Gmail waits a random 90–210 seconds after each successful email. Different Gmail accounts are spaced by a random 3–6 seconds. Users cannot shorten these safety delays.
+            </div>
           </div>
         </div>
 
@@ -2605,7 +2789,7 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
                 {connectedAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.email} ·{" "}
-                    {Number(senderSentToday[a.id] || a.sent_today || 0).toLocaleString()} sent today
+                    {Number(senderLast24h[a.id] || 0).toLocaleString()} used today
                   </option>
                 ))}
               </select>
@@ -2928,99 +3112,171 @@ export default function MessageClient({ workspace }: { workspace: Workspace }) {
 
       <div className="grid grid-2">
         <div className="card" style={{ padding: 18 }}>
-          <h3 id="send-follow-ups">Send Follow-ups — 72h no reply</h3>
-          <p className="muted">
-            These are people you emailed more than 72 hours ago who did not send a reply. Send them now when you are ready.
-          </p>
-          <div className="notice" style={{ marginBottom: 12 }}>
-            Due now: <strong>{dueFollowUps.length.toLocaleString()}</strong> contact(s). You can send up to 1,000 follow-ups at once. Choose the follow-up template here, then send once.
-          </div>
-          <div className="grid grid-2">
+          <div className="actions" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
-              <label className="label">Which follow-ups?</label>
-              <select
-                className="select"
-                value={followUpSegment}
-                onChange={(e) =>
-                  setFollowUpSegment(
-                    e.target.value as
-                      | "all_unanswered"
-                      | "no_reply"
-                      | "auto_reply",
-                  )
-                }
-              >
-                <option value="all_unanswered">All due follow-ups</option>
+              <h3 id="send-follow-ups" style={{ marginTop: 0, marginBottom: 6 }}>Follow-ups</h3>
+              <p className="muted" style={{ margin: 0 }}>Oldest eligible prospects are selected first. The sequence ends after Follow-up 2.</p>
+            </div>
+            <button className="btn secondary mini" type="button" onClick={loadDueFollowUps}>Refresh</button>
+          </div>
+
+          {!replySyncEnabled ? (
+            <div className="notice" style={{ marginTop: 12 }}>
+              <strong>Visible but safely disabled for Google verification.</strong> This send-only build cannot read replies, so it cannot safely decide who should receive a follow-up. The controls and queue are ready for the team build.
+            </div>
+          ) : null}
+
+          <div className="success" style={{ marginTop: 12 }}>
+            <strong>{dueFollowUpTotal.toLocaleString()} need Follow-up {followUpStage}</strong>
+            <span className="muted"> · waited at least {followUpAfterHours} hours · {followUpSegment === "all_unanswered" ? "all unanswered" : followUpSegment === "auto_reply" ? "auto reply only" : "no reply"}</span>
+          </div>
+
+          <div className="grid grid-2" style={{ marginTop: 12 }}>
+            <div>
+              <label className="label">Audience</label>
+              <select className="select" value={audienceCategoryId} onChange={(e) => setAudienceCategoryId(e.target.value)}>
+                <option value="">All audiences</option>
+                {categories.map((category) => <option key={`followup-audience-${category.id}`} value={category.id}>{category.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Countries</label>
+              <select className="select" value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)}>
+                <option value="">All countries</option>
+                {locationOptions.map((option) => <option key={`followup-country-${option.value}`} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Follow-up stage</label>
+              <select className="select" value={followUpStage} onChange={(e) => setFollowUpStage(Number(e.target.value) === 2 ? 2 : 1)}>
+                <option value={1}>Follow-up 1</option>
+                <option value={2}>Follow-up 2</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Reply state</label>
+              <select className="select" value={followUpSegment} onChange={(e) => setFollowUpSegment(e.target.value as "all_unanswered" | "no_reply" | "auto_reply")}>
+                <option value="all_unanswered">All unanswered</option>
                 <option value="no_reply">No reply at all</option>
                 <option value="auto_reply">Auto reply only</option>
               </select>
             </div>
             <div>
-              <label className="label">Follow-up template to use</label>
-              <select
-                className="select"
-                value={currentFollowUpTemplate?.id || ""}
-                onChange={(e) => {
-                  setFollowUpTemplateId(e.target.value);
-                }}
-              >
-                <option value="">Use first follow-up template</option>
-                {(followUpTemplates.length ? followUpTemplates : allFollowUpTemplates).map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
+              <label className="label">Template</label>
+              <select className="select" value={currentFollowUpTemplate?.id || ""} onChange={(e) => setFollowUpTemplateId(e.target.value)}>
+                <option value="">Select Follow-up {followUpStage} template</option>
+                {(stageFollowUpTemplates.length ? stageFollowUpTemplates : allStageFollowUpTemplates).map((template) => (
+                  <option key={template.id} value={template.id}>{template.name} · wait {templateFollowUpAfterHours(template)}h</option>
                 ))}
               </select>
-              <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>Only follow-up templates show here. First-message templates are not used.</p>
+            </div>
+            <div>
+              <label className="label">How many</label>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={Math.max(1, dueFollowUpTotal)}
+                disabled={followUpSendAll || selectedDueFollowUpIds.length > 0}
+                value={Math.min(Math.max(1, followUpLimit), Math.max(1, dueFollowUpTotal || followUpLimit))}
+                onChange={(e) => setFollowUpLimit(Math.max(1, Math.round(Number(e.target.value || 100))))}
+              />
+              <label className="checkbox-row" style={{ marginBottom: 0 }}>
+                <input type="checkbox" checked={followUpSendAll} disabled={selectedDueFollowUpIds.length > 0} onChange={(e) => setFollowUpSendAll(e.target.checked)} />
+                <span>Send all {dueFollowUpTotal.toLocaleString()} due</span>
+              </label>
             </div>
           </div>
+
+          <div className="notice" style={{ marginTop: 12 }}>
+            {Object.entries(followUpLanguageSummary.counts).length
+              ? Object.entries(followUpLanguageSummary.counts).map(([language, count]) => `${language} ${count}`).join(" · ")
+              : "No eligible prospects loaded"}
+            {followUpLanguageSummary.missing
+              ? ` · ${followUpLanguageSummary.missing} missing reviewed translation in preview`
+              : followUpLanguageSummary.checked && followUpLanguageSummary.complete
+                ? " · Translation coverage complete"
+                : followUpLanguageSummary.checked
+                  ? ` · Preview checked ${followUpLanguageSummary.checked.toLocaleString()} of ${followUpLanguageSummary.intended.toLocaleString()}`
+                  : ""}
+            {selectedDueFollowUpIds.length ? ` · ${selectedDueFollowUpIds.length} exact prospect(s) selected` : ""}
+          </div>
+
           <div className="actions" style={{ marginTop: 12 }}>
             <button
               className="btn"
               type="button"
-              disabled={busy || !dueFollowUps.length}
+              disabled={busy || !replySyncEnabled || !dueFollowUpTotal || !currentFollowUpTemplate || !connectedAccounts.length}
               onClick={sendDueFollowUpsNow}
             >
-              Send Due Follow-ups Now
-            </button>
-            <button
-              className="btn secondary"
-              type="button"
-              onClick={loadDueFollowUps}
-            >
-              Refresh
+              {replySyncEnabled ? `Start Follow-up ${followUpStage}` : "Follow-ups disabled in verification build"}
             </button>
           </div>
-          <div className="actions" style={{ marginTop: 12 }}>
-            <button className="btn secondary mini" type="button" onClick={() => setShowDueList((v) => !v)}>{showDueList ? "Hide list" : "Show list"}</button>
-          </div>
-          {showDueList ? (
-            <div className="table-wrap" style={{ marginTop: 12 }}>
+
+          <details className="card" style={{ padding: 14, marginTop: 12, background: "rgba(255,255,255,0.03)" }}>
+            <summary style={{ cursor: "pointer", fontWeight: 800 }}>Choose exact prospects</summary>
+            <div className="actions" style={{ marginTop: 12 }}>
+              <input className="input" style={{ flex: "1 1 260px" }} value={dueFollowUpSearch} onChange={(e) => setDueFollowUpSearch(e.target.value)} placeholder="Search business or email" />
+              <button className="btn secondary mini" type="button" onClick={() => {
+                setSelectedDueFollowUps((current) => ({ ...current, ...Object.fromEntries(visibleDueFollowUps.map((row) => [row.business_id, true])) }));
+                setFollowUpSendAll(false);
+              }}>Select shown</button>
+              <button className="btn secondary mini" type="button" onClick={() => setSelectedDueFollowUps({})}>Clear</button>
+            </div>
+            <p className="muted">Showing the oldest {visibleDueFollowUps.length.toLocaleString()} loaded prospects. Selecting exact prospects overrides “How many”.</p>
+            <div className="table-wrap">
               <table>
-                <thead>
-                  <tr>
-                    <th>Business</th>
-                    <th>Email</th>
-                    <th>Type</th>
-                    <th>Last Sent</th>
-                  </tr>
-                </thead>
+                <thead><tr><th>Select</th><th>Business</th><th>Email</th><th>Next stage</th><th>Last message</th></tr></thead>
                 <tbody>
-                  {dueFollowUps.slice(0, 1000).map((row) => (
+                  {visibleDueFollowUps.map((row) => (
                     <tr key={`${row.business_id}-${row.last_sent_at}`}>
+                      <td><input type="checkbox" checked={Boolean(selectedDueFollowUps[row.business_id])} onChange={(e) => {
+                        setSelectedDueFollowUps((current) => ({ ...current, [row.business_id]: e.target.checked }));
+                        if (e.target.checked) setFollowUpSendAll(false);
+                      }} /></td>
                       <td>{row.business_name || "-"}</td>
                       <td>{row.to_email}</td>
-                      <td>{row.followup_segment || row.segment || row.reply_state || followUpSegment}</td>
+                      <td>Follow-up {row.followup_stage || followUpStage}</td>
                       <td>{new Date(row.last_sent_at).toLocaleString()}</td>
                     </tr>
                   ))}
-                  {!dueFollowUps.length ? (
-                    <tr>
-                      <td colSpan={4} className="muted">No due follow-ups yet.</td>
-                    </tr>
-                  ) : null}
+                  {!visibleDueFollowUps.length ? <tr><td colSpan={5} className="muted">No due prospects match these filters.</td></tr> : null}
                 </tbody>
               </table>
             </div>
-          ) : null}
+          </details>
+
+          <details className="card" style={{ padding: 14, marginTop: 10, background: "rgba(255,255,255,0.03)" }}>
+            <summary style={{ cursor: "pointer", fontWeight: 800 }}>Translation details</summary>
+            <p className="muted">Scout checks each recipient against the selected template’s country assignments and reviewed language versions.</p>
+            <div className="stack">
+              <label className="checkbox-row"><input type="radio" name="missing-translation" checked={missingTranslationAction === "stop"} onChange={() => setMissingTranslationAction("stop")} /><span><strong>Stop and ask</strong><br />Do not send when any selected prospect needs a missing translation.</span></label>
+              <label className="checkbox-row"><input type="radio" name="missing-translation" checked={missingTranslationAction === "exclude"} onChange={() => setMissingTranslationAction("exclude")} /><span><strong>Exclude those contacts</strong><br />Skip only prospects whose reviewed translation is missing.</span></label>
+              <label className="checkbox-row"><input type="radio" name="missing-translation" checked={missingTranslationAction === "english"} onChange={() => setMissingTranslationAction("english")} /><span><strong>Use English</strong><br />Use the English master as the fallback.</span></label>
+            </div>
+          </details>
+
+          <details className="card" style={{ padding: 14, marginTop: 10, background: "rgba(255,255,255,0.03)" }}>
+            <summary style={{ cursor: "pointer", fontWeight: 800 }}>Gmail accounts and limits</summary>
+            <p className="muted">Automatic rotation is the default. Blank run limits use each Gmail account’s Settings default.</p>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Use</th><th>Gmail</th><th>Last 24h</th><th>Remaining</th><th>Campaign maximum</th></tr></thead>
+                <tbody>
+                  {accounts.map((account) => (
+                    <tr key={`followup-sender-${account.id}`}>
+                      <td><input type="checkbox" checked={Boolean(selectedAccounts[account.id])} disabled={!senderAvailable(account)} onChange={(e) => setSelectedAccounts((current) => ({ ...current, [account.id]: e.target.checked }))} /></td>
+                      <td>{account.email}<br /><span className="muted">{senderAvailable(account) ? "Ready" : "Paused or limited"}</span></td>
+                      <td>{Number(senderLast24h[account.id] || account.sent_today || 0).toLocaleString()}</td>
+                      <td>{senderRemainingToday(account).toLocaleString()}</td>
+                      <td><input className="input" type="number" min={1} placeholder={String(account.default_run_limit || 50)} value={senderRunLimits[account.id] || ""} onChange={(e) => setSenderRunLimits((current) => ({ ...current, [account.id]: e.target.value }))} /></td>
+                    </tr>
+                  ))}
+                  {!accounts.length ? <tr><td colSpan={5} className="muted">No Gmail accounts connected.</td></tr> : null}
+                </tbody>
+              </table>
+            </div>
+          </details>
         </div>
 
         <div className="card" style={{ padding: 18 }}>
@@ -3062,9 +3318,14 @@ Click <strong>Run Due Sends Now</strong> to start.
               />
             </div>
           </div>
-          <div className="notice" style={{ marginTop: 12 }}>
-            Saved sends start through Scout&apos;s central worker. You do not need to keep this page open.
-          </div>
+          <label className="checkbox-row" style={{ marginTop: 12 }}>
+            <input
+              type="checkbox"
+              checked={autoRunSchedules}
+              onChange={(e) => setAutoRunSchedules(e.target.checked)}
+            />{" "}
+            Start saved sends automatically; Supabase continues them after Scout is closed
+          </label>
           <div className="actions" style={{ marginTop: 12 }}>
             <button className="btn secondary" type="button" onClick={enableScheduleNotifier}>
               {scheduleReminderEnabled && notificationPermission === "granted" ? "App notifier on" : "Enable app notifier"}
@@ -3116,7 +3377,8 @@ Click <strong>Run Due Sends Now</strong> to start.
                       <td>
                         <div className="actions" style={{ gap: 6 }}>
                           {String(s.status || "") === "scheduled" && !s.stop_requested ? <button className="btn secondary mini" type="button" onClick={() => downloadScheduleReminder(s)}>Phone reminder</button> : null}
-                          {["scheduled", "due", "running"].includes(String(s.status || "")) && !s.stop_requested ? <button className="btn secondary mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(s)}>{stopBusyId === s.id ? "Stopping…" : "Stop"}</button> : null}
+                          {!["sent", "complete", "completed", "cancelled"].includes(String(s.status || "")) ? <button className="btn mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => continueSchedule(s)}>{stopBusyId === s.id ? "Working…" : "Continue sending"}</button> : null}
+                          {["scheduled", "due", "running"].includes(String(s.status || "")) && !s.stop_requested ? <button className="btn secondary mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => stopSchedule(s)}>{stopBusyId === s.id ? "Working…" : "Stop sending"}</button> : null}
                           <button className="btn secondary mini" type="button" disabled={Boolean(stopBusyId)} onClick={() => deleteSchedule(s)}>Delete</button>
                         </div>
                       </td>

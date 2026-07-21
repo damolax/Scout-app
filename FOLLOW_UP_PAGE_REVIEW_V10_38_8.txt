@@ -1,0 +1,25 @@
+SCOUT v10.38.8 FOLLOW-UPS PAGE — FINAL REVIEW
+
+CONFIRMED
+- The page is compact: the main workflow is visible without opening the detailed lists.
+- Main controls: Audience, Countries, Follow-up stage, Reply state, Template, How many.
+- Default quantity: 100.
+- Send all is an explicit checkbox, not the default action.
+- Oldest due prospects are selected first.
+- Exact prospect selection is inside one closed accordion.
+- Translation details and missing-translation behavior are inside one closed accordion.
+- Gmail accounts, rolling usage, remaining allowance, and campaign maximum are inside one closed accordion.
+- Templates can be assigned to Follow-up 1 or Follow-up 2 and given their own wait period.
+- The database queue advances each successful follow-up once and stops after Follow-up 2.
+- Failed sends remain retryable and do not advance the stage.
+- Real replies, bounces, blocks, delivery failures, no-inbox, invalid, duplicate, and archived leads are suppressed.
+- The Google-verification build visibly explains why follow-up sending is disabled and blocks it in the client, API, and worker.
+
+VALIDATION
+- TypeScript typecheck: PASS
+- Next.js production build: PASS
+- Source diff whitespace check: PASS
+- Deployment script syntax check: PASS
+
+LIMITATION
+- This was validated offline. Live Supabase, Vercel, Gmail OAuth, and Cron behavior still require the controlled post-deployment checks in AUDIT_RESULTS_V10_38_8.txt.

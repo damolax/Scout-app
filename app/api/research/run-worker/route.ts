@@ -1,5 +1,5 @@
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
@@ -30,9 +30,10 @@ async function signedInMemberCanRun(workspaceId: string) {
       .select('workspace_id,user_id,approved')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
+      .eq('approved', true)
       .limit(1);
     if (memberError) return false;
-    return Boolean(member);
+    return Boolean(member?.length);
   } catch {
     return false;
   }
@@ -103,9 +104,9 @@ async function runWorker(request: NextRequest) {
     }
   }
 
-  const cycles = Math.max(1, Math.min(12, Number(body.cycles || request.nextUrl.searchParams.get('cycles') || 1)));
-  const batchSize = Math.max(1, Math.min(40, Number(body.batchSize || request.nextUrl.searchParams.get('batchSize') || 4)));
-  const concurrency = Math.max(1, Math.min(5, Number(body.concurrency || request.nextUrl.searchParams.get('concurrency') || 2)));
+  const cycles = Math.max(1, Math.min(2, Number(body.cycles || request.nextUrl.searchParams.get('cycles') || 1)));
+  const batchSize = Math.max(1, Math.min(2, Number(body.batchSize || request.nextUrl.searchParams.get('batchSize') || 4)));
+  const concurrency = Math.max(1, Math.min(2, Number(body.concurrency || request.nextUrl.searchParams.get('concurrency') || 2)));
   const enqueueLimit = Math.max(0, Math.min(50000, Number(body.enqueueLimit || request.nextUrl.searchParams.get('enqueueLimit') || 5000)));
   const autoEnqueue = body.autoEnqueue !== false && request.nextUrl.searchParams.get('autoEnqueue') !== 'false';
 

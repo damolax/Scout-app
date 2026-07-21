@@ -1,9 +1,9 @@
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
+import { requireWorkspaceAccess } from '@/lib/require-workspace-access';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { createClient } from '@/lib/supabase-server';
 import { signatureHtml, signatureText } from '@/lib/email-signature';
 import { featureFlags } from '@/lib/feature-flags';
 
@@ -22,6 +22,7 @@ async function refreshAccessToken(account: AnyRow) {
   if (!account.refresh_token) throw new Error(`No refresh token for ${account.email}. Reconnect Gmail in Settings.`);
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
+    signal: AbortSignal.timeout(12000),
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: String(account.refresh_token), grant_type: 'refresh_token' })
   });
@@ -50,6 +51,7 @@ async function ensureAccessToken(supabase: ReturnType<typeof createAdminClient>,
 async function syncSignatureToGmail(accessToken: string, email: string, html: string) {
   const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs/${encodeURIComponent(email)}`, {
     method: 'PATCH',
+    signal: AbortSignal.timeout(12000),
     headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({ signature: html })
   });
@@ -67,20 +69,15 @@ export async function POST(request: NextRequest) {
     const workspaceId = String(input.workspace_id || '').trim();
     const accountId = String(input.gmail_account_id || '').trim();
     const applyAll = Boolean(input.apply_all || input.applyAll);
-    const syncRequested = Boolean(input.sync_to_gmail || input.syncToGmail);
-    const syncToGmail = syncRequested && featureFlags.gmailNativeSignatureSync;
+    const syncToGmail = Boolean(input.sync_to_gmail || input.syncToGmail);
+    if (syncToGmail && !featureFlags.gmailNativeSignatureSync) throw new Error('Native Gmail signature sync is disabled in the Google send-only verification build. The signature can still be saved and added to Scout-sent emails.');
     const signature_enabled = input.signature_enabled !== false;
     const signature_html = String(input.signature_html || '').trim();
     const signature_text = String(input.signature_text || '').trim();
     const signature_logo_url = String(input.signature_logo_url || input.logo_url || '').trim();
     if (!workspaceId) throw new Error('workspace_id is required.');
+    await requireWorkspaceAccess(workspaceId);
     if (!applyAll && !accountId) throw new Error('gmail_account_id is required unless apply_all is true.');
-
-    const sessionClient = await createClient();
-    const { data: { user } } = await sessionClient.auth.getUser();
-    if (!user) return NextResponse.json({ success: false, error: 'Not signed in.' }, { status: 401 });
-    const { data: membership } = await sessionClient.from('workspace_members').select('workspace_id').eq('workspace_id', workspaceId).eq('user_id', user.id).eq('approved', true).maybeSingle();
-    if (!membership) return NextResponse.json({ success: false, error: 'You do not have access to this workspace.' }, { status: 403 });
 
     const supabase = createAdminClient();
 
@@ -115,13 +112,9 @@ export async function POST(request: NextRequest) {
         updated: 0,
         workspace_saved: true,
         results: [],
-        sync_available: featureFlags.gmailNativeSignatureSync,
-        sync_requested: syncRequested,
-        message: syncRequested && !featureFlags.gmailNativeSignatureSync
-          ? 'Signature and logo were saved in Scout. Gmail-native signature sync is available after advanced Google authorization.'
-          : syncToGmail
-            ? 'Signature and logo were saved to the workspace, but no Gmail sender accounts are connected yet. Connect Gmail before syncing to Gmail.'
-            : 'Signature and logo were saved to the workspace.'
+        message: syncToGmail
+          ? 'Signature and logo were saved to the workspace, but no Gmail sender accounts are connected yet. Connect Gmail before syncing to Gmail.'
+          : 'Signature and logo were saved to the workspace.'
       });
     }
 
@@ -179,18 +172,7 @@ export async function POST(request: NextRequest) {
       results.push({ account_id: account.id, email: account.email, sync_status: syncStatus, sync_error: syncError });
     }
 
-    return NextResponse.json({
-      success: true,
-      updated: results.length,
-      workspace_saved: true,
-      sync_available: featureFlags.gmailNativeSignatureSync,
-      sync_requested: syncRequested,
-      sync_deferred: syncRequested && !featureFlags.gmailNativeSignatureSync,
-      results,
-      message: syncRequested && !featureFlags.gmailNativeSignatureSync
-        ? 'Saved in Scout. Gmail-native signature sync is temporarily unavailable during send-only Google verification.'
-        : undefined,
-    });
+    return NextResponse.json({ success: true, updated: results.length, workspace_saved: true, results });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 400 });
   }

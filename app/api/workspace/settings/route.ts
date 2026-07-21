@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { isScoutAdminEmail } from '@/lib/admin';
 
 function cleanUrl(value: unknown) {
   let url = String(value || '').trim();
@@ -40,7 +39,7 @@ export async function GET(request: NextRequest) {
     const admin = createAdminClient();
     const { data, error } = await admin
       .from('workspaces')
-      .select('id,name,api_key,app_url,render_backend_url,default_audience_category_id,default_audience_category_name,dork_settings,extension_settings,email_signature_text,email_signature_html,email_logo_url')
+      .select('id,name,api_key,app_url,default_audience_category_id,default_audience_category_name,dork_settings,extension_settings,email_signature_text,email_signature_html,email_logo_url')
       .eq('id', workspaceId)
       .single();
     if (error) throw error;
@@ -58,9 +57,6 @@ export async function POST(request: NextRequest) {
     const allowed = await assertMember(workspaceId);
     if ('error' in allowed) return NextResponse.json({ success: false, error: allowed.error }, { status: allowed.status });
 
-    if (!isScoutAdminEmail(allowed.user.email)) {
-      return NextResponse.json({ success: false, error: 'Only the main admin can change shared Scout setup.' }, { status: 403 });
-    }
 
     const admin = createAdminClient();
     let defaultCategoryId = body.defaultAudienceCategoryId ? String(body.defaultAudienceCategoryId) : null;
@@ -102,7 +98,6 @@ export async function POST(request: NextRequest) {
 
     const patch = {
       app_url: cleanUrl(body.appUrl),
-      render_backend_url: cleanUrl(body.renderBackendUrl),
       default_audience_category_id: defaultCategoryId,
       default_audience_category_name: defaultCategoryName || null,
       extension_settings: {
@@ -114,25 +109,15 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString()
     };
 
-    const { data, error } = await admin.from('workspaces').update(patch).eq('id', workspaceId).select('id,name,api_key,app_url,render_backend_url,default_audience_category_id,default_audience_category_name,dork_settings,extension_settings,email_signature_text,email_signature_html,email_logo_url').single();
+    const { data, error } = await admin.from('workspaces').update(patch).eq('id', workspaceId).select('id,name,api_key,app_url,default_audience_category_id,default_audience_category_name,dork_settings,extension_settings,email_signature_text,email_signature_html,email_logo_url').single();
     if (error) throw error;
 
-    await admin
-      .from('workspaces')
-      .update({
-        app_url: patch.app_url,
-        render_backend_url: patch.render_backend_url,
-        dork_settings: data?.dork_settings || {},
-        extension_settings: patch.extension_settings,
-        updated_at: new Date().toISOString()
-      })
-      .neq('id', workspaceId);
 
     await admin.from('activity_logs').insert({
       workspace_id: workspaceId,
       type: 'workspace_settings_saved',
       message: 'Workspace setup URLs/default category were saved.',
-      raw: { appUrl: patch.app_url, renderBackendUrl: patch.render_backend_url, defaultAudienceCategoryName: defaultCategoryName },
+      raw: { appUrl: patch.app_url, defaultAudienceCategoryName: defaultCategoryName },
       created_by: allowed.user.id
     });
 

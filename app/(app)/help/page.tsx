@@ -40,8 +40,10 @@ const pages = [
       ["More options", "Shows extra tools like test-only mode, fixing lead status, checking bad inboxes, and downloading results."],
       ["Ready Leads", "Hidden by default. Click Show when you want to choose exact leads."],
       ["Preview", "Hidden by default. Click Show when you want to see the email before sending."],
-      ["Follow-up template to use", "Choose the follow-up message before sending due follow-ups. First-message templates are not used here."],
-      ["Send Due Follow-ups Now", "Sends follow-up emails now to people who are due."],
+      ["Follow-up stage", "Choose Follow-up 1 or Follow-up 2. Scout never advances beyond stage 2."],
+      ["How many", "Defaults to 100. You can also choose exact prospects or deliberately send all due."],
+      ["Follow-up template", "Choose a template assigned to the selected stage. Each template controls its own waiting period."],
+      ["Start Follow-up", "Queues the oldest eligible prospects first, using the selected translation and Gmail rules."],
       ["Schedule Email", "Save a first-email send for later. Open Scout at that time or use the phone reminder."],
       ["Run Due Sends Now", "Starts saved sends whose time has arrived."],
       ["Add phone reminder", "Adds a phone/calendar reminder so you remember to open Scout."],
@@ -95,7 +97,7 @@ const pages = [
     items: [
       ["Open Scout from the app icon", "The APK opens your Scout web app in a phone app wrapper."],
       ["Allow notifications", "Lets the phone show reminders at the top of the screen."],
-      ["Phone reminder", "This is an optional phone reminder. Scheduled email jobs are handled by Scout's central worker even when the page is closed."],
+      ["Phone reminder", "This reminds you when a saved send is due. It does not secretly send while Scout is closed."],
     ],
   },
 ];
@@ -109,7 +111,7 @@ export default function HelpPage() {
       </div>
       <div className="card" style={{ padding: 18 }}>
         <h3>The simple rule</h3>
-        <p className="muted">Scout finds leads, queues email jobs, and helps you follow up. After you click Send, the central worker can continue even when you close the page.</p>
+        <p className="muted">Scout finds leads, sends emails, watches replies, and helps you follow up. If you want Scout to send, keep Scout open.</p>
       </div>
       {pages.map((page) => (
         <div className="card" style={{ padding: 18 }} key={page.title}>
@@ -144,7 +146,7 @@ export default function HelpPage() {
           <li>Click Send Now.</li>
           <li>Check Replies later.</li>
           <li>When a prospect replies, open the reply and answer from Scout.</li>
-          <li>After 72 hours, go to Due Follow-ups, choose the follow-up template, and click Send Due Follow-ups Now.</li>
+          <li>Open Follow-ups, choose the stage, template, and quantity, review translation coverage, then click Start Follow-up.</li>
         </ol>
       </div>
     </div>

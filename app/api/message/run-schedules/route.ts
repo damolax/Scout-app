@@ -1,5 +1,5 @@
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
@@ -10,13 +10,15 @@ import { buildMimeMessage, appendSignatureToText, EmailAttachment } from "@/lib/
 import { applyCountryFilter, businessMatchesCountry, extractBusinessCountries } from "@/lib/country-location";
 import { resolveTemplateContent } from "@/lib/template-language";
 import { businessIdentityKeys } from "@/lib/normalize";
-import { configuredRunLimit, effectiveDailyLimit, nextDelayMs, sendingMode } from "@/lib/sending-safety";
+import { normalizeEmailAddress, verifyEmailBasic } from "@/lib/email-verification";
+import { effectiveRunLimit, recordSenderHealthEvent } from "@/lib/sender-health";
+import { featureFlags } from "@/lib/feature-flags";
 
 type AnyRow = Record<string, any>;
 
 type WorkerSummary = {
   scheduleId: string;
-  status: "sent" | "failed" | "skipped" | "running" | "queued";
+  status: "sent" | "failed" | "skipped" | "running";
   type?: string;
   requested: number;
   attempted: number;
@@ -28,13 +30,11 @@ type WorkerSummary = {
 };
 
 const MAX_WORKER_BATCH_SIZE = 1000;
-const MAX_EMAILS_PER_SENDER_PER_RUN = 250;
-const MAX_ACTIVE_SENDER_LANES = Math.max(1, Math.min(500, Number(process.env.SCOUT_MAX_ACTIVE_SENDER_LANES || 12)));
-const MAX_ACTIVE_SENDER_LANES_PER_WORKSPACE = Math.max(1, Math.min(50, Number(process.env.SCOUT_MAX_ACTIVE_SENDER_LANES_PER_WORKSPACE || 2)));
-const MAX_ACTIVE_CAMPAIGNS = Math.max(1, Math.min(200, Number(process.env.SCOUT_MAX_ACTIVE_CAMPAIGNS || 12)));
-const MAX_ACTIVE_CAMPAIGNS_PER_WORKSPACE = Math.max(1, Math.min(25, Number(process.env.SCOUT_MAX_ACTIVE_CAMPAIGNS_PER_WORKSPACE || 1)));
-const MAX_SCHEDULES_PER_RUN = 6;
-const MAX_FAST_MESSAGES_PER_LANE_PASS = Math.max(1, Math.min(10, Number(process.env.SCOUT_FAST_MESSAGES_PER_LANE_PASS || 5)));
+const MAX_FOLLOW_UP_QUEUE_SIZE = 50000;
+const MAX_EMAILS_PER_SENDER_PER_RUN = 1;
+const DEFAULT_SENDER_DELAY_MS = 0;
+const MAX_SCHEDULES_PER_RUN = 1;
+const MAX_ACTIVE_LANES_PER_CHUNK = 8;
 const CONTACTABLE_BUSINESS_STATUSES = ["ready", "found", "connected"];
 const LOCATION_RAW_KEYS = [
   "location",
@@ -77,6 +77,19 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
+function senderDelayMs(_raw: AnyRow) {
+  // v10.38 uses a database-enforced random 90–210 second cooldown per Gmail.
+  // No browser or worker delay setting can shorten it.
+  return DEFAULT_SENDER_DELAY_MS;
+}
+
+function followUpStage(raw: AnyRow) {
+  return Number(raw?.followup_stage) === 2 ? 2 : 1;
+}
+
+function templateFollowUpStage(template: AnyRow) {
+  return Number(template?.raw?.followup_stage) === 2 ? 2 : 1;
+}
 
 function scheduleWorkerSecretFromRequest(
   request: NextRequest,
@@ -169,7 +182,6 @@ function looksLikeLimit(message: string, status: number) {
 function looksLikeMessageBlocked(message: string, status: number) {
   const text = message.toLowerCase();
   return (
-    status === 403 ||
     text.includes("message blocked") ||
     text.includes("blocked") ||
     text.includes("policy") ||
@@ -179,6 +191,7 @@ function looksLikeMessageBlocked(message: string, status: number) {
 }
 
 function isPaused(account: AnyRow) {
+  if (account.safety_override_until && new Date(account.safety_override_until).getTime() > Date.now()) return false;
   const status = String(account.status || "").toLowerCase();
   if (account.is_paused === true || ["limit_hit", "paused", "blocked"].includes(status)) return true;
   if (!account.paused_until) return false;
@@ -227,141 +240,17 @@ function renderTemplate(text: string, business: AnyRow) {
   );
 }
 
-function requestedRunLimit(scheduleRaw: AnyRow, account: AnyRow, senderRunLimitOverride?: number) {
+function senderCap(scheduleRaw: AnyRow, account: AnyRow, senderRunLimitOverride?: number) {
   const caps = scheduleRaw?.sender_run_limits || {};
-  const byEmail = caps[String(account.email || '')];
-  const byId = caps[String(account.id || '')];
-  const raw = senderRunLimitOverride && senderRunLimitOverride > 0 ? senderRunLimitOverride : byId ?? byEmail;
-  if (raw !== undefined && raw !== null && String(raw).trim() !== '' && String(raw).toLowerCase() !== 'auto') {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed > 0) return Math.min(MAX_EMAILS_PER_SENDER_PER_RUN, Math.floor(parsed));
-  }
-  return Math.min(MAX_EMAILS_PER_SENDER_PER_RUN, configuredRunLimit(account));
+  const byEmail = caps[String(account.email || "")];
+  const byId = caps[String(account.id || "")];
+  const configured = senderRunLimitOverride && senderRunLimitOverride > 0
+    ? senderRunLimitOverride
+    : byId ?? byEmail ?? account.default_run_limit;
+  const preferred = Number(configured || effectiveRunLimit(account));
+  const safePreferred = Number.isFinite(preferred) && preferred > 0 ? Math.floor(preferred) : effectiveRunLimit(account);
+  return Math.max(0, Math.min(effectiveRunLimit(account), safePreferred));
 }
-
-type SlotReservation = {
-  allowed: boolean;
-  reservationId: string | null;
-  reason: string;
-  sentToday: number;
-  sentRolling24h: number;
-  sentThisRun: number;
-};
-
-
-type ScaleLease = {
-  allowed: boolean;
-  token: string | null;
-  slot: number | null;
-  reason: string;
-};
-
-async function acquireCampaignLease(
-  supabase: ReturnType<typeof createAdminClient>,
-  workspaceId: string,
-  scheduleId: string,
-): Promise<ScaleLease> {
-  const { data, error } = await supabase.rpc('acquire_scout_campaign_lease', {
-    p_workspace_id: workspaceId,
-    p_schedule_id: scheduleId,
-    p_platform_limit: MAX_ACTIVE_CAMPAIGNS,
-    p_workspace_limit: MAX_ACTIVE_CAMPAIGNS_PER_WORKSPACE,
-    p_lease_seconds: 900,
-  });
-  if (error) throw new Error(`Scale Guard campaign lease failed: ${formatError(error)}. Run RUN_THIS_SQL_FIRST_V10_35_1_SCALE_GUARD.sql.`);
-  const row = Array.isArray(data) ? data[0] : data;
-  return { allowed: Boolean(row?.allowed), token: row?.lease_token ? String(row.lease_token) : null, slot: row?.slot == null ? null : Number(row.slot), reason: String(row?.reason || '') };
-}
-
-async function renewCampaignLease(supabase: ReturnType<typeof createAdminClient>, token: string | null) {
-  if (!token) return;
-  await supabase.rpc('renew_scout_campaign_lease', { p_lease_token: token, p_lease_seconds: 900 });
-}
-
-async function releaseCampaignLease(supabase: ReturnType<typeof createAdminClient>, token: string | null) {
-  if (!token) return;
-  await supabase.rpc('release_scout_campaign_lease', { p_lease_token: token });
-}
-
-async function acquireSenderLaneLease(
-  supabase: ReturnType<typeof createAdminClient>,
-  workspaceId: string,
-  scheduleId: string,
-  gmailAccountId: string,
-): Promise<ScaleLease> {
-  const { data, error } = await supabase.rpc('acquire_scout_sender_lane', {
-    p_workspace_id: workspaceId,
-    p_schedule_id: scheduleId,
-    p_gmail_account_id: gmailAccountId,
-    p_platform_limit: MAX_ACTIVE_SENDER_LANES,
-    p_workspace_limit: MAX_ACTIVE_SENDER_LANES_PER_WORKSPACE,
-    p_lease_seconds: 600,
-  });
-  if (error) throw new Error(`Scale Guard sender lease failed: ${formatError(error)}. Run RUN_THIS_SQL_FIRST_V10_35_1_SCALE_GUARD.sql.`);
-  const row = Array.isArray(data) ? data[0] : data;
-  return { allowed: Boolean(row?.allowed), token: row?.lease_token ? String(row.lease_token) : null, slot: row?.slot == null ? null : Number(row.slot), reason: String(row?.reason || '') };
-}
-
-async function renewSenderLaneLease(supabase: ReturnType<typeof createAdminClient>, token: string | null) {
-  if (!token) return;
-  await supabase.rpc('renew_scout_sender_lane', { p_lease_token: token, p_lease_seconds: 600 });
-}
-
-async function releaseSenderLaneLease(supabase: ReturnType<typeof createAdminClient>, token: string | null) {
-  if (!token) return;
-  await supabase.rpc('release_scout_sender_lane', { p_lease_token: token });
-}
-
-async function reserveSenderSlot(
-  supabase: ReturnType<typeof createAdminClient>,
-  input: { workspaceId: string; account: AnyRow; scheduleId: string; batchId: string; timezone: string; runLimit: number },
-): Promise<SlotReservation> {
-  const dailyLimit = Math.max(1, Math.min(2000, Number(input.account.daily_limit || 250)));
-  const safeLimit = Math.max(0, effectiveDailyLimit(input.account));
-  if (safeLimit <= 0) return { allowed: false, reservationId: null, reason: 'Sender health or warm-up allowance is paused.', sentToday: 0, sentRolling24h: 0, sentThisRun: 0 };
-  const { data, error } = await supabase.rpc('reserve_scout_sender_slot', {
-    p_workspace_id: input.workspaceId,
-    p_gmail_account_id: String(input.account.id),
-    p_schedule_id: input.scheduleId,
-    p_batch_id: input.batchId,
-    p_timezone: input.timezone || 'UTC',
-    p_daily_limit: dailyLimit,
-    p_effective_limit: safeLimit,
-    p_run_limit: input.runLimit,
-  });
-  if (error) {
-    const text = formatError(error).toLowerCase();
-    if (text.includes('reserve_scout_sender_slot') || text.includes('pgrst202') || text.includes('schema cache')) {
-      // Backward-compatible fallback while the additive v10.35 SQL is being applied.
-      // It is conservative but the migration is still required for cross-job atomicity.
-      const rollingSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const [{ count: rolling }, { count: run }] = await Promise.all([
-        supabase.from('sent_messages').select('id', { count: 'exact', head: true }).eq('workspace_id', input.workspaceId).eq('gmail_account_id', input.account.id).eq('status', 'sent').gte('sent_at', rollingSince),
-        supabase.from('sent_messages').select('id', { count: 'exact', head: true }).eq('workspace_id', input.workspaceId).eq('gmail_account_id', input.account.id).eq('status', 'sent').contains('raw', { schedule_id: input.scheduleId }),
-      ]);
-      const sentRolling = Number(rolling || 0);
-      const sentRun = Number(run || 0);
-      const allowed = sentRolling < Math.min(dailyLimit, safeLimit) && sentRun < input.runLimit;
-      return { allowed, reservationId: null, reason: allowed ? 'Fallback safety check.' : 'Safe sending limit reached.', sentToday: Number(input.account.sent_today || 0), sentRolling24h: sentRolling, sentThisRun: sentRun };
-    }
-    throw error;
-  }
-  const row = Array.isArray(data) ? data[0] : data;
-  return {
-    allowed: Boolean(row?.allowed),
-    reservationId: row?.reservation_id ? String(row.reservation_id) : null,
-    reason: String(row?.reason || ''),
-    sentToday: Number(row?.sent_today || 0),
-    sentRolling24h: Number(row?.sent_rolling_24h || 0),
-    sentThisRun: Number(row?.sent_this_run || 0),
-  };
-}
-
-async function finalizeSenderSlot(supabase: ReturnType<typeof createAdminClient>, reservationId: string | null, success: boolean, error?: string) {
-  if (!reservationId) return;
-  await supabase.rpc('finalize_scout_sender_slot', { p_reservation_id: reservationId, p_success: success, p_error: error || null });
-}
-
 
 async function loadScheduleControl(
   supabase: ReturnType<typeof createAdminClient>,
@@ -401,7 +290,7 @@ async function prepareAttachments(items: unknown): Promise<EmailAttachment[]> {
     if (!url) continue;
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol)) continue;
-    const response = await fetch(parsed.toString());
+    const response = await fetch(parsed.toString(), { signal: AbortSignal.timeout(12000) });
     if (!response.ok) throw new Error(`Attachment download failed for ${safeAttachmentName(row.name || row.filename)} with HTTP ${response.status}`);
     const contentType = String(row.mime_type || row.mimeType || response.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
     const buffer = Buffer.from(await response.arrayBuffer());
@@ -425,9 +314,6 @@ async function pauseSenderForLimit(supabase: ReturnType<typeof createAdminClient
     is_paused: true,
     paused_reason: reason,
     last_error: reason,
-    health_status: 'sender_limited',
-    last_provider_limit_at: new Date().toISOString(),
-    provider_limit_count: 1,
     updated_at: new Date().toISOString(),
   }).eq('workspace_id', workspaceId).eq('id', accountId);
   if (rich.error) {
@@ -438,6 +324,57 @@ async function pauseSenderForLimit(supabase: ReturnType<typeof createAdminClient
       updated_at: new Date().toISOString(),
     }).eq('workspace_id', workspaceId).eq('id', accountId);
   }
+}
+
+async function getBasicVerification(
+  supabase: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  emailInput: unknown,
+) {
+  const email = normalizeEmailAddress(emailInput);
+  const { data: cached } = await supabase
+    .from("email_verifications")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .eq("email", email)
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+  if (cached) {
+    return {
+      email,
+      status: String(cached.status || "unknown"),
+      reason: String(cached.reason || ""),
+      roleLabel: cached.role_label ? String(cached.role_label) : null,
+      mxHosts: Array.isArray(cached.mx_hosts) ? cached.mx_hosts : [],
+      cached: true,
+    };
+  }
+  const result = await verifyEmailBasic(email);
+  await supabase.from("email_verifications").upsert({
+    workspace_id: workspaceId,
+    email: result.email,
+    domain: result.domain,
+    status: result.status,
+    verification_level: result.level,
+    syntax_valid: result.syntaxValid,
+    domain_has_mx: result.domainHasMx,
+    mx_hosts: result.mxHosts,
+    role_inbox: result.roleInbox,
+    role_label: result.roleLabel,
+    disposable: result.disposable,
+    reason: result.reason,
+    checked_at: result.checkedAt,
+    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    raw: {},
+  }, { onConflict: "workspace_id,email" });
+  return {
+    email: result.email,
+    status: result.status,
+    reason: result.reason,
+    roleLabel: result.roleLabel,
+    mxHosts: result.mxHosts,
+    cached: false,
+  };
 }
 
 async function refreshAccessToken(account: AnyRow) {
@@ -456,6 +393,7 @@ async function refreshAccessToken(account: AnyRow) {
     );
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
+    signal: AbortSignal.timeout(12000),
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: clientId,
@@ -491,6 +429,7 @@ async function sendWithGmail(
     "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
     {
       method: "POST",
+      signal: AbortSignal.timeout(15000),
       headers: {
         authorization: `Bearer ${accessToken}`,
         "content-type": "application/json",
@@ -565,7 +504,8 @@ async function loadTemplates(
       .limit(1);
     if (error) throw error;
     return (data || []).filter((t: AnyRow) =>
-      desiredTypes.includes(String(t.template_type || "initial")),
+      desiredTypes.includes(String(t.template_type || "initial")) &&
+      (schedule.type !== "follow_up" || templateFollowUpStage(t) === followUpStage(schedule.raw || {})),
     );
   }
   let query = supabase
@@ -580,7 +520,9 @@ async function loadTemplates(
     query = query.eq("category_id", schedule.category_id);
   const { data, error } = await query;
   if (error) throw error;
-  return data || [];
+  return (data || []).filter((template: AnyRow) =>
+    schedule.type !== "follow_up" || templateFollowUpStage(template) === followUpStage(schedule.raw || {}),
+  );
 }
 
 async function loadAccounts(
@@ -588,19 +530,6 @@ async function loadAccounts(
   schedule: AnyRow,
 ) {
   const raw = schedule.raw || {};
-  // Provider-limit pauses expire automatically. The sender returns in
-  // Recovering mode; other sender lanes are never interrupted.
-  const recovery = await supabase.from('gmail_accounts').update({
-    status: 'connected',
-    is_paused: false,
-    paused_reason: null,
-    health_status: 'recovering',
-    last_error: null,
-    updated_at: new Date().toISOString(),
-  }).eq('workspace_id', schedule.workspace_id).in('status', ['limit_hit', 'sender_limited']).lte('paused_until', new Date().toISOString());
-  if (recovery.error && String(recovery.error.message || '').toLowerCase().includes('health_status')) {
-    await supabase.from('gmail_accounts').update({ status: 'connected', is_paused: false, paused_reason: null, last_error: null, updated_at: new Date().toISOString() }).eq('workspace_id', schedule.workspace_id).in('status', ['limit_hit', 'sender_limited']).lte('paused_until', new Date().toISOString());
-  }
   const selectedIds = Array.isArray(raw.selected_sender_ids)
     ? raw.selected_sender_ids.map(String).filter(Boolean)
     : [];
@@ -611,7 +540,7 @@ async function loadAccounts(
     .in("status", ["connected", "ready"]);
   if (selectedIds.length) query = query.in("id", selectedIds);
   const { data, error } = await query
-    .order("last_successful_send_at", { ascending: true, nullsFirst: true })
+    .order("next_eligible_at", { ascending: true, nullsFirst: true })
     .order("created_at", { ascending: true });
   if (error) throw error;
   return (data || []).filter(
@@ -641,7 +570,7 @@ async function guardTeamBusinessForSend(
     .select('normalized_key,first_workspace_id')
     .in('normalized_key', keys);
   if (claimError) throw claimError;
-  const conflict = (claims || []).find((row: any) => !row.first_workspace_id || String(row.first_workspace_id) !== workspaceId);
+  const conflict = (claims || []).find((row: any) => String(row.first_workspace_id || '') && String(row.first_workspace_id) !== workspaceId);
   return {
     allowed: !conflict,
     ownerWorkspaceId: conflict ? String(conflict.first_workspace_id) : workspaceId,
@@ -673,7 +602,7 @@ async function filterTeamSendableBusinesses(
       .in('normalized_key', keys.slice(index, index + 1000));
     if (error) throw error;
     for (const row of data || []) {
-      if (!row.first_workspace_id || String(row.first_workspace_id) !== workspaceId) blockedKeys.add(String(row.normalized_key || ''));
+      if (String(row.first_workspace_id || '') && String(row.first_workspace_id) !== workspaceId) blockedKeys.add(String(row.normalized_key || ''));
     }
   }
   const isBlocked = (business: AnyRow) => (rowKeys.get(String(business.id || '')) || []).some((key) => blockedKeys.has(key));
@@ -786,19 +715,26 @@ async function loadFollowUpBusinesses(
   const segment = String(
     raw.followup_segment || schedule.followup_segment || "all_unanswered",
   );
-  const rpcLimit = Math.max(limit, dueIds.length || 0, 1);
+  // Exact selections can come from anywhere in the first 1,000 rows shown in the UI.
+  // Query the complete bounded due queue before intersecting selected IDs; otherwise
+  // selecting row 500 while sending five contacts could incorrectly return no match.
+  const rpcLimit = dueIds.length ? MAX_FOLLOW_UP_QUEUE_SIZE : Math.max(limit, 1);
   const { data: dueRows, error: dueError } = await supabase.rpc(
     "get_due_followups",
     {
       target_workspace: schedule.workspace_id,
       limit_rows: rpcLimit,
       followup_segment: segment,
+      requested_stage: followUpStage(raw),
+      followup_after_hours: Math.min(720, Math.max(1, Number(raw.followup_after_hours || 72))),
+      target_category_id: raw.followup_audience_category_id || null,
+      target_country: String(raw.followup_country || ""),
     },
   );
   if (dueError) {
     if (isMissingRpcFunction(dueError))
       throw new Error(
-        "Supabase follow-up function is missing. Run supabase/migrations/202607100839_simple_targeting_followup_rpc.sql once, then retry schedules.",
+        "The staged follow-up function is missing. Run RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql once, then retry schedules.",
       );
     throw dueError;
   }
@@ -882,37 +818,17 @@ async function runOneSchedule(
       reason: "Already running or not scheduled.",
     };
 
-  let campaignLeaseToken: string | null = null;
-  const campaignLease = await acquireCampaignLease(supabase, workspaceId, scheduleId);
-  if (!campaignLease.allowed) {
-    await supabase.from("message_schedules").update({
-      status: "scheduled",
-      last_error: campaignLease.reason || "Queued for central worker capacity.",
-      updated_at: new Date().toISOString(),
-    }).eq("workspace_id", workspaceId).eq("id", scheduleId);
-    return {
-      scheduleId,
-      status: "queued",
-      type: schedule.type,
-      requested: Math.max(1, Math.min(MAX_WORKER_BATCH_SIZE, requestedTarget)),
-      attempted: 0,
-      sent: 0,
-      failed: 0,
-      skipped: 0,
-      reason: campaignLease.reason || "Queued for capacity.",
-    };
-  }
-  campaignLeaseToken = campaignLease.token;
-
   const batchId = `schedule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   let attempted = 0;
   let sent = 0;
   let failed = 0;
   let skipped = 0;
   let stopped = false;
-  let batchCreated = false;
 
   try {
+    if (schedule.type === "follow_up" && !featureFlags.gmailReplySync) {
+      throw new Error("Follow-up sending is disabled in this send-only Google-verification build because reply reading is not enabled.");
+    }
     const templates = await loadTemplates(supabase, schedule);
     if (!templates.length)
       throw new Error("No active template found for this schedule.");
@@ -927,70 +843,20 @@ async function runOneSchedule(
     const senderMode = String(raw.sender_mode || "rotate");
     const allowHighRiskSend = Boolean(raw.allow_high_risk_send);
     const dryRun = Boolean(raw.dry_run);
-    const { data: workspaceSettings } = await supabase.from('workspaces').select('timezone').eq('id', workspaceId).maybeSingle();
-    const workspaceTimezone = String((workspaceSettings as AnyRow | null)?.timezone || 'UTC');
+    const delayMs = senderDelayMs(raw);
 
     const laneAccounts = (senderMode === "specific"
       ? loadedAccounts.slice(0, 1)
       : loadedAccounts
-    ).filter((account) => requestedRunLimit(raw, account, senderRunLimitOverride) > 0 && effectiveDailyLimit(account) > 0);
+    ).filter(
+      (account) => senderCap(raw, account, senderRunLimitOverride) > 0,
+    ).slice(0, MAX_ACTIVE_LANES_PER_CHUNK);
     if (!laneAccounts.length)
       throw new Error("All selected senders reached their run or daily limits.");
 
-    // Choose each sender's pacing delay once for this pass. This prevents a
-    // Normal/Warm-up sender from being repeatedly polled while it is not due,
-    // and allows the worker to rotate through all 150 connected accounts.
-    const pacingDelayByAccount = new Map<string, number>();
-    for (const account of laneAccounts) {
-      pacingDelayByAccount.set(String(account.id), dryRun ? 0 : nextDelayMs(account));
-    }
-    const passStartedAt = Date.now();
-    const passCandidateAccounts = laneAccounts.filter((account) => {
-      if (dryRun || !account.last_successful_send_at) return true;
-      const previous = new Date(account.last_successful_send_at).getTime();
-      if (!Number.isFinite(previous)) return true;
-      const requiredDelay = pacingDelayByAccount.get(String(account.id)) || 0;
-      return passStartedAt - previous >= Math.max(0, requiredDelay - 1_500);
-    });
-    if (!passCandidateAccounts.length) {
-      const nextWaitMs = Math.min(
-        ...laneAccounts.map((account) => {
-          const previous = account.last_successful_send_at
-            ? new Date(account.last_successful_send_at).getTime()
-            : 0;
-          const requiredDelay = pacingDelayByAccount.get(String(account.id)) || 0;
-          return previous ? Math.max(1_000, requiredDelay - (passStartedAt - previous)) : 1_000;
-        }),
-      );
-      await supabase.from("message_schedules").update({
-        status: "scheduled",
-        scheduled_for: new Date(Date.now() + Math.min(60_000, Math.max(1_000, nextWaitMs))).toISOString(),
-        last_error: "Waiting for the next sender pacing window.",
-        updated_at: new Date().toISOString(),
-      }).eq("workspace_id", workspaceId).eq("id", scheduleId);
-      return {
-        scheduleId,
-        status: "queued",
-        type: schedule.type,
-        requested: Math.max(1, Math.min(MAX_WORKER_BATCH_SIZE, requestedTarget)),
-        attempted: 0,
-        sent: 0,
-        failed: 0,
-        skipped: 0,
-        reason: "Waiting for sender pacing.",
-      };
-    }
-
-    // One short resource-safe pass activates at most the configured workspace
-    // lanes. Fast senders may send a small burst; Normal/Warm-up senders send
-    // one message and return control to the fair central queue.
-    const maxMessagesPerLanePass = passCandidateAccounts.reduce((maximum, account) => {
-      const cap = sendingMode(account) === "fast" ? MAX_FAST_MESSAGES_PER_LANE_PASS : 1;
-      return Math.max(maximum, cap);
-    }, 1);
     const dynamicChunkCapacity = Math.max(
       1,
-      MAX_ACTIVE_SENDER_LANES_PER_WORKSPACE * maxMessagesPerLanePass,
+      laneAccounts.length * MAX_EMAILS_PER_SENDER_PER_RUN,
     );
     const targetCount = Math.max(
       1,
@@ -1036,35 +902,38 @@ async function runOneSchedule(
           : "No Ready contacts found.",
       );
 
-    let batchCreatePromise: Promise<void> | null = null;
-    const ensureBatchCreated = async () => {
-      if (batchCreated) return;
-      if (batchCreatePromise) return batchCreatePromise;
-      batchCreatePromise = (async () => {
-        const { error: batchError } = await supabase
-          .from("outreach_batches")
-          .insert({
-            id: batchId,
-            workspace_id: workspaceId,
-            template_id: templates[0].id,
-            requested_count: contacts.length,
-            selected_sender_count: laneAccounts.length,
-            status: dryRun ? "scheduled_dry_run" : "scheduled_running",
-            raw: {
-              schedule_id: scheduleId,
-              schedule_type: schedule.type,
-              schedule_raw: raw,
-              parallel_sender_lanes: laneAccounts.length,
-              sender_safety_modes: Object.fromEntries(laneAccounts.map((account) => [String(account.email), sendingMode(account)])),
-              workspace_timezone: workspaceTimezone,
-              max_emails_per_sender_this_run: Object.fromEntries(laneAccounts.map((account) => [String(account.email), requestedRunLimit(raw, account, senderRunLimitOverride)])),
-            },
-          });
-        if (batchError) throw batchError;
-        batchCreated = true;
-      })();
-      return batchCreatePromise;
-    };
+    const missingTranslationAction = ["stop", "exclude", "english"].includes(String(raw.missing_translation_action || "english"))
+      ? String(raw.missing_translation_action || "english")
+      : "english";
+    if (schedule.type === "follow_up" && missingTranslationAction === "stop") {
+      const missing = contacts.find((business: AnyRow, index: number) => {
+        const template = templateMode === "specific" ? templates[0] : templates[index % templates.length];
+        return resolveTemplateContent(template, business).usedFallback;
+      });
+      if (missing) {
+        throw new Error(`Follow-up job stopped before sending because ${missing.email || missing.name || "a prospect"} needs a reviewed translation. Choose Exclude or Use English, or add the missing translation.`);
+      }
+    }
+
+    const { error: batchError } = await supabase
+      .from("outreach_batches")
+      .insert({
+        id: batchId,
+        workspace_id: workspaceId,
+        template_id: templates[0].id,
+        requested_count: contacts.length,
+        selected_sender_count: laneAccounts.length,
+        status: dryRun ? "scheduled_dry_run" : "scheduled_running",
+        raw: {
+          schedule_id: scheduleId,
+          schedule_type: schedule.type,
+          schedule_raw: raw,
+          parallel_sender_lanes: laneAccounts.length,
+          sender_delay_ms: delayMs,
+          max_emails_per_sender_this_run: MAX_EMAILS_PER_SENDER_PER_RUN,
+        },
+      });
+    if (batchError) throw batchError;
 
     const sentBySender: Record<string, number> = Object.fromEntries(
       laneAccounts.map((a) => [String(a.id), 0]),
@@ -1081,11 +950,7 @@ async function runOneSchedule(
 
     let nextContactIndex = 0;
     let progressWrite = Promise.resolve();
-    let lastProgressWriteCount = 0;
-    const queueProgressWrite = (force = false) => {
-      const currentCount = attempted + skipped;
-      if (!force && currentCount - lastProgressWriteCount < 10) return progressWrite;
-      lastProgressWriteCount = currentCount;
+    const queueProgressWrite = () => {
       const processedSnapshot = baseProcessed + attempted + skipped;
       const sentSnapshot = baseSent + sent;
       const failedSnapshot = baseFailed + failed;
@@ -1116,422 +981,394 @@ async function runOneSchedule(
 
     const runSenderLane = async (account: AnyRow) => {
       const accountId = String(account.id);
-      const laneLease = await acquireSenderLaneLease(
-        supabase,
-        workspaceId,
-        scheduleId,
-        accountId,
+      const laneCap = Math.min(
+        MAX_EMAILS_PER_SENDER_PER_RUN,
+        senderCap(raw, account, senderRunLimitOverride),
       );
-      if (!laneLease.allowed) return { attempted: 0, skipped: 0, reason: laneLease.reason || "capacity" };
+      let laneAttempts = 0;
 
-      const startedAttempted = attempted;
-      const startedSkipped = skipped;
-      try {
-        const laneCap = requestedRunLimit(raw, account, senderRunLimitOverride);
-        const passCap = Math.max(
-          1,
-          Math.min(
-            laneCap,
-            sendingMode(account) === "fast" ? MAX_FAST_MESSAGES_PER_LANE_PASS : 1,
-          ),
-        );
-        let laneAttempts = 0;
-        let lastSendStartedAt = 0;
-
-        // Stagger active lanes slightly. Idle connected accounts consume no worker slot.
-        if (!dryRun) {
-          await sleep(
-            Math.min(
-              2_000,
-              Math.max(0, Number(laneLease.slot || 1) - 1) * 250,
-            ),
-          );
+      while (!stopped && laneAttempts < laneCap) {
+        const control = await loadScheduleControl(supabase, workspaceId, scheduleId);
+        if (control.stopRequested) {
+          stopped = true;
+          break;
         }
 
-        while (!stopped && laneAttempts < passCap) {
-          await Promise.all([
-            renewCampaignLease(supabase, campaignLeaseToken),
-            renewSenderLaneLease(supabase, laneLease.token),
-          ]);
+        const task = takeNextContact();
+        if (!task) break;
+        const { business, index } = task;
+        const toEmail = normalizeEmail(business.email);
+        const template =
+          templateMode === "specific"
+            ? templates[0]
+            : templates[index % templates.length];
+        const localized = resolveTemplateContent(template, business);
 
-          const control = await loadScheduleControl(
-            supabase,
-            workspaceId,
-            scheduleId,
-          );
-          if (control.stopRequested) {
-            stopped = true;
-            break;
-          }
+        if (schedule.type === "follow_up" && localized.usedFallback && missingTranslationAction === "exclude") {
+          skipped += 1;
+          await supabase.from("outreach_events").insert({
+            workspace_id: workspaceId,
+            batch_id: batchId,
+            business_id: business.id,
+            template_id: template.id,
+            type: "missing_translation_excluded",
+            message: `${toEmail}: excluded because the selected follow-up template has no complete ${localized.detectedLanguage.label} translation.`,
+            raw: {
+              schedule_id: scheduleId,
+              detected_language: localized.detectedLanguage.code,
+              template_language: localized.language,
+            },
+          });
+          await queueProgressWrite();
+          continue;
+        }
 
-          if (!dryRun) {
-            const requiredDelay = pacingDelayByAccount.get(accountId) || nextDelayMs(account);
-            const previousSendAt = lastSendStartedAt || (
-              account.last_successful_send_at
-                ? new Date(account.last_successful_send_at).getTime()
-                : 0
-            );
-            const remainingDelay = previousSendAt
-              ? requiredDelay - (Date.now() - previousSendAt)
-              : 0;
+        const teamGuard = await guardTeamBusinessForSend(
+          supabase,
+          workspaceId,
+          String(business.id),
+        );
+        if (!teamGuard.allowed) {
+          skipped += 1;
+          await supabase.from("outreach_events").insert({
+            workspace_id: workspaceId,
+            batch_id: batchId,
+            business_id: business.id,
+            type: "team_duplicate_blocked",
+            message: `Blocked ${toEmail} because another Scout user in this deployment owns the lead.`,
+            raw: {
+              schedule_id: scheduleId,
+              owner_workspace_id: teamGuard.ownerWorkspaceId,
+              conflict_key: teamGuard.conflictKey,
+            },
+          });
+          await queueProgressWrite();
+          continue;
+        }
 
-            // Do not make a serverless request sleep for a long Warm-up/Normal
-            // delay. The central worker will revisit this sender when it is due.
-            if (remainingDelay > 1_500) break;
-            if (remainingDelay > 0) await sleep(remainingDelay);
-          }
+        const verification = await getBasicVerification(supabase, workspaceId, toEmail);
+        if (verification.status === "invalid") {
+          skipped += 1;
+          await supabase
+            .from("businesses")
+            .update({
+              status: "invalid",
+              email_verification_status: "invalid",
+              email_verification_level: "basic",
+              email_verified_at: new Date().toISOString(),
+              email_verification_reason: verification.reason,
+              email_role_label: verification.roleLabel,
+              email_mx_hosts: verification.mxHosts,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("workspace_id", workspaceId)
+            .eq("id", business.id);
+          await supabase.from("outreach_events").insert({
+            workspace_id: workspaceId,
+            batch_id: batchId,
+            business_id: business.id,
+            gmail_account_id: account.id,
+            type: "invalid_recipient_blocked",
+            message: `${toEmail}: ${verification.reason}`,
+            raw: { schedule_id: scheduleId, verification },
+          });
+          await queueProgressWrite();
+          continue;
+        }
 
-          let reservation: SlotReservation | null = null;
-          if (!dryRun) {
-            reservation = await reserveSenderSlot(supabase, {
-              workspaceId,
-              account,
-              scheduleId,
-              batchId,
-              timezone: workspaceTimezone,
-              runLimit: laneCap,
+        const { data: reservations, error: reservationError } = await supabase.rpc(
+          "reserve_sender_send",
+          {
+            target_workspace: workspaceId,
+            target_account: accountId,
+            reservation_raw: {
+              source: "scheduled_worker",
+              schedule_id: scheduleId,
+              recipient: toEmail,
+            },
+          },
+        );
+        if (reservationError) throw reservationError;
+        const reservation = Array.isArray(reservations) ? reservations[0] : reservations;
+        if (!reservation?.allowed || !reservation?.reservation_id) {
+          await supabase.from("outreach_events").insert({
+            workspace_id: workspaceId,
+            batch_id: batchId,
+            gmail_account_id: account.id,
+            type: "sender_waiting",
+            message: `${account.email}: ${reservation?.reason || "Sender is waiting for its next safe slot."}`,
+            raw: { schedule_id: scheduleId, safety: reservation || null },
+          });
+          return;
+        }
+        const reservationId = String(reservation.reservation_id);
+        const dispatchAtMs = new Date(String(reservation.dispatch_at || '')).getTime();
+        if (Number.isFinite(dispatchAtMs)) {
+          const waitMs = Math.max(0, dispatchAtMs - Date.now());
+          if (waitMs > 50_000) {
+            await supabase.rpc("release_sender_send", {
+              target_reservation: reservationId,
+              release_reason: "Dispatch slot exceeded the worker time window.",
+              event_raw: { source: "scheduled_worker", schedule_id: scheduleId },
             });
-            if (!reservation.allowed) {
-              // Capacity/allowance checks are expected while rotating many
-              // senders. Do not create a database event on every worker tick.
-              break;
-            }
+            return;
+          }
+          await sleep(waitMs);
+        }
+
+        attempted += 1;
+        laneAttempts += 1;
+
+        const subjects = splitSubjects(
+          localized.subject,
+          localized.subjectVariants,
+        );
+        const subject = renderTemplate(
+          subjects[index % Math.max(1, subjects.length)] || localized.subject,
+          business,
+        );
+        const body = renderTemplate(localized.message, business);
+        const finalBody = appendSignatureToText(body, account);
+        const nowIso = new Date().toISOString();
+
+        await supabase.from("outreach_events").insert({
+          workspace_id: workspaceId,
+          batch_id: batchId,
+          business_id: business.id,
+          template_id: template.id,
+          gmail_account_id: account.id,
+          type: "sending",
+          message: `Sending message to ${toEmail}`,
+          raw: {
+            schedule_id: scheduleId,
+            business_name: business.name || "",
+            from_email: normalizeEmail(account.email),
+            to_email: toEmail,
+            current: baseProcessed + attempted,
+            target: totalTarget,
+            safety: reservation,
+            verification,
+            template_language: localized.language,
+            detected_business_language: localized.detectedLanguage,
+            used_language_fallback: localized.usedFallback,
+          },
+        });
+
+        try {
+          const attachments = await preparedAttachmentsFor(template);
+          let gmailMessageId = "";
+          let gmailThreadId = "";
+          if (!dryRun) {
+            const accessToken = await ensureAccessToken(supabase, account);
+            const result = await sendWithGmail(
+              accessToken,
+              String(account.email),
+              toEmail,
+              subject,
+              body,
+              account,
+              attachments,
+            );
+            gmailMessageId = result.id || "";
+            gmailThreadId = result.threadId || "";
           }
 
-          const task = takeNextContact();
-          if (!task) {
-            await finalizeSenderSlot(
-              supabase,
-              reservation?.reservationId || null,
-              false,
-              "No remaining contact in this pass.",
-            );
-            break;
-          }
-          const { business, index } = task;
+          const statusText = dryRun ? "dry_run" : "sent";
+          await supabase.from("sent_messages").insert({
+            workspace_id: workspaceId,
+            business_id: business.id,
+            template_id: template.id,
+            gmail_account_id: account.id,
+            batch_id: batchId,
+            to_email: toEmail,
+            from_email: normalizeEmail(account.email),
+            subject,
+            body: finalBody,
+            provider_message_id: gmailMessageId || null,
+            gmail_thread_id: gmailThreadId || null,
+            status: statusText,
+            delivery_status: statusText,
+            is_follow_up: schedule.type === "follow_up",
+            sent_at: nowIso,
+            raw: {
+              schedule_id: scheduleId,
+              dry_run: dryRun,
+              followup_segment: raw.followup_segment || schedule.followup_segment || null,
+              signature_applied: account.signature_enabled !== false && Boolean(account.signature_text || account.signature_html),
+              signature_application_count: 1,
+              template_language: localized.language,
+              detected_business_language: localized.detectedLanguage,
+              used_language_fallback: localized.usedFallback,
+              verification,
+              safety: reservation,
+              attachments: templateAttachments(template).map((a: AnyRow) => ({
+                name: a.name || a.filename,
+                url: a.public_url || a.url,
+              })),
+            },
+          });
 
-          const teamGuard = await guardTeamBusinessForSend(
-            supabase,
-            workspaceId,
-            String(business.id),
-          );
-          if (!teamGuard.allowed) {
-            await finalizeSenderSlot(
-              supabase,
-              reservation?.reservationId || null,
-              false,
-              "Team duplicate protection blocked this contact.",
-            );
-            skipped += 1;
-            await ensureBatchCreated();
-            await supabase.from("outreach_events").insert({
-              workspace_id: workspaceId,
-              batch_id: batchId,
-              business_id: business.id,
-              type: "team_duplicate_blocked",
-              message: `Blocked ${normalizeEmail(business.email)} because another team member owns the lead.`,
-              raw: {
+          if (!dryRun) {
+            await supabase.rpc("finalize_sender_send", {
+              target_reservation: reservationId,
+              target_recipient: toEmail,
+              event_raw: {
+                source: "scheduled_worker",
                 schedule_id: scheduleId,
-                owner_workspace_id: teamGuard.ownerWorkspaceId,
-                conflict_key: teamGuard.conflictKey,
+                gmail_message_id: gmailMessageId,
+                gmail_thread_id: gmailThreadId,
               },
+            });
+            await supabase
+              .from("businesses")
+              .update({
+                status: "contacted",
+                email_verification_status: verification.status,
+                email_verification_level: "basic",
+                email_verified_at: new Date().toISOString(),
+                email_verification_reason: verification.reason,
+                email_role_label: verification.roleLabel,
+                email_mx_hosts: verification.mxHosts,
+                updated_at: nowIso,
+              })
+              .eq("workspace_id", workspaceId)
+              .eq("id", business.id);
+            account.successful_sends = Number(account.successful_sends || 0) + 1;
+            account.lifetime_sent = Number(account.lifetime_sent || 0) + 1;
+            sentBySender[accountId] = (sentBySender[accountId] || 0) + 1;
+            sent += 1;
+          } else {
+            await supabase.rpc("release_sender_send", {
+              target_reservation: reservationId,
+              release_reason: "Dry run",
+              event_raw: { source: "scheduled_worker", schedule_id: scheduleId },
+            });
+            skipped += 1;
+          }
+
+          await supabase.from("outreach_events").insert({
+            workspace_id: workspaceId,
+            batch_id: batchId,
+            business_id: business.id,
+            template_id: template.id,
+            gmail_account_id: account.id,
+            type: statusText,
+            message: statusText === "sent" ? `Message sent to ${toEmail}` : `Scheduled ${statusText}: ${toEmail}`,
+            raw: {
+              schedule_id: scheduleId,
+              business_name: business.name || "",
+              from_email: normalizeEmail(account.email),
+              to_email: toEmail,
+              current: baseProcessed + attempted,
+              target: totalTarget,
+              safety: reservation,
+            },
+          });
+        } catch (sendError) {
+          const err = sendError as Error & {
+            status?: number;
+            limitHit?: boolean;
+            blocked?: boolean;
+          };
+          const reason = err.message || formatError(err);
+          await supabase.rpc("release_sender_send", {
+            target_reservation: reservationId,
+            release_reason: reason,
+            event_raw: { source: "scheduled_worker", schedule_id: scheduleId },
+          });
+          const failedStatus = err.blocked
+            ? "message_blocked"
+            : err.limitHit
+              ? "limit_hit"
+              : "failed";
+          failed += 1;
+
+          await supabase.from("sent_messages").insert({
+            workspace_id: workspaceId,
+            business_id: business.id,
+            template_id: template.id,
+            gmail_account_id: account.id,
+            batch_id: batchId,
+            to_email: toEmail,
+            from_email: normalizeEmail(account.email),
+            subject,
+            body: finalBody,
+            status: failedStatus,
+            delivery_status: failedStatus,
+            error_code: failedStatus,
+            is_follow_up: schedule.type === "follow_up",
+            sent_at: nowIso,
+            raw: {
+              schedule_id: scheduleId,
+              error: reason,
+              followup_segment: raw.followup_segment || schedule.followup_segment || null,
+              signature_applied: account.signature_enabled !== false && Boolean(account.signature_text || account.signature_html),
+              signature_application_count: 1,
+              template_language: localized.language,
+              detected_business_language: localized.detectedLanguage,
+              used_language_fallback: localized.usedFallback,
+              verification,
+            },
+          });
+          await supabase.from("outreach_events").insert({
+            workspace_id: workspaceId,
+            batch_id: batchId,
+            business_id: business.id,
+            template_id: template.id,
+            gmail_account_id: account.id,
+            type: failedStatus,
+            message: `${toEmail}: ${reason}`,
+            raw: {
+              schedule_id: scheduleId,
+              business_name: business.name || "",
+              from_email: normalizeEmail(account.email),
+              to_email: toEmail,
+              current: baseProcessed + attempted,
+              target: totalTarget,
+            },
+          });
+
+          if (err.limitHit) {
+            await recordSenderHealthEvent(supabase as any, {
+              workspaceId,
+              gmailAccountId: accountId,
+              eventType: "provider_limit",
+              reason,
+              recipient: toEmail,
+              raw: { schedule_id: scheduleId, status: err.status },
             });
             await queueProgressWrite();
-            continue;
+            return;
           }
-
-          attempted += 1;
-          laneAttempts += 1;
-          lastSendStartedAt = Date.now();
-          await ensureBatchCreated();
-
-          const template =
-            templateMode === "specific"
-              ? templates[0]
-              : templates[index % templates.length];
-          const localized = resolveTemplateContent(template, business);
-          const subjects = splitSubjects(
-            localized.subject,
-            localized.subjectVariants,
-          );
-          const subject = renderTemplate(
-            subjects[index % Math.max(1, subjects.length)] || localized.subject,
-            business,
-          );
-          const body = renderTemplate(localized.message, business);
-          const finalBody = appendSignatureToText(body, account);
-          const toEmail = normalizeEmail(business.email);
-          const nowIso = new Date().toISOString();
-
-          try {
-            const attachments = await preparedAttachmentsFor(template);
-            let gmailMessageId = "";
-            let gmailThreadId = "";
-            if (!dryRun) {
-              const accessToken = await ensureAccessToken(supabase, account);
-              const result = await sendWithGmail(
-                accessToken,
-                String(account.email),
-                toEmail,
-                subject,
-                body,
-                account,
-                attachments,
-              );
-              gmailMessageId = result.id || "";
-              gmailThreadId = result.threadId || "";
-            }
-
-            const statusText = dryRun ? "dry_run" : "sent";
-            const { error: sentHistoryError } = await supabase
-              .from("sent_messages")
-              .insert({
-                workspace_id: workspaceId,
-                business_id: business.id,
-                template_id: template.id,
-                gmail_account_id: account.id,
-                batch_id: batchId,
-                to_email: toEmail,
-                from_email: normalizeEmail(account.email),
-                subject,
-                body: finalBody,
-                provider_message_id: gmailMessageId || null,
-                gmail_thread_id: gmailThreadId || null,
-                status: statusText,
-                delivery_status: statusText,
-                is_follow_up: schedule.type === "follow_up",
-                sent_at: nowIso,
-                raw: {
-                  schedule_id: scheduleId,
-                  reservation_id: reservation?.reservationId || null,
-                  dry_run: dryRun,
-                  followup_segment:
-                    raw.followup_segment || schedule.followup_segment || null,
-                  signature_applied:
-                    account.signature_enabled !== false &&
-                    Boolean(account.signature_text || account.signature_html),
-                  signature_application_count: 1,
-                  sending_mode: sendingMode(account),
-                  template_language: localized.language,
-                  detected_business_language: localized.detectedLanguage,
-                  used_language_fallback: localized.usedFallback,
-                  attachments: templateAttachments(template).map((a: AnyRow) => ({
-                    name: a.name || a.filename,
-                    url: a.public_url || a.url,
-                  })),
-                },
-              });
-
-            if (!dryRun) {
-              await finalizeSenderSlot(
-                supabase,
-                reservation?.reservationId || null,
-                true,
-                sentHistoryError?.message,
-              );
-              await supabase
-                .from("businesses")
-                .update({ status: "contacted", updated_at: nowIso })
-                .eq("workspace_id", workspaceId)
-                .eq("id", business.id);
-              await supabase
-                .from("gmail_accounts")
-                .update({
-                  sent_today: Number(account.sent_today || 0) + 1,
-                  last_error: sentHistoryError
-                    ? `Message sent but history save failed: ${sentHistoryError.message}`
-                    : null,
-                  last_successful_send_at: nowIso,
-                  health_status:
-                    account.health_status === "sender_limited"
-                      ? "recovering"
-                      : account.health_status,
-                  updated_at: nowIso,
-                })
-                .eq("workspace_id", workspaceId)
-                .eq("id", account.id);
-              account.sent_today = Number(account.sent_today || 0) + 1;
-              account.last_successful_send_at = nowIso;
-              sentBySender[accountId] = (sentBySender[accountId] || 0) + 1;
-              sent += 1;
-            } else {
-              skipped += 1;
-            }
-
-            await supabase.from("outreach_events").insert({
-              workspace_id: workspaceId,
-              batch_id: batchId,
-              business_id: business.id,
-              template_id: template.id,
-              gmail_account_id: account.id,
-              type: statusText,
-              message:
-                statusText === "sent"
-                  ? `Message sent to ${toEmail}`
-                  : `Scheduled ${statusText}: ${toEmail}`,
-              raw: {
-                schedule_id: scheduleId,
-                business_name: business.name || "",
-                from_email: normalizeEmail(account.email),
-                to_email: toEmail,
-                current: baseProcessed + attempted,
-                target: totalTarget,
-                sending_mode: sendingMode(account),
-              },
-            });
-          } catch (sendError) {
-            const err = sendError as Error & {
-              status?: number;
-              limitHit?: boolean;
-              blocked?: boolean;
-            };
-            const reason = err.message || formatError(err);
-            const failedStatus = err.blocked
-              ? "message_blocked"
-              : err.limitHit
-                ? "limit_hit"
-                : "failed";
-            await finalizeSenderSlot(
-              supabase,
-              reservation?.reservationId || null,
-              false,
+          if (err.blocked) {
+            await recordSenderHealthEvent(supabase as any, {
+              workspaceId,
+              gmailAccountId: accountId,
+              eventType: "message_blocked",
               reason,
-            );
-            failed += 1;
-
-            await supabase.from("sent_messages").insert({
-              workspace_id: workspaceId,
-              business_id: business.id,
-              template_id: template.id,
-              gmail_account_id: account.id,
-              batch_id: batchId,
-              to_email: toEmail,
-              from_email: normalizeEmail(account.email),
-              subject,
-              body: finalBody,
-              status: failedStatus,
-              delivery_status: failedStatus,
-              error_code: failedStatus,
-              is_follow_up: schedule.type === "follow_up",
-              sent_at: nowIso,
-              raw: {
-                schedule_id: scheduleId,
-                error: reason,
-                followup_segment:
-                  raw.followup_segment || schedule.followup_segment || null,
-                signature_applied:
-                  account.signature_enabled !== false &&
-                  Boolean(account.signature_text || account.signature_html),
-                signature_application_count: 1,
-                sending_mode: sendingMode(account),
-                template_language: localized.language,
-                detected_business_language: localized.detectedLanguage,
-                used_language_fallback: localized.usedFallback,
-                attachments: templateAttachments(template).map((a: AnyRow) => ({
-                  name: a.name || a.filename,
-                  url: a.public_url || a.url,
-                })),
-              },
+              recipient: toEmail,
+              raw: { schedule_id: scheduleId, status: err.status },
             });
-            await supabase.from("outreach_events").insert({
-              workspace_id: workspaceId,
-              batch_id: batchId,
-              business_id: business.id,
-              template_id: template.id,
-              gmail_account_id: account.id,
-              type: failedStatus,
-              message: `${toEmail}: ${reason}`,
-              raw: {
-                schedule_id: scheduleId,
-                business_name: business.name || "",
-                from_email: normalizeEmail(account.email),
-                to_email: toEmail,
-                sending_mode: sendingMode(account),
-              },
+          } else {
+            await recordSenderHealthEvent(supabase as any, {
+              workspaceId,
+              gmailAccountId: accountId,
+              eventType: "temporary_failure",
+              reason,
+              recipient: toEmail,
+              raw: { schedule_id: scheduleId, status: err.status },
             });
-
-            if (err.limitHit) {
-              const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-              await pauseSenderForLimit(
-                supabase,
-                workspaceId,
-                accountId,
-                reason,
-                until,
-              );
-              await queueProgressWrite();
-              break;
-            }
-            if (err.blocked) {
-              await supabase
-                .from("gmail_accounts")
-                .update({
-                  spam_risk_status: "blocked_warning",
-                  last_error: reason,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("workspace_id", workspaceId)
-                .eq("id", account.id);
-            }
           }
-
-          await queueProgressWrite();
         }
 
-        return {
-          attempted: attempted - startedAttempted,
-          skipped: skipped - startedSkipped,
-          reason: "",
-        };
-      } finally {
-        await releaseSenderLaneLease(supabase, laneLease.token).catch(
-          () => undefined,
-        );
+        await queueProgressWrite();
       }
     };
-
-    // Try candidates in small waves until this workspace makes progress. This
-    // skips capped/not-yet-due senders without activating more than the allowed
-    // number of concurrent lanes.
-    for (
-      let index = 0;
-      index < passCandidateAccounts.length && !stopped && nextContactIndex < contacts.length;
-      index += MAX_ACTIVE_SENDER_LANES_PER_WORKSPACE
-    ) {
-      const wave = passCandidateAccounts.slice(
-        index,
-        index + MAX_ACTIVE_SENDER_LANES_PER_WORKSPACE,
-      );
-      const beforeProgress = attempted + skipped;
-      await Promise.all(wave.map((account) => runSenderLane(account)));
-      if (attempted + skipped > beforeProgress) break;
-    }
-    await queueProgressWrite(true);
+    await Promise.all(laneAccounts.map((account) => runSenderLane(account)));
     await progressWrite;
 
     if (stopped && nextContactIndex < contacts.length) {
       skipped += contacts.length - nextContactIndex;
-    }
-
-    if (!batchCreated && attempted === 0 && skipped === 0) {
-      await supabase.from("message_schedules").update({
-        status: "scheduled",
-        scheduled_for: new Date(Date.now() + 30_000).toISOString(),
-        last_error: "Waiting for sender capacity or a remaining sender allowance.",
-        updated_at: new Date().toISOString(),
-        last_heartbeat_at: new Date().toISOString(),
-      }).eq("workspace_id", workspaceId).eq("id", scheduleId);
-      return {
-        scheduleId,
-        status: "queued",
-        type: schedule.type,
-        requested: contacts.length,
-        attempted: 0,
-        sent: 0,
-        failed: 0,
-        skipped: 0,
-        reason: "Waiting for sender capacity or allowance.",
-      };
     }
 
     const totalProcessed = baseProcessed + attempted + skipped;
@@ -1541,36 +1378,34 @@ async function runOneSchedule(
     const shouldContinue = !stopped && totalProcessed < totalTarget && contacts.length > 0;
     const finalStatus = stopped ? "cancelled" : shouldContinue ? "scheduled" : "sent";
 
-    if (batchCreated) {
-      await supabase
-        .from("outreach_batches")
-        .update({
-          status: dryRun
-            ? "scheduled_dry_run_complete"
-            : shouldContinue
-              ? "scheduled_chunk_complete"
-              : "scheduled_complete",
-          attempted_count: attempted,
-          sent_count: sent,
-          failed_count: failed,
-          skipped_count: skipped,
-          finished_at: new Date().toISOString(),
-          raw: {
-            schedule_id: scheduleId,
-            parallel_sender_lanes: laneAccounts.length,
-            sender_safety_modes: Object.fromEntries(laneAccounts.map((laneAccount) => [String(laneAccount.email), sendingMode(laneAccount)])),
-            sent_by_sender: sentBySender,
-          },
-        })
-        .eq("workspace_id", workspaceId)
-        .eq("id", batchId);
-    }
+    await supabase
+      .from("outreach_batches")
+      .update({
+        status: dryRun
+          ? "scheduled_dry_run_complete"
+          : shouldContinue
+            ? "scheduled_chunk_complete"
+            : "scheduled_complete",
+        attempted_count: attempted,
+        sent_count: sent,
+        failed_count: failed,
+        skipped_count: skipped,
+        finished_at: new Date().toISOString(),
+        raw: {
+          schedule_id: scheduleId,
+          parallel_sender_lanes: laneAccounts.length,
+          sender_delay_ms: delayMs,
+          sent_by_sender: sentBySender,
+        },
+      })
+      .eq("workspace_id", workspaceId)
+      .eq("id", batchId);
 
     await supabase
       .from("message_schedules")
       .update({
         status: finalStatus,
-        batch_id: batchCreated ? batchId : null,
+        batch_id: batchId,
         processed_count: totalProcessed,
         sent_count: totalSent,
         failed_count: totalFailed,
@@ -1582,7 +1417,7 @@ async function runOneSchedule(
         last_error: stopped
           ? "Stopped by user."
           : shouldContinue
-            ? `Parallel chunk complete. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; the central worker will continue it safely.`
+            ? `Safe cron chunk complete. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left; Supabase Cron will continue automatically.`
             : null,
       })
       .eq("workspace_id", workspaceId)
@@ -1594,7 +1429,7 @@ async function runOneSchedule(
         type: shouldContinue ? "job_progress" : "job_completed",
         title: `${schedule.type === "follow_up" ? "Follow-up" : "Message"} job ${stopped ? "stopped" : shouldContinue ? "progress" : "completed"}`,
         message: shouldContinue
-          ? `Sent ${totalSent.toLocaleString()} so far. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left. ${laneAccounts.length} sender lane(s) are using their saved safety modes.`
+          ? `Sent ${totalSent.toLocaleString()} so far. ${Math.max(0, totalTarget - totalProcessed).toLocaleString()} left. ${laneAccounts.length} sender(s) are controlled by the database cooldown and rolling limits.`
           : `Sent ${totalSent.toLocaleString()}, failed ${totalFailed.toLocaleString()}, skipped ${totalSkipped.toLocaleString()}.`,
         entityType: "message_schedule",
         entityId: scheduleId,
@@ -1610,7 +1445,7 @@ async function runOneSchedule(
           total_target: totalTarget,
           should_continue: shouldContinue,
           parallel_sender_lanes: laneAccounts.length,
-          sender_safety_modes: Object.fromEntries(laneAccounts.map((laneAccount) => [String(laneAccount.email), sendingMode(laneAccount)])),
+          sender_delay_ms: delayMs,
           sent_by_sender: sentBySender,
         },
       });
@@ -1644,7 +1479,7 @@ async function runOneSchedule(
       })
       .eq("workspace_id", workspaceId)
       .eq("id", scheduleId);
-    if (batchCreated)
+    if (batchId)
       await supabase
         .from("outreach_batches")
         .update({
@@ -1692,15 +1527,13 @@ async function runOneSchedule(
       reason,
       batchId,
     };
-  } finally {
-    await releaseCampaignLease(supabase, campaignLeaseToken).catch(() => undefined);
   }
 }
 
 async function resetStaleRunningSchedules(
   supabase: ReturnType<typeof createAdminClient>,
 ) {
-  const staleSince = new Date(Date.now() - 18 * 60 * 1000).toISOString();
+  const staleSince = new Date(Date.now() - 12 * 60 * 1000).toISOString();
   const { error } = await supabase
     .from("message_schedules")
     .update({
@@ -1732,80 +1565,76 @@ async function runSchedules(
     .eq("status", "scheduled")
     .or("stop_requested.is.null,stop_requested.eq.false")
     .lte("scheduled_for", new Date().toISOString())
-    .order("updated_at", { ascending: true })
     .order("scheduled_for", { ascending: true })
     .limit(Math.max(1, Math.min(MAX_SCHEDULES_PER_RUN, limit)));
   if (workspaceId) query = query.eq("workspace_id", workspaceId);
   if (scheduleId) query = query.eq("id", scheduleId);
   const { data: schedules, error } = await query;
   if (error) throw error;
-  // Run different workspaces concurrently. Database campaign/sender leases
-  // enforce the platform-wide and per-workspace limits across all instances.
-  return Promise.all(
-    (schedules || []).map((schedule) =>
-      runOneSchedule(
-        supabase,
-        schedule,
-        targetLimitOverride,
-        senderRunLimitOverride,
-      ),
-    ),
-  );
+  const results: WorkerSummary[] = [];
+  for (const schedule of schedules || []) {
+    results.push(await runOneSchedule(supabase, schedule, targetLimitOverride, senderRunLimitOverride));
+  }
+  return results;
 }
 
-async function isAuthorizedWorkerRequest(
+type WorkerAuthorization = {
+  authorized: boolean;
+  cron: boolean;
+  workspaceId?: string;
+};
+
+async function authorizeWorkerRequest(
   request: NextRequest,
   input?: Record<string, unknown>,
-) {
+): Promise<WorkerAuthorization> {
+  const secret =
+    process.env.SCHEDULE_WORKER_SECRET ||
+    process.env.CRON_SECRET ||
+    process.env.RUN_ALL_WORKER_SECRET ||
+    "";
   const provided = scheduleWorkerSecretFromRequest(request, input);
-  const configuredSecrets = [
-    process.env.SCHEDULE_WORKER_SECRET,
-    process.env.CRON_SECRET,
-    process.env.RUN_ALL_WORKER_SECRET,
-  ]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-  if (provided && configuredSecrets.includes(provided)) {
-    return { allowed: true, worker: true, workspaceId: "" };
+  if (secret && provided.length >= 24 && provided === secret) {
+    return {
+      authorized: true,
+      cron: true,
+      workspaceId: input?.workspaceId ? String(input.workspaceId) : undefined,
+    };
   }
 
-  // A signed-in user may manually process only their own workspace. This keeps
-  // the existing "Run due sends" button without exposing a platform worker.
-  const requestedWorkspace = String(
-    input?.workspaceId || request.nextUrl.searchParams.get("workspaceId") || "",
-  ).trim();
-  if (!requestedWorkspace) {
-    return { allowed: false, worker: false, workspaceId: "" };
-  }
   try {
     const userClient = await createClient();
-    const {
-      data: { user },
-    } = await userClient.auth.getUser();
-    if (!user) return { allowed: false, worker: false, workspaceId: "" };
+    const { data: { user } } = await userClient.auth.getUser();
+    if (!user) return { authorized: false, cron: false };
+
+    let workspaceId = String(input?.workspaceId || request.nextUrl.searchParams.get("workspaceId") || "").trim();
+    if (!workspaceId) {
+      const { data } = await userClient.rpc("current_scout_workspace");
+      const row = Array.isArray(data) ? data[0] : data;
+      workspaceId = String(row?.id || "").trim();
+    }
+    if (!workspaceId) return { authorized: false, cron: false };
+
     const { data: membership } = await userClient
       .from("workspace_members")
       .select("workspace_id")
-      .eq("workspace_id", requestedWorkspace)
+      .eq("workspace_id", workspaceId)
       .eq("user_id", user.id)
       .eq("approved", true)
       .maybeSingle();
-    return {
-      allowed: Boolean(membership),
-      worker: false,
-      workspaceId: membership ? requestedWorkspace : "",
-    };
+    if (!membership) return { authorized: false, cron: false };
+    return { authorized: true, cron: false, workspaceId };
   } catch {
-    return { allowed: false, worker: false, workspaceId: "" };
+    return { authorized: false, cron: false };
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const authorization = await isAuthorizedWorkerRequest(request);
-    if (!authorization.allowed) {
+    const authorization = await authorizeWorkerRequest(request);
+    if (!authorization.authorized) {
       return NextResponse.json(
-        { success: false, error: "Unauthorized schedule worker request." },
+        { success: false, error: "Invalid request. Sign in to Scout and run schedules from the app." },
         { status: 401 },
       );
     }
@@ -1818,10 +1647,8 @@ export async function GET(request: NextRequest) {
     const targetLimit = Number(request.nextUrl.searchParams.get("targetLimit") || request.nextUrl.searchParams.get("scheduleBatchSize") || 0);
     const senderRunLimit = Number(request.nextUrl.searchParams.get("senderRunLimit") || 0);
     const requestedWorkspaceId = String(request.nextUrl.searchParams.get("workspaceId") || "");
-    const workspaceId = authorization.worker
-      ? requestedWorkspaceId
-      : authorization.workspaceId;
-    const results = await runSchedules(limit, scheduleId || undefined, targetLimit || undefined, senderRunLimit || undefined, workspaceId || undefined);
+    const workspaceId = authorization.cron ? (requestedWorkspaceId || undefined) : authorization.workspaceId;
+    const results = await runSchedules(limit, scheduleId || undefined, targetLimit || undefined, senderRunLimit || undefined, workspaceId);
     return NextResponse.json({ success: true, ran: results.length, results });
   } catch (error) {
     return NextResponse.json(
@@ -1834,21 +1661,21 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const input = await request.json().catch(() => ({}));
-    const authorization = await isAuthorizedWorkerRequest(request, input);
-    if (!authorization.allowed) {
+    const authorization = await authorizeWorkerRequest(request, input);
+    if (!authorization.authorized) {
       return NextResponse.json(
-        { success: false, error: "Unauthorized schedule worker request." },
+        { success: false, error: "Invalid request. Sign in to Scout and run schedules from the app." },
         { status: 401 },
       );
     }
+    const requestedWorkspaceId = input.workspaceId ? String(input.workspaceId) : undefined;
+    const workspaceId = authorization.cron ? requestedWorkspaceId : authorization.workspaceId;
     const results = await runSchedules(
       Number(input.limit || MAX_SCHEDULES_PER_RUN),
       input.scheduleId ? String(input.scheduleId) : undefined,
       Number(input.targetLimit || input.scheduleBatchSize || 0) || undefined,
       Number(input.senderRunLimit || 0) || undefined,
-      authorization.worker
-        ? (input.workspaceId ? String(input.workspaceId) : undefined)
-        : authorization.workspaceId,
+      workspaceId,
     );
     return NextResponse.json({ success: true, ran: results.length, results });
   } catch (error) {

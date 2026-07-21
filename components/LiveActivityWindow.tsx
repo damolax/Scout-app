@@ -210,12 +210,8 @@ export function LiveActivityWindow({ workspaceId }: { workspaceId?: string | nul
   }, [liveEvents]);
 
   useEffect(() => {
-    const refresh = () => {
-      if (document.visibilityState !== 'visible') return;
-      void load();
-    };
-    const initial = window.setTimeout(refresh, open ? 1200 : 12000);
-    const timer = window.setInterval(refresh, open ? 10000 : hasWork ? 30000 : 60000);
+    const initial = window.setTimeout(() => load(), open ? 1200 : 12000);
+    const timer = window.setInterval(load, open ? 5000 : hasWork ? 10000 : 45000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, open, hasWork]);

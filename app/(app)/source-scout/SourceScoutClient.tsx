@@ -165,7 +165,7 @@ export default function SourceScoutClient({ workspace }: { workspace: Workspace 
       <div className="grid grid-3">
         <div className="card kpi"><div className="title">Direct email extraction</div><div className="num">Email</div><p className="muted">Emails visible on fetched search results, directory pages, or imported extension pages can go Ready.</p></div>
         <div className="card kpi"><div className="title">Website discovery</div><div className="num">Site</div><p className="muted">If no email is visible, Scout imports the official website/business lead.</p></div>
-        <div className="card kpi"><div className="title">Auto Scout handoff</div><div className="num">Deep</div><p className="muted">Website-only leads are queued so Auto Scout/Render checks real contact/about/impressum pages.</p></div>
+        <div className="card kpi"><div className="title">Auto Scout handoff</div><div className="num">Deep</div><p className="muted">Website-only leads are queued so Auto Scout checks real contact, about, and legal/impressum pages through this Scout deployment.</p></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
@@ -233,7 +233,7 @@ export default function SourceScoutClient({ workspace }: { workspace: Workspace 
             </div>
             <label className="checkbox-row"><input type="checkbox" checked={directEmailsReady} onChange={(e) => setDirectEmailsReady(e.target.checked)} /> Direct emails found automatically should go to Ready.</label>
             <label className="checkbox-row"><input type="checkbox" checked={enqueueWebsiteAutoScout} onChange={(e) => setEnqueueWebsiteAutoScout(e.target.checked)} /> Website-only leads should be queued for Auto Scout.</label>
-            <div className="notice"><b>Note:</b> Google may block automated fetching. Bing/directory URLs work better. Auto Scout still uses Render/backend for deep website email searching.</div>
+            <div className="notice"><b>Note:</b> Google may block automated fetching. Direct business websites, Bing results, and directory URLs work better. Auto Scout checks public pages only and keeps uncertain results for review.</div>
           </div>
         </div>
       </div>

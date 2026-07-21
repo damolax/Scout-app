@@ -2,14 +2,15 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle, Trophy, Users, ShieldCheck } from 'lucide-react';
+import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle, Trophy, ShieldCheck } from 'lucide-react';
 
-const baseItems = [
+const items = [
   { href: '/dashboard', label: 'Home', icon: BarChart3 },
   { href: '/source-scout', label: 'Find Leads', icon: Search },
   { href: '/message', label: 'Send Emails', icon: Mail },
   { href: '/replies', label: 'Replies', icon: Inbox },
   { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/google-verification', label: 'Google Review', icon: ShieldCheck },
   { href: '/challenges', label: 'Challenges', icon: Trophy },
   { href: '/help', label: 'How to Use', icon: HelpCircle }
 ];
@@ -20,10 +21,9 @@ const groupedRoutes: Record<string, string[]> = {
   '/message': ['/message', '/templates', '/deliverability', '/operations'],
   '/replies': ['/replies'],
   '/settings': ['/settings'],
+  '/google-verification': ['/google-verification'],
   '/challenges': ['/challenges'],
-  '/help': ['/help'],
-  '/team': ['/team'],
-  '/google-verification': ['/google-verification']
+  '/help': ['/help']
 };
 
 function isActive(pathname: string, href: string) {
@@ -31,16 +31,8 @@ function isActive(pathname: string, href: string) {
   return routes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }
 
-export function AppNav({ isAdmin = false }: { isAdmin?: boolean }) {
+export function AppNav() {
   const pathname = usePathname();
-  const items = isAdmin
-    ? [
-        ...baseItems.slice(0, 5),
-        { href: '/team', label: 'Team', icon: Users },
-        { href: '/google-verification', label: 'Google Verification', icon: ShieldCheck },
-        ...baseItems.slice(5)
-      ]
-    : baseItems;
   return (
     <nav className="nav" aria-label="Main navigation">
       {items.map((item) => {

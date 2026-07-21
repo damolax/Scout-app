@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
         workspace_id: workspace.id,
         type: 'team_duplicate_removed',
         title: 'Team duplicate leads removed',
-        message: `${teamDuplicateLeadCount.toLocaleString()} lead${teamDuplicateLeadCount === 1 ? '' : 's'} already scouted by a team member and removed from this extension import.`,
+        message: `${teamDuplicateLeadCount.toLocaleString()} lead${teamDuplicateLeadCount === 1 ? '' : 's'} already scouted by a Scout user and removed from this extension import.`,
         entity_type: 'extension_import',
         entity_id: null,
         raw: { teamDuplicatesRemoved: teamDuplicateLeadCount, source: body.source || 'extension' }
@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
         workspace_id: workspace.id,
         type: 'team_duplicate_removed',
         title: 'Team duplicate leads removed',
-        message: `${teamDuplicateLeadCount.toLocaleString()} lead${teamDuplicateLeadCount === 1 ? '' : 's'} already scouted by a team member and removed from this extension import.`,
+        message: `${teamDuplicateLeadCount.toLocaleString()} lead${teamDuplicateLeadCount === 1 ? '' : 's'} already scouted by a Scout user and removed from this extension import.`,
         entity_type: 'extension_import',
         entity_id: null,
         raw: { teamDuplicatesRemoved: teamDuplicateLeadCount, source: body.source || 'extension' }

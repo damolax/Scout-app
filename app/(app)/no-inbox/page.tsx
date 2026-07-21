@@ -52,7 +52,7 @@ export default async function NoInboxPage() {
             const business = Array.isArray(r.businesses) ? r.businesses[0] : r.businesses;
             return <tr key={r.id}><td>{text(r.email)}</td><td>{r.business_id ? <Link href={`/businesses/${r.business_id}`}>{text(business?.name)}</Link> : text(business?.name)}</td><td>{text(r.reason)}</td><td>{text(business?.website || business?.domain)}</td><td>{text(r.gmail_thread_id)}</td><td>{r.created_at ? new Date(r.created_at).toLocaleString() : '-'}</td></tr>;
           })}
-          {!rows.length ? <tr><td colSpan={6} className="muted">No delivery-failure records are stored yet. During send-only verification, new Gmail delivery notices remain in Gmail until advanced reply synchronization is enabled.</td></tr> : null}
+          {!rows.length ? <tr><td colSpan={6} className="muted">No Gmail delivery failure records yet. Run Replies → Sync replies + bounces, or Message → Sync Bounces/Blocked.</td></tr> : null}
         </tbody></table></div>
       </div>
 

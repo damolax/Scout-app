@@ -12,7 +12,6 @@ const DEFAULT_FOLLOW_UP = `Hi {name},\n\nJust following up on my earlier message
 const DEFAULT_REPLY = `Hi {name},\n\nThanks for getting back to me.\n\nThat makes sense. Based on what you said, I can send a short practical breakdown for {business}.\n\nBest regards,\nOlalekan`;
 
 type TemplateType = 'initial' | 'follow_up' | 'reply';
-type TemplateHealthAlert = { id: string; template_id: string; sent_count: number; real_reply_count: number; alerted_at: string; raw?: Record<string, unknown> | null };
 
 function formatError(error: unknown) {
   if (!error) return 'Unknown error.';
@@ -50,6 +49,12 @@ function templateAttachments(template: MessageTemplate): TemplateAttachment[] {
   return direct.length ? direct : raw;
 }
 
+function templateRawNumber(template: MessageTemplate, key: string, fallback: number) {
+  const raw = template.raw && typeof template.raw === 'object' ? template.raw : {};
+  const value = Number((raw as Record<string, unknown>)[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
 function attachmentLabel(attachment: TemplateAttachment) {
   const size = Number(attachment.size_bytes || 0);
   const sizeText = size > 0 ? ` · ${(size / 1024 / 1024).toFixed(size > 1024 * 1024 ? 1 : 2)} MB` : '';
@@ -68,6 +73,8 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
   const [templateType, setTemplateType] = useState<TemplateType>('initial');
   const [purpose, setPurpose] = useState('');
   const [replyContext, setReplyContext] = useState('');
+  const [followUpStage, setFollowUpStage] = useState<1 | 2>(1);
+  const [followUpAfterHours, setFollowUpAfterHours] = useState(72);
   const [subject, setSubject] = useState(defaultSubject('initial'));
   const [subjectVariants, setSubjectVariants] = useState('{business}, quick idea\nQuick idea for {name}');
   const [message, setMessage] = useState(DEFAULT_INITIAL);
@@ -82,7 +89,6 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
   const [status, setStatus] = useState('Create initial, follow-up, and reply-only templates. Reply templates cannot be used for first-message batches.');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [healthAlerts, setHealthAlerts] = useState<TemplateHealthAlert[]>([]);
 
   const categoryTemplates = templates.filter((t) => (!categoryId || t.category_id === categoryId) && (typeFilter === 'all' || (t.template_type || 'initial') === typeFilter));
   const initialCount = templates.filter((t) => (t.template_type || 'initial') === 'initial').length;
@@ -109,19 +115,6 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setAvailableCountries(Array.from(found).sort((a, b) => a.localeCompare(b)));
   }
 
-  async function loadTemplateHealth() {
-    const response = await fetch(`/api/templates/health?workspace_id=${encodeURIComponent(workspace.id)}`, { cache: 'no-store' });
-    const json = await response.json().catch(() => ({}));
-    if (response.ok && json?.success) setHealthAlerts((json.alerts || []) as TemplateHealthAlert[]);
-  }
-
-  async function dismissHealthAlert(alertId: string) {
-    const response = await fetch('/api/templates/health', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspace_id: workspace.id, alert_id: alertId }) });
-    const json = await response.json().catch(() => ({}));
-    if (!response.ok || json?.success === false) { setError(json?.error || 'Could not dismiss template warning.'); return; }
-    setHealthAlerts((current) => current.filter((alert) => alert.id !== alertId));
-  }
-
   async function loadAll() {
     setError('');
     const [categoryResult, templateResult] = await Promise.all([
@@ -135,7 +128,6 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setCategories(cats);
     setTemplates(temps);
     if (!categoryId && cats[0]) setCategoryId(cats[0].id);
-    await loadTemplateHealth().catch(() => undefined);
   }
 
   useEffect(() => {
@@ -157,6 +149,8 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setAttachmentStatus('');
     setPurpose(type === 'reply' ? 'Use only when replying from a business conversation.' : type === 'follow_up' ? 'Use for businesses with inbox but no reply yet.' : 'Use only for first outreach messages.');
     setReplyContext(type === 'reply' ? 'Useful after a real buyer reply or an auto-responder follow-up.' : '');
+    setFollowUpStage(1);
+    setFollowUpAfterHours(72);
   }
 
   function loadTemplate(template: MessageTemplate) {
@@ -166,6 +160,8 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     setTemplateType(type);
     setPurpose(template.purpose || '');
     setReplyContext(template.reply_context || '');
+    setFollowUpStage(Math.min(2, Math.max(1, Math.round(templateRawNumber(template, 'followup_stage', 1)))) as 1 | 2);
+    setFollowUpAfterHours(Math.min(720, Math.max(1, Math.round(templateRawNumber(template, 'followup_after_hours', 72)))));
     setSubject(template.subject || defaultSubject(type));
     setSubjectVariants((template.subject_variants || []).join('\n'));
     setMessage(template.message || defaultBody(type));
@@ -250,7 +246,19 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       active: true,
       created_by: userId || null
     };
-    if (includeRaw) payload.raw = { attachments, translations: cleanTemplateTranslations(translations), country_assignments: cleanTemplateCountryAssignments(countryAssignments), ...extraRaw };
+    if (includeRaw) payload.raw = {
+      attachments,
+      translations: cleanTemplateTranslations(translations),
+      country_assignments: cleanTemplateCountryAssignments(countryAssignments),
+      ...(templateType === 'follow_up'
+        ? {
+            followup_stage: followUpStage,
+            followup_after_hours: Math.min(720, Math.max(1, Math.round(Number(followUpAfterHours || 72)))),
+            followup_sequence_max: 2,
+          }
+        : {}),
+      ...extraRaw
+    };
     return payload;
   }
 
@@ -457,15 +465,6 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       {error ? <div className="error">{error}</div> : null}
       <div className="success">{status}</div>
 
-      {healthAlerts.length ? <div className="card" style={{ padding: 18, borderColor: '#d8a23c' }}>
-        <h3>Template performance suggestion</h3>
-        <p className="muted">Scout only suggests a change; it never edits or disables your template automatically. These figures use replies currently tracked in Scout.</p>
-        {healthAlerts.map((alert) => {
-          const template = templates.find((row) => row.id === alert.template_id);
-          return <div className="notice" key={alert.id} style={{ marginTop: 10 }}><strong>{template?.name || String((alert.raw as any)?.template_name || 'Template')}</strong> has sent {Number(alert.sent_count || 0).toLocaleString()} messages over at least three days without a confirmed real reply. Consider changing the subject or body.<div className="actions" style={{ marginTop: 8 }}><button className="btn secondary mini" type="button" onClick={() => { if (template) loadTemplate(template); }}>Open template</button><button className="btn secondary mini" type="button" onClick={() => dismissHealthAlert(alert.id)}>Dismiss</button></div></div>;
-        })}
-      </div> : null}
-
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Initial</div><div className="num">{initialCount}</div></div>
         <div className="card kpi"><div className="title">Follow-up</div><div className="num">{followCount}</div></div>
@@ -546,6 +545,31 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
           </div>
           <label className="label" style={{ marginTop: 12 }}>Purpose / when to use</label>
           <input className="input" value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="Example: after an auto-responder or after a positive reply" />
+          {templateType === 'follow_up' ? (
+            <div className="card" style={{ padding: 14, marginTop: 12, background: 'rgba(255,255,255,0.03)' }}>
+              <div className="grid grid-2">
+                <div>
+                  <label className="label">Follow-up stage</label>
+                  <select className="select" value={followUpStage} onChange={(e) => setFollowUpStage(Number(e.target.value) === 2 ? 2 : 1)}>
+                    <option value={1}>Follow-up 1</option>
+                    <option value={2}>Follow-up 2</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Wait after previous message</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={720}
+                    value={followUpAfterHours}
+                    onChange={(e) => setFollowUpAfterHours(Math.min(720, Math.max(1, Number(e.target.value || 72))))}
+                  />
+                  <p className="muted" style={{ margin: '6px 0 0', fontSize: 12 }}>Hours. The sequence ends after Follow-up 2, so no template repeats endlessly.</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {templateType === 'reply' ? <><label className="label" style={{ marginTop: 12 }}>Reply context note</label><input className="input" value={replyContext} onChange={(e) => setReplyContext(e.target.value)} placeholder="Example: use when buyer asks for examples/pricing" /></> : null}
           <label className="label" style={{ marginTop: 12 }}>Primary subject</label>
           <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />

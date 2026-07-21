@@ -5,7 +5,6 @@ import { AppOpenRunner } from '@/components/AppOpenRunner';
 import { ScoutingLevel } from '@/components/ScoutingLevel';
 import { createClient } from '@/lib/supabase-server';
 import { getCurrentWorkspace } from '@/lib/workspace';
-import { isScoutAdminEmail } from '@/lib/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,10 +13,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { data: { user } } = await supabase.auth.getUser();
   const { workspace } = await getCurrentWorkspace();
 
-  const isAdmin = isScoutAdminEmail(user?.email);
 
   return (
-    <AppShellClient workspaceName={workspace?.name} userEmail={user?.email} isAdmin={isAdmin}>
+    <AppShellClient workspaceName={workspace?.name} userEmail={user?.email}>
       <main className="main">
         <div className="main-topbar">
           <div>

@@ -193,19 +193,8 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     } else {
       loadStats();
     }
-    const refresh = () => {
-      if (document.visibilityState !== "visible") return;
-      void loadStats();
-    };
-    const timer = window.setInterval(refresh, running ? 10000 : 60000);
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") void loadStats();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.clearInterval(timer);
-    };
+    const timer = window.setInterval(loadStats, running ? 2500 : 10000);
+    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, running]);
 

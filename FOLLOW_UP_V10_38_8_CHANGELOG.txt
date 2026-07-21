@@ -1,0 +1,23 @@
+SCOUT GOOGLE-VERIFICATION v10.38.8 — COMPACT, SAFE FOLLOW-UPS
+
+WHAT CHANGED
+- Rebuilt the Follow-ups card so the visible controls are only Audience, Countries, Follow-up stage, Reply state, Template, How many, and one main Start Follow-up button.
+- Added a safe default of 100 and an explicit Send all option.
+- Added Follow-up 1 and Follow-up 2. A business can receive each stage once; the sequence then ends.
+- Added a per-template follow-up stage and waiting period in Templates.
+- Added exact-prospect search, Select shown, individual selection, last-message date, and next-stage visibility inside one accordion.
+- Added translation coverage and three missing-translation actions: Stop and ask, Exclude those contacts, or Use English.
+- Added Gmail sender selection, rolling 24-hour usage, remaining allowance, and optional campaign maximum inside one accordion.
+- Oldest eligible prospects are selected first.
+- Real replies, delivery failures, blocked inboxes, bounced/no-inbox/invalid/archived businesses are excluded by the staged Supabase queue.
+- Failed follow-up sends do not advance the stage and remain retryable.
+- The send-only Google-verification build shows the complete Follow-ups interface but disables follow-up sending in both the page and backend because inbox/reply reading is not enabled.
+
+VALIDATION
+- npm run typecheck: PASS
+- npm run build: PASS
+
+AUDIT CORRECTIONS
+- Exact selected prospects are validated against the complete bounded due queue.
+- Translation coverage is only labeled complete when every intended prospect in the UI preview was checked.
+- The package records that its source base is the uploaded v10.38.5 build.

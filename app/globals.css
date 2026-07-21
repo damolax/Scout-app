@@ -600,8 +600,6 @@ code { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-
   .sender-limits-grid { grid-template-columns: 1fr; min-width: 220px; }
   .sender-limit-input { min-width: 220px; }
 }
-
-/* v10.35 public verification pages */
 .public-shell { min-height: 100vh; max-width: 1240px; margin: 0 auto; padding: 0 28px; }
 .public-header { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:22px 0; border-bottom:1px solid var(--line); }
 .public-brand { display:flex; align-items:center; gap:12px; }

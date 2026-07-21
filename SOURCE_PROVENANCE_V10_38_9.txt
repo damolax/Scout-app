@@ -1,0 +1,15 @@
+SCOUT v10.38.9 — SOURCE PROVENANCE
+
+Base package:
+- SCOUT_GOOGLE_VERIFICATION_V10_38_8_AUDITED
+- v10.38.8 was reconstructed and audited from the user-uploaded v10.38.5 source.
+
+This v10.38.9 update modifies:
+- app/(app)/replies/RepliesClient.tsx
+- app/(app)/replies/page.tsx
+- package.json
+- package-lock.json
+- deployment and audit documentation
+
+It does not replace the follow-up correction already present in v10.38.8.
+It does not add or enable Gmail inbox-reading authorization.

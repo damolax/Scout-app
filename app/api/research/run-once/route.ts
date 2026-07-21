@@ -1,5 +1,5 @@
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
@@ -53,9 +53,10 @@ async function signedInMemberCanRun(workspaceId: string) {
       .select('workspace_id,user_id,approved')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
+      .eq('approved', true)
       .limit(1);
     if (memberError) return false;
-    return Boolean(member);
+    return Boolean(member?.length);
   } catch {
     return false;
   }
@@ -195,46 +196,10 @@ function fetchJsonWithTimeout(url: URL, payload: any, timeoutMs: number) {
   }).finally(() => clearTimeout(timer));
 }
 
-async function callBackendFindEmail(business: any) {
-  const backend = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (!backend) throw new Error('Backend not configured.');
-  const base = backend.endsWith('/') ? backend : `${backend}/`;
-  const website = normalizeAutoScoutWebsite(business);
-  if (!website) throw new Error('No valid business website URL for backend finder.');
-
-  const payload = {
-    name: business.name,
-    businessName: business.name,
-    website,
-    domain: business.domain,
-    location: business.location,
-    category: business.category,
-    raw: business.raw,
-    websiteOnly: true,
-    directWebsiteOnly: true,
-    skipBusinessNameSearch: true
-  };
-
-  const errors: string[] = [];
-  for (const path of ['/find-email', '/batch-find-emails']) {
-    const target = new URL(path, base);
-    try {
-      const json = await fetchJsonWithTimeout(target, path.includes('batch') ? { businesses: [payload] } : payload, 6500);
-      if (path.includes('batch')) {
-        const first = Array.isArray(json?.results) ? json.results[0] : Array.isArray(json?.data) ? json.data[0] : json;
-        return first || json;
-      }
-      return json;
-    } catch (error) {
-      errors.push(`${path}: ${errorMessage(error)}`);
-    }
-  }
-  throw new Error(`Email finder backend did not return quickly. ${errors.join(' | ')}`);
-}
 
 async function runOnce(request: NextRequest) {
-  const limit = Math.max(1, Math.min(500, Number(request.nextUrl.searchParams.get('limit') || 100)));
-  const concurrency = Math.max(1, Math.min(50, Number(request.nextUrl.searchParams.get('concurrency') || 20)));
+  const limit = Math.max(1, Math.min(4, Number(request.nextUrl.searchParams.get('limit') || 2)));
+  const concurrency = Math.max(1, Math.min(2, Number(request.nextUrl.searchParams.get('concurrency') || 1)));
   const workspaceId = String(request.nextUrl.searchParams.get('workspaceId') || '').trim();
 
   const auth = await authorizeResearchRun(request, workspaceId);
@@ -284,22 +249,14 @@ async function runOnce(request: NextRequest) {
 
     try {
       let deepResult: DeepWebsiteFinderResult | null = null;
-      let backendResult: any = {};
-      let backendError = '';
+      const backendResult: any = {};
+      const backendError = '';
 
-      // Best process: check the real website first. Render/backend is a fallback, not something that can freeze the page.
+      // The fresh free build checks the real public website directly from this Vercel deployment.
       await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_deep_check', `Checking website pages for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: websiteTarget, business_name: business.name || '' });
-      deepResult = await findEmailsDeepFromWebsite(websiteBusiness, { maxPages: 6, timeoutMs: 4500 });
+      deepResult = await findEmailsDeepFromWebsite(websiteBusiness, { maxPages: 4, timeoutMs: 3500 });
       await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_pages_checked', `Checked ${deepResult.pagesChecked} page(s) for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: websiteTarget, business_name: business.name || '', pages_checked: deepResult.pagesChecked, pages_attempted: deepResult.pagesAttempted, source_url: deepResult.sourceUrl || '', email: deepResult.email || '' });
 
-      if (!deepResult.decision?.promote) {
-        try {
-          backendResult = await callBackendFindEmail(websiteBusiness);
-        } catch (error) {
-          backendError = errorMessage(error);
-          backendResult = { success: false, error: backendError, method: 'backend_unavailable_or_slow' };
-        }
-      }
 
       const backendDecision = bestEmailDecisionFromPayload(backendResult, websiteBusiness);
       const merged = mergeResearchDecision(backendResult, backendDecision, deepResult);
@@ -363,7 +320,7 @@ async function runOnce(request: NextRequest) {
       } else {
         await supabase.from('businesses').update({ status: 'review', raw: { ...(business.raw || {}), backend_email_research: enrichedResult } }).eq('id', business.id);
         await supabase.from('email_research_jobs').update({ status: 'done', result: enrichedResult, finished_at: new Date().toISOString(), last_error: null }).eq('id', job.id);
-        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'no_trusted_email_found', method: merged.method, rejected: decision.rejected, reason: merged.reason, backendUsed: Boolean(process.env.NEXT_PUBLIC_BACKEND_URL), pagesChecked: deepResult?.pagesChecked || 0, pagesAttempted: deepResult?.pagesAttempted || 0 });
+        results.push({ job: job.id, business: business.id, businessName: business.name, status: 'no_trusted_email_found', method: merged.method, rejected: decision.rejected, reason: merged.reason, pagesChecked: deepResult?.pagesChecked || 0, pagesAttempted: deepResult?.pagesAttempted || 0 });
         await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_no_email', `No trusted email found for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: business.website || business.domain || '', business_name: business.name || '', pages_checked: deepResult?.pagesChecked || 0, reason: merged.reason || '' });
       }
     } catch (error) {
