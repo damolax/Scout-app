@@ -1,0 +1,40 @@
+SCOUT v10.40.0 FULL VERIFICATION — AUDIT STATUS
+
+Implemented:
+- OAuth: gmail.send, gmail.readonly, gmail.settings.basic
+- Scoped collection from Scout-created Gmail threads and related delivery notices
+- Real reply, automatic response, no-inbox, bounce, block, temporary failure, unsubscribe and provider-limit classification
+- Duplicate Gmail message indexes
+- Manual and scheduled inbound synchronization
+- Scout signature idempotence and native Gmail signature synchronization
+- Follow-up safety based on reply synchronization
+- Fresh-install and existing-app SQL paths
+- Schema contract 10.40.0
+- Auto Scout worker authorization protection
+- Private/internal URL fetch protection
+- Shared-workspace-safe account deletion
+- Template replacement rollback protection
+- Simplified eight-item navigation and Team Setup page
+- Git deployment locked to damolax/Scout-app
+
+Validation completed in the packaging environment:
+- 140 application TypeScript/TSX files passed syntax transpilation
+- 22/22 static release checks passed
+- All four SQL-contract groups passed
+- Deployment shell syntax passed
+- Stub-backed strict TypeScript semantic check passed
+- 10 inbound classification cases plus signature idempotence passed
+- Self-contained HTML guide JavaScript syntax passed
+
+Final gates deliberately enforced on the user's computer before GitHub push:
+- npm ci
+- npm run verify:static
+- npm run verify:sql-contract
+- npm run typecheck
+- npm run build
+
+Reason: the packaging environment's npm mirror returned HTTP 503 during the final dependency download. The deployment script refuses to push if any real dependency-backed check fails. Live Gmail, Google OAuth, Supabase and Vercel acceptance tests must still be completed after deployment.
+
+DEPLOYMENT SCRIPT REVISION
+- Corrected Windows Git Bash path handling on version validation.
+- The original failure occurred before git clone/push.

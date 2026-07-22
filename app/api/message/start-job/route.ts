@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: false,
         disabled: true,
-        error: 'Follow-up sending is disabled in this send-only Google-verification build because reply reading is not enabled.'
+        error: 'Follow-up sending requires Gmail reply synchronization. Reconnect Gmail with reply-reading permission or enable the inbound worker.'
       }, { status: 403 });
     }
     const targetCount = Math.max(1, Math.min(MAX_MESSAGE_BATCH_SIZE, Number(body.targetCount || 1000)));

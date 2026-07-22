@@ -64,11 +64,8 @@ async function signedInMemberCanRun(workspaceId: string) {
 
 async function authorizeResearchRun(request: NextRequest, workspaceId: string) {
   const configuredSecret = process.env.CRON_SECRET || process.env.AUTO_SCOUT_WORKER_SECRET || process.env.RUN_ALL_WORKER_SECRET || '';
-  if (!configuredSecret) return { ok: true };
   const supplied = workerSecretFromRequest(request);
-  const userAgent = request.headers.get('user-agent') || '';
-  const isVercelCron = userAgent.toLowerCase().includes('vercel-cron');
-  if (isVercelCron || supplied === configuredSecret) return { ok: true };
+  if (configuredSecret && supplied && supplied === configuredSecret) return { ok: true };
   if (await signedInMemberCanRun(workspaceId)) return { ok: true };
   return { ok: false, error: 'Unauthorized Auto Scout run. Use a valid worker secret or run it while signed in.' };
 }

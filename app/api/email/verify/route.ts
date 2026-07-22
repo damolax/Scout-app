@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     if (!emails.length) return NextResponse.json({ success: false, error: 'Provide at least one email address.' }, { status: 400 });
 
     const supabase = createAdminClient();
-    const results = [];
+    const results: Array<Record<string, unknown>> = [];
     for (const email of emails) {
       const { data: cached } = await supabase
         .from('email_verifications')

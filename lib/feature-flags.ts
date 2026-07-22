@@ -6,8 +6,8 @@ function enabled(name: string, fallback: boolean) {
 
 export const featureFlags = {
   gmailSend: enabled('GMAIL_SEND_ENABLED', true),
-  gmailReplySync: enabled('GMAIL_REPLY_SYNC_ENABLED', false),
-  gmailNativeSignatureSync: enabled('GMAIL_NATIVE_SIGNATURE_SYNC_ENABLED', false),
+  gmailReplySync: enabled('GMAIL_REPLY_SYNC_ENABLED', true),
+  gmailNativeSignatureSync: enabled('GMAIL_NATIVE_SIGNATURE_SYNC_ENABLED', true),
   placementTests: enabled('PLACEMENT_TESTS_ENABLED', false),
   accountDeletion: enabled('ACCOUNT_DELETION_ENABLED', true),
 };

@@ -49,7 +49,7 @@ export async function ensureMessageWorker(origin: string): Promise<MessageWorker
         ready: false,
         configured: false,
         appUrl,
-        error: `Central worker setup failed: ${error.message}. Run the v10.38.5 Supabase upgrade SQL once.`,
+        error: `Central worker setup failed: ${error.message}. Run RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql once, then use Settings → Run full check.`,
       };
     }
     const result = Array.isArray(data) ? data[0] : data;

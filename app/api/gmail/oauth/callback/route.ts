@@ -6,6 +6,17 @@ import { createAdminClient } from '@/lib/supabase-admin';
 import { requireWorkspaceAccess } from '@/lib/require-workspace-access';
 import { deploymentDailyCap, deploymentRunCap } from '@/lib/sender-health';
 
+const REQUIRED_GMAIL_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.settings.basic',
+];
+
+function normalizeScopes(value: unknown) {
+  const source = Array.isArray(value) ? value.map(String) : String(value || '').split(/\s+/);
+  return Array.from(new Set(source.map((item) => item.trim()).filter(Boolean)));
+}
+
 function decodeState(state: string, secret: string) {
   try {
     const [encoded, suppliedSignature] = state.split('.');
@@ -92,6 +103,8 @@ export async function GET(request: NextRequest) {
     if (!refreshToken) throw new Error('Google did not return a refresh token. Remove Scout from Google Account access, then connect again.');
 
     const now = new Date().toISOString();
+    const grantedScopes = normalizeScopes(tokenJson.scope || existing?.granted_scopes || (existing?.raw as any)?.scope || '');
+    const oauthReconnectRequired = REQUIRED_GMAIL_SCOPES.some((scope) => !grantedScopes.includes(scope));
     const expiresAt = tokenJson.expires_in ? new Date(Date.now() + Number(tokenJson.expires_in) * 1000).toISOString() : null;
     const deploymentCap = deploymentDailyCap();
     const runCap = deploymentRunCap();
@@ -102,7 +115,11 @@ export async function GET(request: NextRequest) {
       status: existing?.pause_kind ? (existing.status || 'paused') : 'connected',
       connection_status: 'verified',
       connection_verified_at: now,
-      connection_error: null,
+      connection_error: oauthReconnectRequired ? 'Reconnect Gmail and approve sending, Scout-thread reply reading, and Gmail signature settings.' : null,
+      granted_scopes: grantedScopes,
+      oauth_reconnect_required: oauthReconnectRequired,
+      last_reply_sync_status: oauthReconnectRequired ? 'reconnect_required' : (existing?.last_reply_sync_status || 'ready'),
+      last_reply_sync_error: oauthReconnectRequired ? 'Required Gmail permissions are missing.' : null,
       access_token: accessToken,
       refresh_token: refreshToken,
       client_id: clientId,
@@ -133,10 +150,11 @@ export async function GET(request: NextRequest) {
       clean_since: existing?.clean_since || now,
       raw: {
         ...(existing?.raw && typeof existing.raw === 'object' ? existing.raw : {}),
-        connected_via: 'native_v10_38_send_only_oauth',
-        authorization_mode: 'send_only_google_verification',
+        connected_via: 'native_v10_40_full_oauth',
+        authorization_mode: 'send_replies_signature',
         connected_at: now,
-        scope: tokenJson.scope || '',
+        scope: grantedScopes.join(' '),
+        required_scopes: REQUIRED_GMAIL_SCOPES,
         token_type: tokenJson.token_type || '',
         redirect_uri: redirectUri,
         google_identity: googleIdentity,

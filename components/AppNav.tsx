@@ -2,28 +2,28 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle, Trophy, ShieldCheck } from 'lucide-react';
+import { BarChart3, Search, Mail, Inbox, Settings, HelpCircle, Building2, FileText } from 'lucide-react';
 
 const items = [
   { href: '/dashboard', label: 'Home', icon: BarChart3 },
   { href: '/source-scout', label: 'Find Leads', icon: Search },
+  { href: '/businesses', label: 'Leads', icon: Building2 },
+  { href: '/templates', label: 'Templates', icon: FileText },
   { href: '/message', label: 'Send Emails', icon: Mail },
   { href: '/replies', label: 'Replies', icon: Inbox },
   { href: '/settings', label: 'Settings', icon: Settings },
-  { href: '/google-verification', label: 'Google Review', icon: ShieldCheck },
-  { href: '/challenges', label: 'Challenges', icon: Trophy },
-  { href: '/help', label: 'How to Use', icon: HelpCircle }
+  { href: '/help', label: 'Team Setup', icon: HelpCircle }
 ];
 
 const groupedRoutes: Record<string, string[]> = {
   '/dashboard': ['/dashboard'],
-  '/source-scout': ['/source-scout', '/upload', '/auto-scout', '/email-scout', '/verify', '/businesses', '/data-safety', '/no-inbox'],
-  '/message': ['/message', '/templates', '/deliverability', '/operations'],
+  '/source-scout': ['/source-scout', '/upload', '/auto-scout', '/email-scout', '/verify'],
+  '/businesses': ['/businesses', '/no-inbox', '/data-safety'],
+  '/templates': ['/templates'],
+  '/message': ['/message', '/deliverability'],
   '/replies': ['/replies'],
-  '/settings': ['/settings'],
-  '/google-verification': ['/google-verification'],
-  '/challenges': ['/challenges'],
-  '/help': ['/help']
+  '/settings': ['/settings', '/google-verification'],
+  '/help': ['/help', '/challenges']
 };
 
 function isActive(pathname: string, href: string) {
@@ -33,18 +33,9 @@ function isActive(pathname: string, href: string) {
 
 export function AppNav() {
   const pathname = usePathname();
-  return (
-    <nav className="nav" aria-label="Main navigation">
-      {items.map((item) => {
-        const Icon = item.icon;
-        const active = isActive(pathname, item.href);
-        return (
-          <Link key={item.href} href={item.href} className={active ? 'active' : ''}>
-            <Icon size={18} />
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
+  return <nav className="nav" aria-label="Main navigation">{items.map((item) => {
+    const Icon = item.icon;
+    const active = isActive(pathname, item.href);
+    return <Link key={item.href} href={item.href} className={active ? 'active' : ''}><Icon size={18} />{item.label}</Link>;
+  })}</nav>;
 }

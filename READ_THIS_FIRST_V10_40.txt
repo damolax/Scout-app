@@ -1,0 +1,19 @@
+SCOUT v10.40.0 FULL REPLY + SIGNATURE VALIDATION RELEASE
+
+CURRENT SCOUT APP:
+1. Run database/02_UPGRADE_EXISTING_SCOUT_TO_V10_40.sql in the current Supabase project.
+2. Run database/03_VERIFY_V10_40.sql and stop if any passed value is false.
+3. Open SCOUT_V10_40_FULL_SETUP_GUIDE.html and complete Google Cloud/Vercel/Cron preparation.
+4. Run DEPLOY_V10_40_0_FULL_GIT_BASH.sh through the exact Git Bash block in EXACT_DEPLOY_STEPS_V10_40.txt.
+5. Reconnect every Gmail account so it grants gmail.send, gmail.readonly, and gmail.settings.basic.
+6. Complete the controlled acceptance tests before team use.
+
+NEW TEAM COPY:
+Use database/01_FRESH_INSTALL_V10_40.sql, never the existing-app upgrade alone.
+
+TARGET REPOSITORY:
+https://github.com/damolax/Scout-app
+Branch: main
+
+IMPORTANT:
+The deployment script runs npm ci, TypeScript, SQL-contract checks, and the complete Next.js production build before GitHub is updated. It stops before push if any code check fails.

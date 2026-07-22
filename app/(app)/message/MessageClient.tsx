@@ -2321,7 +2321,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     setError("");
     try {
       if (!replySyncEnabled) {
-        throw new Error("Follow-up sending is disabled in this send-only Google-verification build because Scout cannot safely confirm replies without inbox-reading permission.");
+        throw new Error("Follow-up sending requires active Gmail reply synchronization so Scout can exclude real replies, bounces, blocks, and unsubscribes.");
       }
       if (!currentFollowUpTemplate) {
         throw new Error(`Create an active Follow-up ${followUpStage} template first.`);
@@ -3122,7 +3122,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
 
           {!replySyncEnabled ? (
             <div className="notice" style={{ marginTop: 12 }}>
-              <strong>Visible but safely disabled for Google verification.</strong> This send-only build cannot read replies, so it cannot safely decide who should receive a follow-up. The controls and queue are ready for the team build.
+              <strong>Reply synchronization is not ready.</strong> Reconnect Gmail with the required permissions and confirm the inbound worker before sending follow-ups.
             </div>
           ) : null}
 
@@ -3209,7 +3209,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
               disabled={busy || !replySyncEnabled || !dueFollowUpTotal || !currentFollowUpTemplate || !connectedAccounts.length}
               onClick={sendDueFollowUpsNow}
             >
-              {replySyncEnabled ? `Start Follow-up ${followUpStage}` : "Follow-ups disabled in verification build"}
+              {replySyncEnabled ? `Start Follow-up ${followUpStage}` : "Reply sync required"}
             </button>
           </div>
 

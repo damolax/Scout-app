@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     const accountId = String(input.gmail_account_id || '').trim();
     const applyAll = Boolean(input.apply_all || input.applyAll);
     const syncToGmail = Boolean(input.sync_to_gmail || input.syncToGmail);
-    if (syncToGmail && !featureFlags.gmailNativeSignatureSync) throw new Error('Native Gmail signature sync is disabled in the Google send-only verification build. The signature can still be saved and added to Scout-sent emails.');
+    if (syncToGmail && !featureFlags.gmailNativeSignatureSync) throw new Error('Native Gmail signature sync is disabled by configuration. The signature can still be saved and added to Scout-sent emails.');
     const signature_enabled = input.signature_enabled !== false;
     const signature_html = String(input.signature_html || '').trim();
     const signature_text = String(input.signature_text || '').trim();
@@ -136,6 +136,7 @@ export async function POST(request: NextRequest) {
       let syncError = '';
       if (syncToGmail) {
         try {
+          if (Boolean(account.oauth_reconnect_required)) throw new Error('Reconnect Gmail and approve Gmail signature settings before synchronizing the native signature.');
           const accessToken = await ensureAccessToken(supabase, account);
           await syncSignatureToGmail(accessToken, String(account.email), safeHtml);
           syncStatus = 'synced';
@@ -154,20 +155,10 @@ export async function POST(request: NextRequest) {
         .eq('id', account.id);
       if (updateError) {
         const msg = formatError(updateError).toLowerCase();
-        const missingSignatureColumn = msg.includes('signature_') || msg.includes('gmail_signature_') || msg.includes('sync_signature_to_gmail');
-        if (!missingSignatureColumn) throw updateError;
-        const fallbackRaw = {
-          ...(account.raw || {}),
-          email_identity: { signature_enabled, signature_html: safeHtml, signature_text: safeText, signature_logo_url, sync_signature_to_gmail: syncToGmail },
-          email_identity_updated_at: new Date().toISOString(),
-          email_identity_note: 'Saved in raw fallback because signature columns were missing. Run the v8.41 Supabase repair SQL.'
-        };
-        const { error: fallbackError } = await supabase
-          .from('gmail_accounts')
-          .update({ raw: fallbackRaw, updated_at: new Date().toISOString() })
-          .eq('workspace_id', workspaceId)
-          .eq('id', account.id);
-        if (fallbackError) throw fallbackError;
+        if (msg.includes('signature_') || msg.includes('gmail_signature_') || msg.includes('sync_signature_to_gmail')) {
+          throw new Error('Database update required: Gmail signature columns are missing. Run the bundled v10.40 SQL and try again.');
+        }
+        throw updateError;
       }
       results.push({ account_id: account.id, email: account.email, sync_status: syncStatus, sync_error: syncError });
     }

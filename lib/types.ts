@@ -10,7 +10,11 @@ export type BusinessStatus =
   | 'bounced'
   | 'invalid'
   | 'duplicate'
-  | 'archived';
+  | 'archived'
+  | 'blocked'
+  | 'unsubscribed'
+  | 'do_not_contact'
+  | 'sent';
 
 export type Workspace = {
   id: string;
@@ -224,6 +228,13 @@ export type GmailAccount = {
   sync_signature_to_gmail?: boolean | null;
   gmail_signature_synced_at?: string | null;
   gmail_signature_sync_error?: string | null;
+  granted_scopes?: string[] | null;
+  oauth_reconnect_required?: boolean | null;
+  last_reply_sync_at?: string | null;
+  last_reply_sync_status?: string | null;
+  last_reply_sync_error?: string | null;
+  last_reply_message_id?: string | null;
+  last_reply_history_id?: string | null;
   created_at: string;
   updated_at?: string | null;
   deployment_cap?: number | null;
@@ -291,6 +302,13 @@ export type MessageSchedule = {
   sync_signature_to_gmail?: boolean | null;
   gmail_signature_synced_at?: string | null;
   gmail_signature_sync_error?: string | null;
+  granted_scopes?: string[] | null;
+  oauth_reconnect_required?: boolean | null;
+  last_reply_sync_at?: string | null;
+  last_reply_sync_status?: string | null;
+  last_reply_sync_error?: string | null;
+  last_reply_message_id?: string | null;
+  last_reply_history_id?: string | null;
   created_at: string;
   updated_at?: string | null;
 };

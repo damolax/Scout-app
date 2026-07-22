@@ -1,0 +1,11 @@
+SCOUT v10.40.0 DEPLOYMENT SCRIPT FIX
+
+Problem corrected:
+- The original line 20 passed Git Bash's /c/... path directly into Windows Node require().
+- Windows Node could not resolve that MSYS-style path, so deployment stopped before cloning or pushing.
+
+Correction:
+- The script now changes into the source directory and reads ./package.json.
+- Error output now prints the exact command that failed.
+
+Application source and database contract remain version 10.40.0.

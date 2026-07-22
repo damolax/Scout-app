@@ -827,7 +827,7 @@ async function runOneSchedule(
 
   try {
     if (schedule.type === "follow_up" && !featureFlags.gmailReplySync) {
-      throw new Error("Follow-up sending is disabled in this send-only Google-verification build because reply reading is not enabled.");
+      throw new Error("Follow-up sending requires Gmail reply synchronization. Reconnect Gmail with reply-reading permission or enable the inbound worker.");
     }
     const templates = await loadTemplates(supabase, schedule);
     if (!templates.length)

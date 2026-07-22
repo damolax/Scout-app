@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       .order('last_health_review_at', { ascending: true, nullsFirst: true })
       .limit(limit);
     if (error) throw error;
-    const results = [];
+    const results: Array<Record<string, unknown>> = [];
     for (const account of accounts || []) {
       try {
         const patch = await reviewSenderHealth(supabase as any, account);

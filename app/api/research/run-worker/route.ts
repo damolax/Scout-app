@@ -95,13 +95,13 @@ async function runWorker(request: NextRequest) {
   if (!workspaceId) return NextResponse.json({ success: false, error: 'Missing workspaceId.' }, { status: 400 });
 
   const cronSecret = process.env.CRON_SECRET || process.env.AUTO_SCOUT_WORKER_SECRET || process.env.RUN_ALL_WORKER_SECRET || '';
-  if (cronSecret) {
-    const supplied = workerSecretFromRequest(request, body);
-    const userAgent = request.headers.get('user-agent') || '';
-    const isVercelCron = userAgent.toLowerCase().includes('vercel-cron');
-    if (!isVercelCron && supplied !== cronSecret && !(await signedInMemberCanRun(workspaceId))) {
-      return NextResponse.json({ success: false, error: 'Unauthorized Auto Scout worker request. Use a valid worker secret or run it while signed in.' }, { status: 401 });
-    }
+  const supplied = workerSecretFromRequest(request, body);
+  const secretAuthorized = Boolean(cronSecret && supplied && supplied === cronSecret);
+  const memberAuthorized = await signedInMemberCanRun(workspaceId);
+  if (!secretAuthorized && !memberAuthorized) {
+    return NextResponse.json({ success: false, error: cronSecret
+      ? 'Unauthorized Auto Scout worker request. Use the valid worker secret or run it while signed in as an approved workspace member.'
+      : 'Auto Scout worker secret is not configured. Run this action while signed in, and configure CRON_SECRET before enabling background work.' }, { status: 401 });
   }
 
   const cycles = Math.max(1, Math.min(2, Number(body.cycles || request.nextUrl.searchParams.get('cycles') || 1)));

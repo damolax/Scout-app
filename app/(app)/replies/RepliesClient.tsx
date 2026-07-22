@@ -150,6 +150,8 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [openedReply, setOpenedReply] = useState<ReplyRow | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -226,6 +228,38 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  const syncNow = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setError('');
+    setSyncStatus('Checking Scout-created Gmail threads…');
+    try {
+      const active = accounts.filter((account) => ['connected', 'ready', 'recovering'].includes(String(account.status || '').toLowerCase()));
+      if (!active.length) throw new Error('Connect or reconnect at least one Gmail account first.');
+      let saved = 0;
+      let failures = 0;
+      for (const account of active) {
+        for (const endpoint of ['/api/gmail/sync-replies', '/api/gmail/sync-bounces']) {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ workspace_id: workspace.id, gmail_account_id: account.id, max_results: 100, days: 30 }),
+          });
+          const json = await response.json().catch(() => ({}));
+          if (!response.ok || json.success === false) failures += 1;
+          else saved += Number(json.saved || 0);
+        }
+      }
+      await loadAll();
+      setSyncStatus(`${saved.toLocaleString()} new record${saved === 1 ? '' : 's'} collected${failures ? ` · ${failures} check(s) need attention` : ''}.`);
+    } catch (syncError) {
+      setError(formatError(syncError));
+      setSyncStatus('');
+    } finally {
+      setSyncing(false);
+    }
+  }, [accounts, loadAll, syncing, workspace.id]);
 
   const realReplies = useMemo(() => compactReplyRows(replyRows.filter(isUnifiedRealReply)), [replyRows]);
   const autoReplies = useMemo(() => compactReplyRows(replyRows.filter(isUnifiedAutoReply)), [replyRows]);
@@ -306,13 +340,14 @@ export default function RepliesClient({ workspace }: { workspace: Workspace }) {
             <p className="muted" style={{ margin: '6px 0 0' }}>Open a real reply, read the exact message, then continue from that business record.</p>
           </div>
           <div className="actions">
+            <button className="btn" type="button" onClick={syncNow} disabled={syncing || loading}>{syncing ? 'Checking…' : 'Check replies now'}</button>
             <button className="btn secondary" type="button" onClick={loadAll} disabled={loading}>{loading ? 'Refreshing...' : 'Refresh'}</button>
             <button className="btn secondary" type="button" onClick={exportVisibleReplies} disabled={!visibleReplies.length}>Export visible</button>
           </div>
         </div>
 
         <div className="notice" style={{ marginTop: 12 }}>
-          <strong>Google verification mode:</strong> automatic Gmail inbox scanning is disabled. This page displays replies and delivery records already stored by Scout; it does not scan unrelated inbox messages.
+          <strong>Scoped Gmail collection is active:</strong> Scout checks only threads created by Scout-sent messages plus delivery-system notices related to Scout recipients. It does not import or display unrelated inbox conversations.
         </div>
 
         <div className="grid grid-4" style={{ marginTop: 14 }}>

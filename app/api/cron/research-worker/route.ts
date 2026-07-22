@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const supabase = createAdminClient();
-    const workspaceLimit = Math.max(1, Math.min(1, Number(body.workspaceLimit || 1)));
+    const workspaceLimit = Math.max(1, Math.min(5, Number(body.workspaceLimit || 3)));
     const { data: queued, error } = await supabase
       .from('email_research_jobs')
       .select('workspace_id,updated_at')

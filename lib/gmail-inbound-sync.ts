@@ -30,7 +30,7 @@ type Classification = {
   limitNotice: boolean;
   temporary: boolean;
   ignored: boolean;
-  businessStatus?: 'responded' | 'no_inbox' | 'bounced';
+  businessStatus?: 'responded' | 'no_inbox' | 'bounced' | 'unsubscribed';
 };
 
 type SyncMode = 'replies' | 'bounces';
@@ -202,7 +202,7 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
     'the email account that you tried to reach does not exist', 'unable to receive mail', 'no such recipient'
   ];
   const blockedTerms = [
-    'message blocked', 'blocked', 'rejected due to security', 'rejected by our system', 'policy reason',
+    'message blocked', 'email blocked', 'message was blocked', 'rejected due to security', 'rejected by our system', 'policy reason',
     'spam content', 'looks like spam', 'similar to messages that were identified as spam', 'unsolicited mail',
     'not accepted due to spam', 'rejected as spam', 'policy violation', 'our system has detected that this message is suspicious'
   ];
@@ -341,12 +341,14 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
     'zo snel mogelijk', 'binnen 24 uur', 'binnen 48 uur', 'bedankt voor uw bericht', 'bedankt voor je bericht'
   ];
   const temporaryTerms = ['temporary failure', 'try again later', 'deferred', '4.2.0', '4.4.1', '4.7.0', 'temporarily unavailable', 'greylisted'];
+  const unsubscribeTerms = ['unsubscribe me', 'unsubscribe us', 'please unsubscribe', 'remove me from', 'remove us from', 'please remove me', 'please remove us', 'stop emailing', 'stop contacting', 'do not contact me', 'do not contact us'];
 
   if (limitTerms.some((term) => text.includes(term))) return { classification: 'gmail_limit_notice', replyBucket: 'limit_notice', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: true, temporary: false, ignored: false };
   if (noInboxTerms.some((term) => text.includes(term))) return { classification: 'no_inbox', replyBucket: 'no_inbox', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: true, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'no_inbox' };
   if (blockedTerms.some((term) => text.includes(term))) return { classification: 'message_blocked', replyBucket: 'blocked', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: true, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
-  if (bounceTerms.some((term) => text.includes(term))) return { classification: 'bounce_notice', replyBucket: 'bounce_notice', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
+  // A postmaster or mailer-daemon message can still be temporary. Check temporary SMTP language before the broad bounce sender terms.
   if (temporaryTerms.some((term) => text.includes(term))) return { classification: 'temporary_failure', replyBucket: 'temporary_failure', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: true, ignored: false };
+  if (bounceTerms.some((term) => text.includes(term))) return { classification: 'bounce_notice', replyBucket: 'bounce_notice', isRealReply: false, isAutoReply: false, deliveryFailure: true, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'bounced' };
   const humanReplyTerms = [
     // English human intent. These count even when the subject starts with Re/Fw.
     'we don\'t need', 'we do not need', 'we are not interested', 'not interested', 'not looking to', 'not looking for',
@@ -385,11 +387,24 @@ function classifyInbound(message: NormalizedInbound, sentMatch: AnyRecord | null
   const hasReplySubjectSignal = /^\s*(re|aw|sv|antw|ré|fw|fwd)\s*[:：]/i.test(String(message.subject || ''));
   if (isSelf) return { classification: 'self_message_ignored', replyBucket: 'ignored', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
   if (!sentMatch) return { classification: 'unmatched_inbound', replyBucket: 'unmatched', isRealReply: false, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: true };
+  if (unsubscribeTerms.some((term) => text.includes(term))) return { classification: 'unsubscribe_request', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'unsubscribed' };
   if (hasHumanReplySignal) return { classification: 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
   if (hasAutoHeaderSignal || hasAutoBodySignal) return { classification: 'auto_reply', replyBucket: 'auto_reply', isRealReply: false, isAutoReply: true, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false };
   // v10.16: matched inbound messages that are not bounces and not clear auto replies count as real.
   // Re/AW/FW subjects are a useful signal, but Scout also accepts clean matched inbound messages without them.
   return { classification: hasReplySubjectSignal ? 'real_reply' : 'real_reply', replyBucket: 'real_reply', isRealReply: true, isAutoReply: false, deliveryFailure: false, noInbox: false, blocked: false, limitNotice: false, temporary: false, ignored: false, businessStatus: 'responded' };
+}
+
+export function classifyInboundForTest(input: { from?: string; to?: string; subject?: string; body?: string; snippet?: string; accountEmail?: string; matched?: boolean; headers?: Array<{ name: string; value: string }> }) {
+  const message: NormalizedInbound = {
+    gmailMessageId: 'test-message', gmailThreadId: 'test-thread',
+    fromEmail: normalizeEmail(input.from || ''), fromRaw: input.from || '',
+    toEmail: normalizeEmail(input.to || ''), toRaw: input.to || '',
+    subject: input.subject || '', snippet: input.snippet || '', body: input.body || '',
+    receivedAt: new Date(0).toISOString(), labelIds: [], candidateEmails: extractEmails(`${input.from || ''} ${input.to || ''} ${input.body || ''}`),
+    raw: { gmail: { payload: { headers: input.headers || [] } } },
+  };
+  return classifyInbound(message, input.matched === false ? null : { id: 'test-sent' }, input.accountEmail || 'sender@example.com');
 }
 async function findSentMatch(supabase: SupabaseClient<any, any, any>, workspaceId: string, message: NormalizedInbound) {
   if (message.gmailThreadId) {
@@ -554,8 +569,8 @@ async function applyClassificationUpdates(supabase: SupabaseClient<any, any, any
       updated_at: new Date().toISOString()
     };
     if (classification.isRealReply) {
-      businessPatch.status = 'responded';
-      businessPatch.reply_state = 'real_reply';
+      businessPatch.status = classification.businessStatus || 'responded';
+      businessPatch.reply_state = classification.classification === 'unsubscribe_request' ? 'do_not_contact' : 'real_reply';
       businessPatch.last_real_reply_at = message.receivedAt;
     } else if (classification.isAutoReply) {
       businessPatch.reply_state = 'auto_reply';
@@ -698,6 +713,9 @@ export async function syncGmailInbound({ supabase, workspaceId, accountId, maxRe
   const limit = Math.max(1, Math.min(Number(maxResults || 100), newOnly ? 50 : 500));
   const { data: account, error: accountError } = await supabase.from('gmail_accounts').select('*').eq('workspace_id', workspaceId).eq('id', accountId).single();
   if (accountError || !account) throw new Error(accountError?.message || 'Gmail account not found.');
+  if (Boolean((account as AnyRecord).oauth_reconnect_required)) {
+    throw new Error('Reconnect Gmail in Settings and approve Scout-thread reply reading before checking replies.');
+  }
 
   const accessToken = await ensureAccessToken(supabase, workspaceId, account as AnyRecord);
   const accountEmail = String((account as AnyRecord).email || '').toLowerCase();
@@ -705,7 +723,8 @@ export async function syncGmailInbound({ supabase, workspaceId, accountId, maxRe
   const stats: InboundStats = { success: true, scanned: 0, saved: 0, matched: 0, realReplies: 0, autoReplies: 0, noInbox: 0, blocked: 0, bounced: 0, limitNotices: 0, temporary: 0, ignored: 0, unmatched: 0, accountEmail };
 
   if (!sentRows.length) {
-    await supabase.from('gmail_accounts').update({ last_error: null, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', accountId);
+    const finishedAt = new Date().toISOString();
+    await supabase.from('gmail_accounts').update({ last_error: null, last_reply_sync_at: finishedAt, last_reply_sync_status: 'ok', last_reply_sync_error: null, updated_at: finishedAt }).eq('workspace_id', workspaceId).eq('id', accountId);
     return stats;
   }
 
@@ -756,6 +775,14 @@ export async function syncGmailInbound({ supabase, workspaceId, accountId, maxRe
     }
   }
 
-  await supabase.from('gmail_accounts').update({ last_error: null, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', accountId);
+  const finishedAt = new Date().toISOString();
+  await supabase.from('gmail_accounts').update({
+    last_error: null,
+    last_reply_sync_at: finishedAt,
+    last_reply_sync_status: 'ok',
+    last_reply_sync_error: null,
+    last_reply_message_id: Array.from(processedMessageIds).at(-1) || null,
+    updated_at: finishedAt,
+  }).eq('workspace_id', workspaceId).eq('id', accountId);
   return stats;
 }

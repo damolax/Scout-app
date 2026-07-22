@@ -26,7 +26,7 @@ export default function Home() {
       <section className="public-grid">
         <div className="card"><h3>Simple workflow</h3><p>Connect Gmail, select a template and recipients, then send. Scout shows a warning only when something needs attention.</p></div>
         <div className="card"><h3>Safer sending</h3><p>New and recovering accounts use slower pacing. Healthy accounts can use faster sending within strict limits.</p></div>
-        <div className="card"><h3>Google access</h3><p>The initial production authorization requests Gmail sending access only. Inbox reading and Gmail-native signature editing remain disabled.</p></div>
+        <div className="card"><h3>Google access</h3><p>Scout requests Gmail sending, read-only access limited by the app to Scout-created threads and related delivery notices, and Gmail signature settings so users can synchronize the signature they choose.</p></div>
       </section>
       <PublicFooter />
     </main>

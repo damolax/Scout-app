@@ -1,0 +1,26 @@
+SCOUT v10.40.0 FULL VERIFICATION — EXACT CURRENT-APP DEPLOYMENT
+
+1. Run database/02_UPGRADE_EXISTING_SCOUT_TO_V10_40.sql in your CURRENT Supabase project.
+2. Run database/03_VERIFY_V10_40.sql. Every passed result must be true.
+3. In Google Cloud, add gmail.send, gmail.readonly and gmail.settings.basic.
+4. In Vercel, set GMAIL_SEND_ENABLED=true, GMAIL_REPLY_SYNC_ENABLED=true, GMAIL_NATIVE_SIGNATURE_SYNC_ENABLED=true.
+5. Put SCOUT_FULL_VERIFICATION_V10_40_0.zip in Windows Downloads.
+6. Paste this entire block into Git Bash:
+
+cd ~/Downloads || exit 1
+
+ZIP="$(find "$HOME/Downloads" -maxdepth 1 -type f -iname 'SCOUT_FULL_VERIFICATION_V10_40_0*.zip' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-)"
+[ -n "$ZIP" ] && [ -f "$ZIP" ] || { echo "Scout v10.40 ZIP not found in Downloads."; exit 1; }
+
+rm -rf "$HOME/Downloads/SCOUT_FULL_VERIFICATION_V10_40_0"
+unzip -q -o "$ZIP" -d "$HOME/Downloads"
+
+bash "$HOME/Downloads/SCOUT_FULL_VERIFICATION_V10_40_0/DEPLOY_V10_40_0_FULL_GIT_BASH.sh"
+
+7. Open Settings > Setup Readiness and confirm schema 10.40.0.
+8. Generate and run the Vault/Cron SQL from SCOUT_V10_40_FULL_SETUP_GUIDE.html.
+9. Reconnect Gmail accounts.
+10. Complete the controlled signature, real-reply, auto-reply, duplicate, bounce and follow-up tests.
+
+IMPORTANT DEPLOYMENT FIX
+Use the deployment script from the DEPLOY_FIX package. It corrects Windows Git Bash path handling at the version-check step.

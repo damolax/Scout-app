@@ -1,0 +1,30 @@
+-- Scout v10.40.0 Vault + Cron template. Replace the two placeholders before running.
+create extension if not exists pg_net;
+create extension if not exists pg_cron;
+create extension if not exists supabase_vault with schema vault;
+
+select vault.create_secret('https://YOUR-SCOUT-PROJECT.vercel.app', 'scout_app_url', 'Scout production URL')
+where not exists (select 1 from vault.decrypted_secrets where name='scout_app_url');
+select vault.create_secret('REPLACE_WITH_THE_SAME_LONG_CRON_SECRET_USED_IN_VERCEL', 'scout_cron_secret', 'Scout Cron secret')
+where not exists (select 1 from vault.decrypted_secrets where name='scout_cron_secret');
+
+do $$ begin
+  perform cron.unschedule(jobid) from cron.job where jobname in ('scout-inbound-sync-v1040','scout-message-schedules-v1040','scout-research-worker-v1040','scout-health-review-v1040');
+exception when others then null; end $$;
+
+select cron.schedule('scout-inbound-sync-v1040','*/5 * * * *',$job$
+ select net.http_post(
+  url := (select decrypted_secret from vault.decrypted_secrets where name='scout_app_url') || '/api/cron/inbound-sync',
+  headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='scout_cron_secret')),
+  body := '{"accountLimit":3,"maxResults":10,"bounceMaxResults":10,"days":14}'::jsonb, timeout_milliseconds := 55000);
+$job$);
+select cron.schedule('scout-message-schedules-v1040','* * * * *',$job$
+ select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name='scout_app_url') || '/api/message/run-schedules', headers := jsonb_build_object('Content-Type','application/json','x-schedule-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name='scout_cron_secret')), body := '{}'::jsonb, timeout_milliseconds := 55000);
+$job$);
+select cron.schedule('scout-research-worker-v1040','*/2 * * * *',$job$
+ select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name='scout_app_url') || '/api/cron/research-worker', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='scout_cron_secret')), body := '{"workspaceLimit":3}'::jsonb, timeout_milliseconds := 55000);
+$job$);
+select cron.schedule('scout-health-review-v1040','*/15 * * * *',$job$
+ select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name='scout_app_url') || '/api/cron/health-review', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='scout_cron_secret')), body := '{}'::jsonb, timeout_milliseconds := 55000);
+$job$);
+select jobid,jobname,schedule,active from cron.job where jobname like 'scout-%' order by jobname;

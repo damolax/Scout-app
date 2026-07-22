@@ -1,5 +1,7 @@
 import { buildSourceScoutDorks, parseSourceScoutText, searchUrl, type SourceScoutMode } from './source-scout';
 import { cleanText, displayDomain, normalizeWebsite } from './normalize';
+import { isIP } from 'node:net';
+import { lookup } from 'node:dns/promises';
 
 export type AutoSourceScoutInput = {
   niche?: string;
@@ -37,6 +39,30 @@ const HREF_RE = /href\s*=\s*["']([^"']+)["']/gi;
 const TITLE_RE = /<title[^>]*>([\s\S]*?)<\/title>/i;
 const BAD_HOST_RE = /(^|\.)(google|bing|microsoft|yahoo|facebook|instagram|linkedin|youtube|twitter|x|tiktok|pinterest|doubleclick|gstatic|googleusercontent|googletagmanager|schema|w3|cloudflare|recaptcha|hcaptcha|sentry|hotjar|aboutads|privacychoices|forbes|wikipedia|medium|reddit|quora|crunchbase|bloomberg|reuters|nytimes|bbc|cnn|cnbc|github|npmjs|themeforest)\./i;
 const ASSET_RE = /\.(?:png|jpe?g|webp|gif|svg|pdf|zip|css|js|ico|woff2?|ttf|eot|mp4|mov|avi|webm|xml)(?:[?#].*)?$/i;
+
+
+function isPrivateAddress(address: string) {
+  const value = address.toLowerCase();
+  if (value === '::1' || value === '0:0:0:0:0:0:0:1' || value.startsWith('fe80:') || value.startsWith('fc') || value.startsWith('fd')) return true;
+  const parts = value.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  const [a,b] = parts;
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+}
+
+async function assertPublicHttpUrl(value: string) {
+  const parsed = new URL(value);
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Only public HTTP or HTTPS pages can be fetched.');
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) throw new Error('Local and internal addresses are blocked.');
+  if (isIP(host)) {
+    if (isPrivateAddress(host)) throw new Error('Private and internal IP addresses are blocked.');
+  } else {
+    const addresses = await lookup(host, { all: true, verbatim: true });
+    if (!addresses.length || addresses.some((row) => isPrivateAddress(row.address))) throw new Error('The hostname resolves to a private or internal network.');
+  }
+  return parsed;
+}
 
 function uniq<T>(items: T[]) {
   return Array.from(new Set(items));
@@ -140,17 +166,34 @@ async function fetchWithTimeout(url: string, timeoutMs: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: {
-        'user-agent': 'Mozilla/5.0 ScoutApp/8.27 (+https://scout-app-oyeola.vercel.app)',
-        'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.7'
+    let current = url;
+    for (let redirectCount = 0; redirectCount <= 3; redirectCount += 1) {
+      await assertPublicHttpUrl(current);
+      const res = await fetch(current, {
+        signal: controller.signal,
+        redirect: 'manual',
+        headers: {
+          'user-agent': 'Mozilla/5.0 ScoutApp/10.40 (+https://scout-app-oyeola.vercel.app)',
+          'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.7'
+        }
+      });
+      if ([301,302,303,307,308].includes(res.status)) {
+        const location = res.headers.get('location');
+        if (!location) throw new Error('Redirect response did not provide a destination.');
+        current = new URL(location, current).toString();
+        continue;
       }
-    });
-    const contentType = res.headers.get('content-type') || '';
-    const text = contentType.includes('text') || contentType.includes('html') || !contentType ? await res.text() : '';
-    return { res, text };
+      const contentType = res.headers.get('content-type') || '';
+      const contentLength = Number(res.headers.get('content-length') || 0);
+      if (contentLength > 2_000_000) throw new Error('Page is larger than Scout’s 2 MB sourcing limit.');
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength > 2_000_000) throw new Error('Page is larger than Scout’s 2 MB sourcing limit.');
+      const text = contentType.includes('text') || contentType.includes('html') || !contentType
+        ? new TextDecoder().decode(bytes)
+        : '';
+      return { res, text };
+    }
+    throw new Error('Too many redirects.');
   } finally {
     clearTimeout(timer);
   }

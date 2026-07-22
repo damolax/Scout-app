@@ -1,13 +1,16 @@
 {
-  "name": "scout-app-v10-38-google-verification",
-  "version": "10.38.9",
+  "name": "scout-app-v10-40-full-verification",
+  "version": "10.40.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "tsc --noEmit && next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:sql-contract": "node scripts/verify-sql-contract.mjs",
+    "verify:release": "npm run verify:static && npm run verify:sql-contract && npm run typecheck && npm run build",
+    "verify:static": "node scripts/verify-static-release.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",
@@ -28,7 +31,7 @@
     "typescript": "6.0.3"
   },
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
-  "description": "Scout App v10.38.9 audited Google verification build: compact staged follow-ups and a simplified reply inbox with visible errors, business names, filters, accurate export wording, and send-only OAuth safety."
+  "description": "Scout v10.40.0 full verification build with scoped Gmail reply collection, reply classification, native Gmail signature sync, schema guard, staged follow-ups, and zero-paid-API deployment."
 }

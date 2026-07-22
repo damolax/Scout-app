@@ -24,29 +24,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, reauthenticate: true, error: 'Sign out and sign back in, then repeat deletion within 15 minutes.' }, { status: 401 });
     }
 
-    const { data: membership, error: membershipError } = await supabase.from('workspace_members').select('workspace_id').eq('user_id', user.id).order('created_at', { ascending: true }).limit(1).maybeSingle();
+    const { data: memberships, error: membershipError } = await supabase.from('workspace_members').select('workspace_id,role').eq('user_id', user.id);
     if (membershipError) throw membershipError;
-    const workspaceId = String(membership?.workspace_id || '');
-    if (!workspaceId) throw new Error('No Scout workspace was found for this account.');
+    if (!memberships?.length) throw new Error('No Scout workspace was found for this account.');
 
     const admin = createAdminClient();
     const deletedAt = new Date().toISOString();
-    const { error: fingerprintError } = await admin.from('team_scouted_leads').update({
-      first_workspace_id: null,
-      first_business_id: null,
-      first_user_id: null,
-      email: null,
-      website: null,
-      domain: null,
-      name: null,
-      source: null,
-      raw: { retained_for_duplicate_prevention: true, owner_deleted_at: deletedAt },
-      last_seen_at: deletedAt,
-    }).or(`first_workspace_id.eq.${workspaceId},first_user_id.eq.${user.id}`);
-    if (fingerprintError && !String(fingerprintError.message || '').includes('team_scouted_leads')) throw fingerprintError;
+    const deletedWorkspaceIds: string[] = [];
+    for (const membership of memberships) {
+      const workspaceId = String(membership.workspace_id || '');
+      if (!workspaceId) continue;
+      const { count, error: countError } = await admin.from('workspace_members').select('user_id', { count: 'exact', head: true }).eq('workspace_id', workspaceId);
+      if (countError) throw countError;
+      const soleOwner = String(membership.role || '').toLowerCase() === 'owner' && Number(count || 0) <= 1;
+      if (soleOwner) {
+        const { error: workspaceError } = await admin.from('workspaces').delete().eq('id', workspaceId);
+        if (workspaceError) throw workspaceError;
+        deletedWorkspaceIds.push(workspaceId);
+      } else {
+        const { error: memberDeleteError } = await admin.from('workspace_members').delete().eq('workspace_id', workspaceId).eq('user_id', user.id);
+        if (memberDeleteError) throw memberDeleteError;
+      }
+    }
 
-    const { error: workspaceError } = await admin.from('workspaces').delete().eq('id', workspaceId);
-    if (workspaceError) throw workspaceError;
+    const workspaceFilter = deletedWorkspaceIds.map((id) => `first_workspace_id.eq.${id}`);
+    const { error: fingerprintError } = await admin.from('team_scouted_leads').update({
+      first_workspace_id: null, first_business_id: null, first_user_id: null,
+      email: null, website: null, domain: null, name: null, source: null,
+      raw: { retained_for_duplicate_prevention: true, owner_deleted_at: deletedAt }, last_seen_at: deletedAt,
+    }).or([...workspaceFilter, `first_user_id.eq.${user.id}`].join(','));
+    if (fingerprintError && !String(fingerprintError.message || '').includes('team_scouted_leads')) throw fingerprintError;
     await admin.from('profiles').delete().eq('id', user.id);
     const { error: authError } = await admin.auth.admin.deleteUser(user.id);
     if (authError) throw authError;

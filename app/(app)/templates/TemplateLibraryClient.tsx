@@ -271,14 +271,8 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
     const payload = templatePayload(category, userId, extraRaw, true);
     const first = await supabase.from('templates').insert(payload).select('*').single();
     if (!first.error) return { data: first.data, savedRaw: true };
-    if (!isMissingColumn(first.error, 'raw')) throw first.error;
-
-    // Older Scout databases may not have templates.raw yet. Save the template without raw
-    // instead of blocking the user. Run SUPABASE_V10_27_FAST_LOAD_INDEXES.sql to keep attachments/version metadata.
-    const fallbackPayload = templatePayload(category, userId, {}, false);
-    const second = await supabase.from('templates').insert(fallbackPayload).select('*').single();
-    if (second.error) throw second.error;
-    return { data: second.data, savedRaw: false };
+    if (isMissingColumn(first.error, 'raw')) throw new Error('Database update required: templates.raw is missing. Run the bundled v10.40 SQL before saving templates.');
+    throw first.error;
   }
 
   async function archiveTemplateVersion(id: string) {
@@ -408,7 +402,7 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       const category = await ensureCategory();
       const { data, savedRaw } = await insertTemplateWithSchemaFallback(category, user.id);
       setTemplateId(data.id);
-      setStatus(savedRaw ? `${typeLabel(templateType)} saved.` : `${typeLabel(templateType)} saved. Run SUPABASE_V10_27_FAST_LOAD_INDEXES.sql once to enable template attachments/version metadata.`);
+      setStatus(savedRaw ? `${typeLabel(templateType)} saved.` : `${typeLabel(templateType)} saved.`);
       await loadAll();
     } catch (err) {
       setError(formatError(err));
@@ -426,17 +420,20 @@ export default function TemplateLibraryClient({ workspace }: { workspace: Worksp
       const { data: { user } } = await supabase.auth.getUser();
       const category = await ensureCategory();
 
-      // Updating a template creates a fresh version with a fresh id.
-      // This makes performance start from zero for the updated version and hides the old version.
-      await archiveTemplateVersion(oldTemplateId);
-
+      // Insert the new version first. The old active version is hidden only after the new row exists.
       const { data, savedRaw } = await insertTemplateWithSchemaFallback(category, user?.id || null, {
         versioned_from_template_id: oldTemplateId,
         version_created_at: new Date().toISOString(),
         version_note: 'Updated template saved as a new performance version.'
       });
+      try {
+        await archiveTemplateVersion(oldTemplateId);
+      } catch (archiveError) {
+        await supabase.from('templates').delete().eq('workspace_id', workspace.id).eq('id', data.id);
+        throw archiveError;
+      }
       setTemplateId(data.id);
-      setStatus(savedRaw ? `${typeLabel(templateType)} updated as a new template version. Its performance starts from zero. The old version is hidden from performance.` : `${typeLabel(templateType)} updated as a new template version. Performance starts from zero. Run SUPABASE_V10_27_FAST_LOAD_INDEXES.sql once to enable template attachments/version metadata.`);
+      setStatus(savedRaw ? `${typeLabel(templateType)} updated as a new template version. Its performance starts from zero. The old version is hidden from performance.` : `${typeLabel(templateType)} updated as a new template version. Performance starts from zero.`);
       await loadAll();
     } catch (err) {
       setError(formatError(err));
