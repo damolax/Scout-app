@@ -367,7 +367,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     }
   }
 
-  async function saveIdentity() {
+  async function saveIdentity(syncToGmail = false) {
     setBusy(true);
     setError('');
     try {
@@ -377,7 +377,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         body: JSON.stringify({
           workspace_id: workspace.id,
           apply_all: true,
-          sync_to_gmail: true,
+          sync_to_gmail: syncToGmail,
           signature_enabled: identity.signature_enabled,
           signature_text: identity.signature_text,
           signature_html: identity.signature_html,
@@ -389,9 +389,17 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       const results = Array.isArray(json.results) ? json.results : [];
       const synced = results.filter((row: any) => row?.sync_status === 'synced').length;
       const failed = results.filter((row: any) => row?.sync_status === 'failed').length;
-      setStatus(Number(json.updated || 0) > 0
-        ? `Scout signature saved for ${Number(json.updated || 0).toLocaleString()} sender(s) · Gmail synced ${synced}/${Number(json.updated || 0)}${failed ? ` · ${failed} failed—open sender details` : ''}.`
-        : 'Saved the workspace signature. Connect Gmail to synchronize it.');
+      const skipped = results.filter((row: any) => row?.sync_status === 'skipped').length;
+      const updated = Number(json.updated || 0);
+      if (!syncToGmail) {
+        setStatus(updated > 0
+          ? `Signature and logo saved in Scout for ${updated.toLocaleString()} sender(s).`
+          : 'Signature and logo saved as the workspace default.');
+      } else {
+        setStatus(updated > 0
+          ? `Signature saved in Scout for ${updated.toLocaleString()} sender(s) · Gmail synced ${synced}/${updated}${failed ? ` · ${failed} failed` : ''}${skipped ? ` · ${skipped} skipped` : ''}.`
+          : 'Signature saved as the workspace default. Connect Gmail to synchronize it.');
+      }
       await loadAccounts();
     } catch (err) {
       setError(formatError(err));
@@ -553,7 +561,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         <div className="card kpi">
           <div className="title">Google OAuth</div>
           <div className="num">{oauthReady === null ? '…' : oauthReady ? 'Ready' : 'Fix'}</div>
-          <p className="muted">Send-only permission set</p>
+          <p className="muted">Send, reply reading, and Gmail signature permissions</p>
         </div>
       </div>
 
@@ -601,7 +609,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         )}
 
         <div className="warning" style={{ marginTop: 12 }}>
-          <strong>Replies in this build:</strong> the classifier supports automatic responses, real responses, no-inbox, blocked messages, bounce notices, Gmail sending-limit notices, and temporary failures. Automatic Gmail inbox detection is not active until the later team build receives inbox-reading permission.
+          <strong>Replies in this build:</strong> automatic Scout-thread synchronization is active after each Gmail sender reconnects with reply-reading permission. Scout classifies real replies, automatic responses, no-inbox notices, blocked messages, bounces, Gmail sending-limit notices, temporary failures, and unsubscribes. Unrelated inbox conversations are ignored.
         </div>
       </div>
 
@@ -717,10 +725,11 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           </div>
           {identity.signature_logo_url ? <img src={identity.signature_logo_url} alt="Signature logo preview" style={{ maxWidth: 160, height: 'auto', marginTop: 12, borderRadius: 8 }} /> : null}
           <div className="actions" style={{ marginTop: 12 }}>
-            <button className="btn" type="button" disabled={busy || logoBusy || !schemaReady} onClick={saveIdentity}>Save + sync signature</button>
+            <button className="btn" type="button" disabled={busy || logoBusy || !schemaReady} onClick={() => saveIdentity(false)}>Save signature &amp; logo</button>
+            <button className="btn secondary" type="button" disabled={busy || logoBusy || !schemaReady} onClick={() => saveIdentity(true)}>Save + sync to Gmail</button>
             {identity.signature_logo_url ? <button className="btn secondary" type="button" onClick={() => copyText(identity.signature_logo_url, 'Logo URL')}>Copy logo URL</button> : null}
           </div>
-          <div className="notice" style={{ marginTop: 10 }}>Scout appends the signature exactly once to Scout-sent emails and synchronizes it to the native Gmail signature for connected senders that granted Gmail signature permission.</div>
+          <div className="notice" style={{ marginTop: 10 }}>Save signature & logo always stores the signature in Scout. Save + sync to Gmail additionally updates the native Gmail signature for connected senders that granted Gmail signature permission.</div>
         </div>
       </details>
 

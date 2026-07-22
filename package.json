@@ -1,6 +1,6 @@
 {
   "name": "scout-app-v10-40-full-verification",
-  "version": "10.40.0",
+  "version": "10.40.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -33,5 +33,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout v10.40.0 full verification build with scoped Gmail reply collection, reply classification, native Gmail signature sync, schema guard, staged follow-ups, and zero-paid-API deployment."
+  "description": "Scout v10.40.1 schema/UI hotfix: correct template message-column readiness check, full Gmail permission wording, reply collection, native Gmail signature sync, staged follow-ups, and zero-paid-API deployment."
 }

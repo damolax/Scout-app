@@ -68,7 +68,7 @@ const TABLE_CONTRACTS: TableContract[] = [
   },
   {
     table: 'templates',
-    columns: ['id', 'workspace_id', 'name', 'subject', 'body', 'template_type', 'active', 'raw']
+    columns: ['id', 'workspace_id', 'name', 'subject', 'message', 'template_type', 'active', 'raw']
   },
   {
     table: 'sent_messages',

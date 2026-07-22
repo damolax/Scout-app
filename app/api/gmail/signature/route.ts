@@ -69,8 +69,11 @@ export async function POST(request: NextRequest) {
     const workspaceId = String(input.workspace_id || '').trim();
     const accountId = String(input.gmail_account_id || '').trim();
     const applyAll = Boolean(input.apply_all || input.applyAll);
-    const syncToGmail = Boolean(input.sync_to_gmail || input.syncToGmail);
-    if (syncToGmail && !featureFlags.gmailNativeSignatureSync) throw new Error('Native Gmail signature sync is disabled by configuration. The signature can still be saved and added to Scout-sent emails.');
+    const syncRequested = Boolean(input.sync_to_gmail || input.syncToGmail);
+    const syncToGmail = syncRequested && featureFlags.gmailNativeSignatureSync;
+    const syncUnavailableReason = syncRequested && !featureFlags.gmailNativeSignatureSync
+      ? 'Native Gmail signature synchronization is disabled by configuration. The signature was still saved in Scout.'
+      : '';
     const signature_enabled = input.signature_enabled !== false;
     const signature_html = String(input.signature_html || '').trim();
     const signature_text = String(input.signature_text || '').trim();
@@ -112,7 +115,10 @@ export async function POST(request: NextRequest) {
         updated: 0,
         workspace_saved: true,
         results: [],
-        message: syncToGmail
+        sync_requested: syncRequested,
+        sync_available: featureFlags.gmailNativeSignatureSync,
+        sync_skipped_reason: syncUnavailableReason,
+        message: syncRequested
           ? 'Signature and logo were saved to the workspace, but no Gmail sender accounts are connected yet. Connect Gmail before syncing to Gmail.'
           : 'Signature and logo were saved to the workspace.'
       });
@@ -127,13 +133,13 @@ export async function POST(request: NextRequest) {
         signature_text: safeText,
         signature_logo_url,
         sync_signature_to_gmail: syncToGmail,
-        gmail_signature_sync_error: null,
+        gmail_signature_sync_error: syncUnavailableReason || null,
         updated_at: new Date().toISOString(),
         raw: { ...(account.raw || {}), email_identity: { ...((account.raw || {}).email_identity || {}), signature_enabled, signature_html: safeHtml, signature_text: safeText, signature_logo_url }, email_identity_updated_at: new Date().toISOString() }
       };
 
-      let syncStatus = syncToGmail ? 'pending' : 'not_requested';
-      let syncError = '';
+      let syncStatus = syncToGmail ? 'pending' : (syncRequested ? 'skipped' : 'not_requested');
+      let syncError = syncUnavailableReason;
       if (syncToGmail) {
         try {
           if (Boolean(account.oauth_reconnect_required)) throw new Error('Reconnect Gmail and approve Gmail signature settings before synchronizing the native signature.');
@@ -163,7 +169,15 @@ export async function POST(request: NextRequest) {
       results.push({ account_id: account.id, email: account.email, sync_status: syncStatus, sync_error: syncError });
     }
 
-    return NextResponse.json({ success: true, updated: results.length, workspace_saved: true, results });
+    return NextResponse.json({
+      success: true,
+      updated: results.length,
+      workspace_saved: true,
+      sync_requested: syncRequested,
+      sync_available: featureFlags.gmailNativeSignatureSync,
+      sync_skipped_reason: syncUnavailableReason,
+      results
+    });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 400 });
   }

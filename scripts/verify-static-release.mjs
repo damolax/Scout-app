@@ -5,7 +5,14 @@ const get=(p)=>fs.readFileSync(path.join(root,p),'utf8');
 const checks=[];
 function check(label,ok,detail=''){ checks.push({label,ok:Boolean(ok),detail}); }
 const pkg=JSON.parse(get('package.json'));
-check('Package version',pkg.version==='10.40.0',pkg.version);
+check('Package version',pkg.version==='10.40.1',pkg.version);
+check('Independent Scout signature save', get('app/(app)/settings/SettingsClient.tsx').includes('Save signature &amp; logo') && get('app/(app)/settings/SettingsClient.tsx').includes('saveIdentity(false)'));
+check('Separate Gmail signature sync', get('app/(app)/settings/SettingsClient.tsx').includes('Save + sync to Gmail') && get('app/(app)/settings/SettingsClient.tsx').includes('saveIdentity(true)'));
+check('Signature route saves before optional sync', get('app/api/gmail/signature/route.ts').includes('syncUnavailableReason') && !get('app/api/gmail/signature/route.ts').includes("throw new Error('Native Gmail signature sync is disabled by configuration"));
+
+check('Templates use message column', get('lib/schema-readiness.ts').includes("'subject', 'message', 'template_type'") && !get('lib/schema-readiness.ts').includes("'subject', 'body', 'template_type'"));
+check('No stale send-only Settings copy', !get('app/(app)/settings/SettingsClient.tsx').includes('Send-only permission set') && !get('app/(app)/settings/SettingsClient.tsx').includes('Automatic Gmail inbox detection is not active until the later team build'));
+check('Hotfix health marker', get('app/api/health/route.ts').includes('full-replies-signature-schema-ui-hotfix'));
 const oauth=get('app/api/gmail/oauth/start/route.ts');
 for(const scope of ['gmail.send','gmail.readonly','gmail.settings.basic']) check(`OAuth ${scope}`,oauth.includes(scope));
 const flags=get('lib/feature-flags.ts');
@@ -27,7 +34,7 @@ check('Research worker closed by default',get('app/api/research/run-worker/route
 check('Private URL protection',get('lib/source-scout-auto.ts').includes('assertPublicHttpUrl'));
 check('Shared workspace safe deletion',get('app/api/account/delete/route.ts').includes('soleOwner'));
 check('Template loss rollback',get('app/(app)/templates/TemplateLibraryClient.tsx').includes('await supabase.from(\'templates\').delete()'));
-check('Target repository locked',fs.existsSync(path.join(root,'DEPLOY_V10_40_0_FULL_GIT_BASH.sh')) ? get('DEPLOY_V10_40_0_FULL_GIT_BASH.sh').includes('damolax/Scout-app.git') : false);
+check('Target repository locked',fs.existsSync(path.join(root,'DEPLOY_V10_40_1_SCHEMA_UI_HOTFIX_GIT_BASH.sh')) ? get('DEPLOY_V10_40_1_SCHEMA_UI_HOTFIX_GIT_BASH.sh').includes('damolax/Scout-app.git') : false);
 const failures=checks.filter(c=>!c.ok);
 for(const c of checks) console.log(`${c.ok?'PASS':'FAIL'}  ${c.label}${c.detail?` — ${c.detail}`:''}`);
 console.log(`\n${checks.length-failures.length}/${checks.length} static release checks passed.`);
