@@ -9,7 +9,7 @@ check('Package version',pkg.version==='10.40.0',pkg.version);
 check('Independent Scout signature save', get('app/(app)/settings/SettingsClient.tsx').includes('Save signature &amp; logo') && get('app/(app)/settings/SettingsClient.tsx').includes('saveIdentity(false)'));
 check('Separate Gmail signature sync', get('app/(app)/settings/SettingsClient.tsx').includes('Save + sync to Gmail') && get('app/(app)/settings/SettingsClient.tsx').includes('saveIdentity(true)'));
 check('Signature route saves before optional sync', get('app/api/gmail/signature/route.ts').includes('syncUnavailableReason') && !get('app/api/gmail/signature/route.ts').includes("throw new Error('Native Gmail signature sync is disabled by configuration"));
-check('Hotfix health marker', get('app/api/health/route.ts').includes('full-replies-signature-schema-final-fix'));
+check('Hotfix health marker', get('app/api/health/route.ts').includes('full-replies-signature-template-contract-fix'));
 const oauth=get('app/api/gmail/oauth/start/route.ts');
 for(const scope of ['gmail.send','gmail.readonly','gmail.settings.basic']) check(`OAuth ${scope}`,oauth.includes(scope));
 const flags=get('lib/feature-flags.ts');

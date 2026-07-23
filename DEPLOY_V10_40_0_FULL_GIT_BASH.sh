@@ -86,7 +86,7 @@ if command -v curl >/dev/null && [ -n "$LIVE_URL" ]; then
   for _ in $(seq 1 36); do
     BODY="$(curl -fsS --max-time 12 "${LIVE_URL%/}/api/health" 2>/dev/null || true)"
     if printf '%s' "$BODY" | node -e '
-      let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{try{const j=JSON.parse(s); process.exit(j?.version==="10.40.0" && j?.build==="full-replies-signature-schema-final-fix" && j?.schema?.contractVersion==="10.40.0" && j?.ready===true ? 0 : 1)}catch{process.exit(1)}});'; then
+      let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{try{const j=JSON.parse(s); process.exit(j?.version==="10.40.0" && j?.build==="full-replies-signature-template-contract-fix" && j?.schema?.contractVersion==="10.40.0" && j?.ready===true ? 0 : 1)}catch{process.exit(1)}});'; then
       VERIFIED="true"
       break
     fi

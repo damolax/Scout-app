@@ -47,11 +47,9 @@ alter table if exists public.businesses add column if not exists email_verificat
 alter table if exists public.businesses add column if not exists email_role_label text;
 alter table if exists public.businesses add column if not exists email_mx_hosts text[] not null default '{}';
 
-alter table if exists public.templates add column if not exists body text;
 alter table if exists public.templates add column if not exists template_type text not null default 'initial';
 alter table if exists public.templates add column if not exists active boolean not null default true;
 alter table if exists public.templates add column if not exists raw jsonb not null default '{}'::jsonb;
-update public.templates set body = coalesce(body, message, '') where body is null;
 
 alter table if exists public.sent_messages add column if not exists template_id uuid;
 alter table if exists public.sent_messages add column if not exists gmail_account_id uuid;

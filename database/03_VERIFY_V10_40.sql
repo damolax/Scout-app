@@ -17,7 +17,7 @@ with required_columns(table_name,column_name) as (values
  ('businesses','last_reply_classification'),('businesses','last_inbound_at'),('businesses','last_auto_reply_at'),
  ('businesses','last_real_reply_at'),('businesses','email_verification_status'),('businesses','email_verification_level'),
  ('businesses','email_verified_at'),('businesses','email_verification_reason'),('businesses','email_role_label'),('businesses','email_mx_hosts'),
- ('templates','id'),('templates','workspace_id'),('templates','name'),('templates','subject'),('templates','body'),
+ ('templates','id'),('templates','workspace_id'),('templates','name'),('templates','subject'),('templates','message'),
  ('templates','template_type'),('templates','active'),('templates','raw'),
  ('sent_messages','id'),('sent_messages','workspace_id'),('sent_messages','business_id'),('sent_messages','template_id'),
  ('sent_messages','gmail_account_id'),('sent_messages','from_email'),('sent_messages','to_email'),('sent_messages','subject'),
