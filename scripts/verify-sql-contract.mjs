@@ -26,6 +26,9 @@ const requiredUpgrade = [
   'add column if not exists oauth_reconnect_required',
   'add column if not exists last_reply_sync_at',
   'add column if not exists gmail_signature_synced_at',
+  'add column if not exists email_signature_text',
+  'add column if not exists email_signature_html',
+  'add column if not exists email_logo_url',
   'reply_history_workspace_gmail_message_uidx',
   'no_inbox_workspace_gmail_message_uidx',
   "'10.40.0'",
@@ -41,7 +44,7 @@ const requiredFresh = [
   'create table if not exists public.reply_history',
   "'10.40.0'",
 ];
-const requiredVerify = ['required_columns', 'reply_dedup_index', 'followup_queue_rpc', "version='10.40.0'"];
+const requiredVerify = ['runtime_required_columns', 'reply_dedup_index', 'followup_queue_rpc', "version='10.40.0'"];
 const requiredCron = ['/api/cron/inbound-sync', '/api/message/run-schedules', '/api/cron/research-worker', '/api/cron/health-review'];
 const groups = [
   ['upgrade', upgrade, requiredUpgrade],

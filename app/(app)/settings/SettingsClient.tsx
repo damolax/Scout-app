@@ -561,7 +561,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         <div className="card kpi">
           <div className="title">Google OAuth</div>
           <div className="num">{oauthReady === null ? '…' : oauthReady ? 'Ready' : 'Fix'}</div>
-          <p className="muted">Send, reply reading, and Gmail signature permissions</p>
+          <p className="muted">Send + replies + Gmail signature scopes</p>
         </div>
       </div>
 
@@ -609,7 +609,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         )}
 
         <div className="warning" style={{ marginTop: 12 }}>
-          <strong>Replies in this build:</strong> automatic Scout-thread synchronization is active after each Gmail sender reconnects with reply-reading permission. Scout classifies real replies, automatic responses, no-inbox notices, blocked messages, bounces, Gmail sending-limit notices, temporary failures, and unsubscribes. Unrelated inbox conversations are ignored.
+          <strong>Replies in this build:</strong> automatic Gmail synchronization is active for reconnected accounts that granted Gmail read access. Scout classifies real replies, automatic responses, no-inbox notices, blocked messages, permanent bounces, Gmail sending-limit notices, and temporary failures.
         </div>
       </div>
 
@@ -725,11 +725,11 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           </div>
           {identity.signature_logo_url ? <img src={identity.signature_logo_url} alt="Signature logo preview" style={{ maxWidth: 160, height: 'auto', marginTop: 12, borderRadius: 8 }} /> : null}
           <div className="actions" style={{ marginTop: 12 }}>
-            <button className="btn" type="button" disabled={busy || logoBusy || !schemaReady} onClick={() => saveIdentity(false)}>Save signature &amp; logo</button>
-            <button className="btn secondary" type="button" disabled={busy || logoBusy || !schemaReady} onClick={() => saveIdentity(true)}>Save + sync to Gmail</button>
+            <button className="btn" type="button" disabled={busy || logoBusy} onClick={() => saveIdentity(false)}>Save signature &amp; logo</button>
+            <button className="btn secondary" type="button" disabled={busy || logoBusy} onClick={() => saveIdentity(true)}>Save + sync to Gmail</button>
             {identity.signature_logo_url ? <button className="btn secondary" type="button" onClick={() => copyText(identity.signature_logo_url, 'Logo URL')}>Copy logo URL</button> : null}
           </div>
-          <div className="notice" style={{ marginTop: 10 }}>Save signature & logo always stores the signature in Scout. Save + sync to Gmail additionally updates the native Gmail signature for connected senders that granted Gmail signature permission.</div>
+          <div className="notice" style={{ marginTop: 10 }}>Signature saving is independent of the full database readiness gate. Save + sync to Gmail additionally updates the native Gmail signature for reconnected senders that granted Gmail signature permission.</div>
         </div>
       </details>
 
