@@ -58,7 +58,7 @@ export async function GET() {
     ready,
     app: 'ok',
     version: '10.40.0',
-    build: 'full-replies-signature-template-contract-fix',
+    build: 'full-replies-signature-stale-job-confirmation',
     environmentReady,
     schemaReady,
     workerReady,

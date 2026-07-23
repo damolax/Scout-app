@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       })
       .eq('workspace_id', workspaceId)
       .eq('id', scheduleId)
-      .in('status', ['scheduled', 'due', 'running', 'stopped'])
+      .in('status', ['scheduled', 'due', 'running', 'stopped', 'failed'])
       .select('*')
       .maybeSingle();
     if (error) throw error;

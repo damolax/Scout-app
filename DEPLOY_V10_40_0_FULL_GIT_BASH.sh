@@ -43,7 +43,7 @@ cd "$WORK_DIR"
 git checkout "$BRANCH"
 git pull --ff-only origin "$BRANCH"
 
-BACKUP_BRANCH="backup-before-v10-40-schema-signature-fix-$(date +%Y%m%d-%H%M%S)"
+BACKUP_BRANCH="backup-before-v10-40-stale-job-confirmation-$(date +%Y%m%d-%H%M%S)"
 git branch "$BACKUP_BRANCH"
 git push origin "$BACKUP_BRANCH"
 
@@ -65,7 +65,7 @@ git add -A
 if git diff --cached --quiet; then
   echo "No source changes were detected. GitHub main already matches this package."
 else
-  git commit -m "Fix Scout schema readiness and signature saving"
+  git commit -m "Ask before continuing jobs stale for two hours"
   git push origin "$BRANCH"
 fi
 
@@ -86,7 +86,7 @@ if command -v curl >/dev/null && [ -n "$LIVE_URL" ]; then
   for _ in $(seq 1 36); do
     BODY="$(curl -fsS --max-time 12 "${LIVE_URL%/}/api/health" 2>/dev/null || true)"
     if printf '%s' "$BODY" | node -e '
-      let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{try{const j=JSON.parse(s); process.exit(j?.version==="10.40.0" && j?.build==="full-replies-signature-template-contract-fix" && j?.schema?.contractVersion==="10.40.0" && j?.ready===true ? 0 : 1)}catch{process.exit(1)}});'; then
+      let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{try{const j=JSON.parse(s); process.exit(j?.version==="10.40.0" && j?.build==="full-replies-signature-stale-job-confirmation" && j?.schema?.contractVersion==="10.40.0" && j?.ready===true ? 0 : 1)}catch{process.exit(1)}});'; then
       VERIFIED="true"
       break
     fi
@@ -106,4 +106,4 @@ echo "DEPLOYMENT VERIFIED"
 echo "Code version:              $EXPECTED_VERSION"
 echo "GitHub repository:         $REPO_URL"
 echo "Supabase schema contract:  10.40.0"
-echo "Scout schema readiness, independent signature saving, reply synchronization, and optional Gmail signature sync are ready for controlled live acceptance tests."
+echo "Scout schema readiness, reply synchronization, signature sync, and two-hour stale-job confirmation are ready for controlled live acceptance tests."

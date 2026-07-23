@@ -630,7 +630,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
     : { value: (recentSchedulesResponse.data || []) as ScheduleRow[] };
 
   const queuedContacts = activeSchedules.value.reduce((total, row) => total + Math.max(0, Number(row.target_count || 0) - Number(row.processed_count || 0)), 0);
-  const staleCutoff = Date.now() - 10 * 60 * 1000;
+  const staleCutoff = Date.now() - 2 * 60 * 60 * 1000;
   const staleJobs = activeSchedules.value.filter((row) => {
     const heartbeat = row.last_heartbeat_at || row.updated_at;
     return heartbeat ? new Date(heartbeat).getTime() < staleCutoff : false;
@@ -699,7 +699,7 @@ export default async function DashboardPage({ searchParams }: { searchParams?: D
   if (gmailSummary.reconnect > 0) issues.push({ title: `${gmailSummary.reconnect} Gmail account${gmailSummary.reconnect === 1 ? '' : 's'} need reconnection`, message: 'Scout cannot use these accounts until Google access is restored.', href: '/settings', severity: 'error' });
   if (gmailSummary.hardRestricted > 0) issues.push({ title: `${gmailSummary.hardRestricted} Gmail account${gmailSummary.hardRestricted === 1 ? '' : 's'} hard restricted`, message: 'The Resume control remains unavailable until the restriction period ends.', href: '/settings', severity: 'warning' });
   if (gmailSummary.paused > 0) issues.push({ title: `${gmailSummary.paused} Gmail account${gmailSummary.paused === 1 ? '' : 's'} paused`, message: 'Open Settings to see each exact reason and the available resume action.', href: '/settings', severity: 'warning' });
-  if (staleJobs.length > 0) issues.push({ title: `${staleJobs.length} sending job${staleJobs.length === 1 ? '' : 's'} have not progressed for 10 minutes`, message: 'The job may be waiting for sender cooldown, or the worker may have stopped.', href: '/message', severity: 'warning' });
+  if (staleJobs.length > 0) issues.push({ title: `${staleJobs.length} sending job${staleJobs.length === 1 ? '' : 's'} need confirmation after more than 2 hours without progress`, message: 'Open Send Emails and choose whether Scout should continue the remaining recipients or keep the job paused.', href: '/message', severity: 'warning' });
   if (failedJobsCount.value > 0) issues.push({ title: `${failedJobsCount.value} failed sending job${failedJobsCount.value === 1 ? '' : 's'}`, message: 'Open Message to see the exact error and restart only after correcting it.', href: '/message', severity: 'error' });
   if (periodReplyMetrics.deliveryFailures > 0) issues.push({ title: `${periodReplyMetrics.deliveryFailures} delivery failure${periodReplyMetrics.deliveryFailures === 1 ? '' : 's'} in ${period.label.toLowerCase()}`, message: 'Review and suppress bad recipient addresses before the next run.', href: '/replies', severity: 'warning' });
   if (periodReplyMetrics.limitNotices > 0) issues.push({ title: `${periodReplyMetrics.limitNotices} Gmail limit notice${periodReplyMetrics.limitNotices === 1 ? '' : 's'}`, message: 'Scout will pause or restrict the affected Gmail according to its health history.', href: '/settings', severity: 'error' });

@@ -24,12 +24,12 @@ export async function POST(request: NextRequest) {
 
     const { data: member, error: memberError } = await supabase
       .from('workspace_members')
-      .select('workspace_id,user_id')
+      .select('workspace_id,user_id,approved')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
       .limit(1);
     if (memberError) throw memberError;
-    if (!member?.length) return NextResponse.json({ success: false, error: 'You do not belong to this workspace.' }, { status: 403 });
+    if (!member?.length || member[0]?.approved === false) return NextResponse.json({ success: false, error: 'You do not have access to this workspace.' }, { status: 403 });
 
     const { data: existing, error: existingError } = await supabase
       .from('message_schedules')
@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
         finished_at: null,
         scheduled_for: now,
         last_error: null,
+        resume_count: Number(existing.resume_count || 0) + 1,
         updated_at: now,
       })
       .eq('workspace_id', workspaceId)

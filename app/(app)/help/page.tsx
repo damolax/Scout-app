@@ -10,6 +10,7 @@ const workflow = [
   ['5. Send a controlled batch', 'Start with one address you control, then increase gradually within Scout’s sender-health allowance.'],
   ['6. Check replies', 'Replies collects messages only from Scout-created threads and related delivery notices. Review real replies first.'],
   ['7. Follow up safely', 'Use Follow-up 1 and Follow-up 2 only. Scout excludes real replies, unsubscribes, bounces, blocked addresses, and invalid inboxes.'],
+  ['8. Recover interrupted jobs', 'Short interruptions recover automatically. After two hours without progress, Scout asks whether to continue only the remaining recipients or keep the job paused.'],
 ];
 
 const acceptance = [
@@ -21,6 +22,7 @@ const acceptance = [
   'Running Check replies twice does not create duplicate records.',
   'The scheduled inbound worker shows a successful run in Supabase Cron history.',
   'A normal member cannot view or delete another member’s workspace data.',
+  'A test job stale for two hours shows Continue remaining messages and Keep paused before sending resumes.',
 ];
 
 export default async function HelpPage() {

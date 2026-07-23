@@ -33,5 +33,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout v10.40.0 full verification build with scoped Gmail reply collection, reply classification, native Gmail signature sync, schema guard, staged follow-ups, and zero-paid-API deployment."
+  "description": "Scout v10.40.0 full verification build with scoped Gmail replies, signature sync, and a required continue-or-pause confirmation after two hours without sending progress."
 }

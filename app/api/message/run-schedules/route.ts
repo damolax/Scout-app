@@ -1533,21 +1533,42 @@ async function runOneSchedule(
 async function resetStaleRunningSchedules(
   supabase: ReturnType<typeof createAdminClient>,
 ) {
-  const staleSince = new Date(Date.now() - 12 * 60 * 1000).toISOString();
-  const { error } = await supabase
+  const now = new Date();
+  const shortRecoveryCutoff = new Date(now.getTime() - 12 * 60 * 1000).toISOString();
+  const confirmationCutoff = new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString();
+
+  // A long interruption must not silently restart when the user comes back.
+  // Mark it failed-but-resumable so AppOpenRunner can ask Continue or Keep paused.
+  const { error: longStaleError } = await supabase
     .from("message_schedules")
     .update({
-      status: "scheduled",
+      status: "failed",
       last_error:
-        "Resuming stale running job after a previous run stopped unexpectedly.",
-      resume_count: 1,
-      updated_at: new Date().toISOString(),
+        "Paused after more than two hours without progress. Open Scout and choose Continue remaining messages or Keep paused.",
+      updated_at: now.toISOString(),
     })
     .eq("status", "running")
     .or("stop_requested.is.null,stop_requested.eq.false")
     .is("finished_at", null)
-    .lt("updated_at", staleSince);
-  if (error) throw error;
+    .lt("updated_at", confirmationCutoff);
+  if (longStaleError) throw longStaleError;
+
+  // Short worker interruptions can still recover automatically.
+  const { error: shortStaleError } = await supabase
+    .from("message_schedules")
+    .update({
+      status: "scheduled",
+      last_error:
+        "Resuming a short interrupted run automatically.",
+      resume_count: 1,
+      updated_at: now.toISOString(),
+    })
+    .eq("status", "running")
+    .or("stop_requested.is.null,stop_requested.eq.false")
+    .is("finished_at", null)
+    .gte("updated_at", confirmationCutoff)
+    .lt("updated_at", shortRecoveryCutoff);
+  if (shortStaleError) throw shortStaleError;
 }
 
 async function runSchedules(

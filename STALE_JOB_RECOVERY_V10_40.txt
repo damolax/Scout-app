@@ -1,0 +1,12 @@
+SCOUT v10.40.0 — TWO-HOUR STALE JOB CONFIRMATION
+
+Behavior
+- Short interruptions under two hours may recover automatically.
+- A sending job with no progress for at least two hours will not silently restart when Scout becomes active.
+- The signed-in user sees a required prompt with Continue remaining messages, Keep paused, and Review job details.
+- Continue preserves processed/sent counts and sends only remaining eligible recipients.
+- Keep paused marks the job stopped and it can later be continued from Send Emails.
+- Manual stops never trigger the recovery prompt.
+- If the background worker continued making progress while the browser/network was offline, no prompt is shown.
+
+No Supabase SQL change is required for this code-only update.
