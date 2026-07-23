@@ -28,17 +28,20 @@ export async function GET() {
     error: 'Worker status has not been checked.',
   };
   let schema: Awaited<ReturnType<typeof checkScoutSchema>> | null = null;
+  let bulkImportReady = false;
   let databaseError = '';
 
   try {
     const supabase = createAdminClient();
-    const [workerResult, schemaResult] = await Promise.all([
+    const [workerResult, schemaResult, bulkImportResult] = await Promise.all([
       supabase.rpc('scout_message_worker_status'),
-      checkScoutSchema(supabase, defaultWorkspaceId)
+      checkScoutSchema(supabase, defaultWorkspaceId),
+      supabase.from('scout_schema_versions').select('version').eq('version', '10.41.0').maybeSingle()
     ]);
     if (workerResult.error) throw workerResult.error;
     centralWorker = (Array.isArray(workerResult.data) ? workerResult.data[0] : workerResult.data) || centralWorker;
     schema = schemaResult;
+    bulkImportReady = !bulkImportResult.error && bulkImportResult.data?.version === '10.41.0';
   } catch (error) {
     databaseError = error instanceof Error ? error.message : String(error);
     centralWorker = {
@@ -57,8 +60,10 @@ export async function GET() {
     success: ready,
     ready,
     app: 'ok',
-    version: '10.40.0',
-    build: 'full-replies-signature-stale-job-confirmation',
+    version: '10.41.0',
+    build: 'high-speed-resumable-bulk-import',
+    bulkImportContract: '10.41.0',
+    bulkImportReady,
     environmentReady,
     schemaReady,
     workerReady,

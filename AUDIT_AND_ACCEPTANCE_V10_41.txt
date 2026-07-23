@@ -1,0 +1,41 @@
+SCOUT v10.41.0 HIGH-SPEED BULK IMPORT — AUDIT
+
+Problem corrected
+- The earlier browser importer sent relatively small chunks sequentially.
+- It ran database duplicate work and the team registry trigger row by row.
+- It then paged through every imported row again for a final recount.
+- At the observed rate of 500 rows in about 2 minutes, 20,000 rows would take roughly 80 minutes.
+
+New import path
+- Up to 5,000 rows per bulk request.
+- Three concurrent database lanes.
+- A 20,000-row compact file plans as four chunks and two network waves.
+- Set-based queue/history/team duplicate checks.
+- Atomic team duplicate claims across concurrent imports.
+- Row trigger bypass only inside the bulk-import transaction, followed by bulk registry enrichment.
+- Idempotent chunk receipts: retries return the saved receipt rather than inserting or counting again.
+- Final totals come from receipts; the browser no longer downloads every inserted key in 1,000-row pages.
+- Automatic chunk splitting remains available for payload, timeout, or transient connection failures.
+- Files with 5,000+ rows use compact raw mode. Name, email, phone, website, domain, category, location, source, status, score, and normalized key remain stored; duplicated original CSV cells are not copied into raw JSON.
+
+Validation completed in this environment
+- 19/19 static release checks passed.
+- Five SQL contract groups passed.
+- 143/143 TypeScript/TSX files passed syntax transpilation.
+- Git Bash deployment scripts passed bash syntax checks.
+- Synthetic 20,000-row plan: 4 x 5,000-row chunks, 3 lanes, 2 network waves.
+- Package metadata, SQL delimiters, required functions, and release markers passed.
+
+Not completed in this environment
+- A real Supabase performance benchmark was not possible because this environment is not connected to the user's database.
+- The dependency-backed npm production build could not be run here because one npm package was not available in the local offline cache. The included deployment script runs npm ci, static checks, SQL checks, TypeScript, and the Next.js production build before GitHub is changed.
+
+Acceptance test after deployment
+1. Run RUN_THIS_HIGH_SPEED_IMPORT_SQL.sql in the current Supabase project.
+2. Confirm the final READY row and run database/07_VERIFY_HIGH_SPEED_BULK_IMPORT.sql; all rows must be true.
+3. Deploy the v10.41 package.
+4. Confirm /api/health reports version 10.41.0, build high-speed-resumable-bulk-import, bulkImportReady true.
+5. Test 1,000 rows, then the same 20,000-row CSV.
+6. Record the displayed rows/second and total completion time.
+
+The exact live duration depends on CSV width, duplicate rate, Supabase database load, and network quality. This package removes the known sequential and recount bottlenecks, but does not claim a measured live time before that acceptance test.

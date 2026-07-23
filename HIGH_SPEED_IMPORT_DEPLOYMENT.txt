@@ -1,0 +1,33 @@
+SCOUT v10.41.0 HIGH-SPEED IMPORT — EXACT ORDER
+
+1. In Supabase SQL Editor, run:
+   RUN_THIS_HIGH_SPEED_IMPORT_SQL.sql
+
+2. Confirm the final result says:
+   scout_bulk_import_status = READY
+   bulk_import_contract = 10.41.0
+   receipt_table_ready = true
+   bulk_import_rpc_ready = true
+   progress_rpc_ready = true
+   finalize_rpc_ready = true
+
+3. Optionally run database/07_VERIFY_HIGH_SPEED_BULK_IMPORT.sql.
+   Every row must show passed = true.
+
+4. In Windows Git Bash, run DEPLOY_V10_41_0_FULL_GIT_BASH.sh through the provided deployment block.
+
+5. Confirm /api/health shows:
+   version = 10.41.0
+   build = high-speed-resumable-bulk-import
+   bulkImportReady = true
+
+6. Test with 1,000 rows first, then the 20,000-row file.
+   The import page shows committed rows/second and a remaining-time estimate.
+
+Behavior:
+- up to 5,000 rows per bulk request
+- 3 concurrent lanes
+- automatic chunk splitting when a request is too large
+- idempotent chunk receipts; retries do not duplicate or recount completed work
+- compact raw mode for 5,000+ rows; all mapped lead fields remain stored
+- exact import counts finalized from database receipts

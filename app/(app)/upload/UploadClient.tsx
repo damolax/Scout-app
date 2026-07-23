@@ -7,15 +7,19 @@ import { errorMessage, fetchJson, isAuthError, isTransientError, withRetry } fro
 import { Business, CsvBusinessInput, CsvInvalidRow, ImportResult, MessageCategory, Workspace } from '@/lib/types';
 
 const MAX_IMPORT_ROWS = 100000;
-const TARGET_IMPORT_CHUNK_ROWS = 1000;
-const MIN_IMPORT_CHUNK_ROWS = 100;
-const MAX_IMPORT_CHUNK_BYTES = 1_250_000;
+const TARGET_IMPORT_CHUNK_ROWS = 5000;
+const MIN_IMPORT_CHUNK_ROWS = 250;
+const MAX_IMPORT_CHUNK_BYTES = 4_500_000;
+const IMPORT_CONCURRENCY = 3;
+const COMPACT_RAW_THRESHOLD = 5000;
 const MAX_IMPORT_FILE_BYTES = 100 * 1024 * 1024;
 const ACTIVE_QUEUE_STATUSES = ['pending', 'scanning', 'found', 'ready', 'review'];
 
 type ImportPhase = 'idle' | 'reading' | 'ready' | 'checking' | 'importing' | 'done' | 'failed';
 type TargetWarning = { activeCount: number; previousHeaders: string[]; newHeaders: string[] } | null;
-type ImportChunkResult = { inserted_count: number; skipped_queue_count: number; skipped_history_count: number; skipped_team_count?: number; skipped_keys?: string[] | null };
+type ImportChunkResult = { row_count?: number; inserted_count: number; skipped_queue_count: number; skipped_history_count: number; skipped_team_count?: number; skipped_keys?: string[] | null; skipped_keys_truncated?: boolean };
+type ImportProgressResult = { processed_count: number; inserted_count: number; skipped_queue_count: number; skipped_history_count: number; skipped_team_count: number; completed_chunks: number };
+type ImportFinalizeResult = ImportProgressResult & { skipped_total: number };
 type AudienceCategorySelection = { id: string; name: string };
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -99,7 +103,7 @@ function downloadInvalidRows(name: string, rows: CsvInvalidRow[]) {
   URL.revokeObjectURL(url);
 }
 
-function toRpcRows(rows: CsvBusinessInput[]) {
+function toRpcRows(rows: CsvBusinessInput[], compactRaw = false) {
   return rows.map((row) => ({
     name: row.name || null,
     email: row.email || null,
@@ -110,26 +114,26 @@ function toRpcRows(rows: CsvBusinessInput[]) {
     location: row.location || null,
     source: row.source || 'csv_upload',
     normalized_key: row.normalized_key,
-    raw: row.raw || {}
+    raw: compactRaw ? {} : (row.raw || {})
   }));
 }
 
 
-function estimateRpcRowBytes(row: CsvBusinessInput): number {
+function estimateRpcRowBytes(row: CsvBusinessInput, compactRaw: boolean): number {
   try {
-    return new TextEncoder().encode(JSON.stringify(toRpcRows([row])[0])).length + 2;
+    return new TextEncoder().encode(JSON.stringify(toRpcRows([row], compactRaw)[0])).length + 2;
   } catch {
     return 2048;
   }
 }
 
-function makeImportChunks(rows: CsvBusinessInput[]): CsvBusinessInput[][] {
+function makeImportChunks(rows: CsvBusinessInput[], compactRaw: boolean): CsvBusinessInput[][] {
   const parts: CsvBusinessInput[][] = [];
   let current: CsvBusinessInput[] = [];
   let currentBytes = 2;
 
   for (const row of rows) {
-    const rowBytes = estimateRpcRowBytes(row);
+    const rowBytes = estimateRpcRowBytes(row, compactRaw);
     const exceedsRows = current.length >= TARGET_IMPORT_CHUNK_ROWS;
     const exceedsBytes = current.length > 0 && currentBytes + rowBytes > MAX_IMPORT_CHUNK_BYTES;
     if (exceedsRows || exceedsBytes) {
@@ -155,7 +159,8 @@ function shouldSplitImportChunk(error: unknown): boolean {
     'could not find the function',
     'schema cache',
     'invalid input syntax',
-    'violates check constraint'
+    'violates check constraint',
+    'high-speed importer sql is not installed'
   ].some((part) => message.includes(part))) return false;
 
   return isTransientError(error) || [
@@ -252,47 +257,52 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   async function invokeImportRpc(
     part: CsvBusinessInput[],
     batchId: string,
+    chunkKey: string,
     category: AudienceCategorySelection,
+    compactRaw: boolean,
     onRetry: (message: string) => void
   ): Promise<ImportChunkResult> {
     let refreshedSession = false;
+    const payload = toRpcRows(part, compactRaw);
 
     return withRetry(async () => {
-      const { data, error } = await supabase.rpc('import_businesses_chunk_with_category', {
+      const call = () => supabase.rpc('import_businesses_bulk_v2', {
         target_workspace: workspace.id,
         target_batch_id: batchId,
-        input_rows: toRpcRows(part),
+        target_chunk_key: chunkKey,
+        input_rows: payload,
         target_category_id: category.id || null,
         target_category_name: category.name || null
       });
+      const { data, error } = await call();
 
       if (error && isAuthError(error) && !refreshedSession) {
         refreshedSession = true;
         const { error: refreshError } = await supabase.auth.refreshSession();
         if (refreshError) throw refreshError;
-        const retry = await supabase.rpc('import_businesses_chunk_with_category', {
-          target_workspace: workspace.id,
-          target_batch_id: batchId,
-          input_rows: toRpcRows(part),
-          target_category_id: category.id || null,
-          target_category_name: category.name || null
-        });
+        const retry = await call();
         if (retry.error) throw retry.error;
         const refreshedItem = ((retry.data || []) as ImportChunkResult[])[0];
-        if (!refreshedItem) throw new Error('Import server returned no result for this chunk.');
+        if (!refreshedItem) throw new Error('High-speed import server returned no result for this chunk.');
         return refreshedItem;
       }
 
-      if (error) throw error;
+      if (error) {
+        const message = formatImportError(error).toLowerCase();
+        if (message.includes('import_businesses_bulk_v2') || message.includes('could not find the function')) {
+          throw new Error('High-speed importer SQL is not installed. Run database/06_HIGH_SPEED_BULK_IMPORT.sql in the current Supabase project, then retry.');
+        }
+        throw error;
+      }
       const item = ((data || []) as ImportChunkResult[])[0];
-      if (!item) throw new Error('Import server returned no result for this chunk.');
+      if (!item) throw new Error('High-speed import server returned no result for this chunk.');
       return item;
     }, {
       retries: 3,
-      baseDelayMs: 650,
-      maxDelayMs: 6000,
+      baseDelayMs: 500,
+      maxDelayMs: 5000,
       onRetry: (error, attempt, delayMs) => {
-        onRetry(`Temporary upload interruption. Retrying safely (${attempt}/3) in ${(delayMs / 1000).toFixed(1)}s: ${formatImportError(error)}`);
+        onRetry(`Temporary upload interruption. Retrying the same idempotent chunk (${attempt}/3) in ${(delayMs / 1000).toFixed(1)}s: ${formatImportError(error)}`);
       }
     });
   }
@@ -300,43 +310,50 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   async function importChunkWithRecovery(
     part: CsvBusinessInput[],
     batchId: string,
+    chunkKey: string,
     category: AudienceCategorySelection,
+    compactRaw: boolean,
     onLeafComplete: (rowCount: number) => void,
     onRetry: (message: string) => void
   ): Promise<ImportChunkResult[]> {
     try {
-      const item = await invokeImportRpc(part, batchId, category, onRetry);
-      onLeafComplete(part.length);
+      const item = await invokeImportRpc(part, batchId, chunkKey, category, compactRaw, onRetry);
+      onLeafComplete(Number(item.row_count || part.length));
       return [item];
     } catch (error) {
       if (part.length <= MIN_IMPORT_CHUNK_ROWS || !shouldSplitImportChunk(error)) throw error;
       const middle = Math.ceil(part.length / 2);
-      onRetry(`A ${part.length.toLocaleString()}-row chunk was too heavy or interrupted. Scout is splitting it into smaller safe chunks without restarting the import.`);
-      const left = await importChunkWithRecovery(part.slice(0, middle), batchId, category, onLeafComplete, onRetry);
-      const right = await importChunkWithRecovery(part.slice(middle), batchId, category, onLeafComplete, onRetry);
+      onRetry(`A ${part.length.toLocaleString()}-row chunk was too heavy or interrupted. Scout is splitting only that chunk and preserving every completed receipt.`);
+      const left = await importChunkWithRecovery(part.slice(0, middle), batchId, `${chunkKey}.a`, category, compactRaw, onLeafComplete, onRetry);
+      const right = await importChunkWithRecovery(part.slice(middle), batchId, `${chunkKey}.b`, category, compactRaw, onLeafComplete, onRetry);
       return [...left, ...right];
     }
   }
 
-  async function fetchBatchImportedKeys(batchId: string): Promise<Set<string>> {
-    const keys = new Set<string>();
-    const pageSize = 1000;
-    for (let from = 0; from < MAX_IMPORT_ROWS; from += pageSize) {
-      const { data, error } = await supabase
-        .from('businesses')
-        .select('normalized_key')
-        .eq('workspace_id', workspace.id)
-        .eq('import_batch_id', batchId)
-        .range(from, from + pageSize - 1);
-      if (error) throw error;
-      for (const row of data || []) {
-        const key = String((row as { normalized_key?: string }).normalized_key || '').trim();
-        if (key) keys.add(key);
-      }
-      if (!data || data.length < pageSize) break;
-    }
-    return keys;
+  async function getImportProgress(batchId: string): Promise<ImportProgressResult> {
+    const { data, error } = await supabase.rpc('get_import_batch_progress_v2', {
+      target_workspace: workspace.id,
+      target_batch_id: batchId
+    });
+    if (error) throw error;
+    const row = ((data || []) as ImportProgressResult[])[0];
+    if (!row) throw new Error('Import progress server returned no result.');
+    return row;
   }
+
+  async function finalizeImport(batchId: string, fileDuplicates: number, invalidCount: number): Promise<ImportFinalizeResult> {
+    const { data, error } = await supabase.rpc('finalize_import_batch_v2', {
+      target_workspace: workspace.id,
+      target_batch_id: batchId,
+      file_duplicate_count: fileDuplicates,
+      invalid_row_count: invalidCount
+    });
+    if (error) throw error;
+    const row = ((data || []) as ImportFinalizeResult[])[0];
+    if (!row) throw new Error('Import finalization server returned no result.');
+    return row;
+  }
+
 
   async function onFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -468,52 +485,61 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       }, { retries: 2 });
 
       batchId = String(batch.id);
-      const parts = makeImportChunks(deduped);
+      const compactRaw = deduped.length >= COMPACT_RAW_THRESHOLD;
+      const parts = makeImportChunks(deduped, compactRaw);
+      const laneCount = Math.min(IMPORT_CONCURRENCY, Math.max(parts.length, 1));
       setPhase('importing');
-      setProgress(`Starting safe cloud import in ${parts.length.toLocaleString()} chunk(s). Scout automatically retries temporary failures and splits heavy chunks.`);
+      setProgress(`Starting high-speed import: ${parts.length.toLocaleString()} bulk chunk(s) across ${laneCount} concurrent lane(s).${compactRaw ? ' Large-file mode stores mapped lead fields without duplicating every original CSV cell into raw JSON.' : ''}`);
 
-      for (let index = 0; index < parts.length; index += 1) {
-        const part = parts[index];
-        const results = await importChunkWithRecovery(
-          part,
-          batchId,
-          category,
-          (rowCount) => {
-            processed += rowCount;
-            setPercent(Math.min(96, Math.round((processed / Math.max(deduped.length, 1)) * 96)));
-            setProgress(`Safe cloud import: ${processed.toLocaleString()} / ${deduped.length.toLocaleString()} row(s). Chunk ${Math.min(index + 1, parts.length).toLocaleString()} of ${parts.length.toLocaleString()}.`);
-          },
-          (message) => setProgress(message)
-        );
+      let nextChunkIndex = 0;
+      let skippedKeysTruncated = false;
+      const runLane = async () => {
+        while (true) {
+          const index = nextChunkIndex;
+          nextChunkIndex += 1;
+          if (index >= parts.length) return;
+          const part = parts[index];
+          const results = await importChunkWithRecovery(
+            part,
+            batchId,
+            String(index + 1),
+            category,
+            compactRaw,
+            (rowCount) => {
+              processed += rowCount;
+              const elapsedSeconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
+              const rowsPerSecond = processed / elapsedSeconds;
+              const remainingSeconds = rowsPerSecond > 0 ? Math.max(0, (deduped.length - processed) / rowsPerSecond) : 0;
+              setPercent(Math.min(96, Math.round((processed / Math.max(deduped.length, 1)) * 96)));
+              setProgress(`High-speed import: ${processed.toLocaleString()} / ${deduped.length.toLocaleString()} row(s) committed · ${rowsPerSecond.toFixed(0)} rows/sec · about ${Math.ceil(remainingSeconds)}s remaining.`);
+            },
+            (message) => setProgress(message)
+          );
 
-        for (const item of results) {
-          insertedFromRpc += Number(item.inserted_count || 0);
-          skippedQueueFromRpc += Number(item.skipped_queue_count || 0);
-          skippedHistoryFromRpc += Number(item.skipped_history_count || 0);
-          skippedTeamFromRpc += Number(item.skipped_team_count || 0);
-          for (const key of item.skipped_keys || []) skippedKeysFromRpc.add(key);
+          for (const item of results) {
+            insertedFromRpc += Number(item.inserted_count || 0);
+            skippedQueueFromRpc += Number(item.skipped_queue_count || 0);
+            skippedHistoryFromRpc += Number(item.skipped_history_count || 0);
+            skippedTeamFromRpc += Number(item.skipped_team_count || 0);
+            skippedKeysTruncated ||= Boolean(item.skipped_keys_truncated);
+            for (const key of item.skipped_keys || []) skippedKeysFromRpc.add(key);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
+      };
 
-        await new Promise((resolve) => setTimeout(resolve, 0));
+      await Promise.all(Array.from({ length: laneCount }, () => runLane()));
+
+      setProgress('Finalizing the import from idempotent database receipts...');
+      const final = await withRetry(() => finalizeImport(batchId, duplicateRows.length, invalidRows.length), { retries: 2 });
+      const inserted = Number(final.inserted_count ?? insertedFromRpc);
+      const skippedExistingQueue = Number(final.skipped_queue_count ?? skippedQueueFromRpc);
+      const skippedScouted = Number(final.skipped_history_count ?? skippedHistoryFromRpc);
+      const skippedTeam = Number(final.skipped_team_count ?? skippedTeamFromRpc);
+      const skippedRows = deduped.filter((row) => skippedKeysFromRpc.has(row.normalized_key));
+      if (skippedKeysTruncated) {
+        setWarnings((current) => [...current, 'The skipped-duplicate CSV contains a sample because more than 500 database duplicates occurred inside at least one chunk. Counts remain exact.']);
       }
-
-      setProgress('Verifying the saved rows so a retried network request cannot produce an incorrect total...');
-      let importedKeys: Set<string> | null = null;
-      try {
-        importedKeys = await withRetry(() => fetchBatchImportedKeys(batchId), { retries: 2 });
-      } catch (verificationError) {
-        console.warn('Import verification query failed:', verificationError);
-        setWarnings((current) => [...current, 'The upload completed, but Scout could not run the final verification count. The imported records are still protected by database deduplication.']);
-      }
-
-      const inserted = importedKeys ? importedKeys.size : insertedFromRpc;
-      const skippedRows = importedKeys
-        ? deduped.filter((row) => !importedKeys!.has(row.normalized_key))
-        : deduped.filter((row) => skippedKeysFromRpc.has(row.normalized_key));
-      const uniqueSkipped = Math.max(0, deduped.length - inserted);
-      const skippedTeam = Math.min(uniqueSkipped, skippedTeamFromRpc);
-      const skippedScouted = Math.min(Math.max(0, uniqueSkipped - skippedTeam), skippedHistoryFromRpc);
-      const skippedExistingQueue = Math.max(0, uniqueSkipped - skippedTeam - skippedScouted);
       let queuedResearch = 0;
 
       if (enqueueResearch && inserted > 0) {
@@ -526,15 +552,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         }
       }
 
-      const skippedTotal = skippedRows.length + duplicateRows.length + invalidRows.length;
-      const { error: batchUpdateError } = await supabase
-        .from('import_batches')
-        .update({ inserted_count: inserted, skipped_count: skippedTotal })
-        .eq('id', batchId);
-      if (batchUpdateError) {
-        console.warn('Import batch summary update failed:', batchUpdateError);
-        setWarnings((current) => [...current, 'The leads were saved, but the import-history summary could not be updated.']);
-      }
+      const skippedTotal = skippedExistingQueue + skippedScouted + skippedTeam + duplicateRows.length + invalidRows.length;
 
       if (skippedTeam > 0) {
         const { error: notificationError } = await supabase.from('app_notifications').insert({
@@ -561,14 +579,10 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       let partialInserted = insertedFromRpc;
       if (batchId) {
         try {
-          const partialKeys = await fetchBatchImportedKeys(batchId);
-          partialInserted = partialKeys.size;
-          await supabase
-            .from('import_batches')
-            .update({ inserted_count: partialInserted, skipped_count: duplicateRows.length + invalidRows.length })
-            .eq('id', batchId);
+          const partial = await getImportProgress(batchId);
+          partialInserted = Number(partial.inserted_count || partialInserted);
         } catch (partialError) {
-          console.warn('Could not verify partial import after failure:', partialError);
+          console.warn('Could not read high-speed import receipts after failure:', partialError);
         }
       }
 
@@ -671,7 +685,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
             <input className="input" value={newAudienceCategory} onChange={(event) => { setNewAudienceCategory(event.target.value); if (audienceCategoryId) setAudienceCategoryId(''); }} placeholder="Airtable service, Marketing, Shopify audit" />
           </div>
         </div>
-        <p className="muted">Limit: 100,000 usable rows. Import divides rows clearly: emails → Ready for Message; no email → Pending for Auto Scout; duplicates are skipped/exportable; invalid rows are downloadable. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
+        <p className="muted">Limit: 100,000 usable rows. Files with 5,000+ rows automatically use compact high-speed mode and three concurrent database lanes. Import divides rows clearly: emails → Ready for Message; no email → Pending for Auto Scout; duplicates are skipped/exportable; invalid rows are downloadable. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
         <div className={phase === 'failed' ? 'error' : phase === 'done' ? 'success' : 'notice'}>{progress}</div>
         <div className="progress-track" aria-label="Import progress"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>
 
@@ -691,7 +705,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         </label>
 
         <div className="actions">
-          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : `Import ${rows.length.toLocaleString()} business(es)`}</button>
+          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'High-speed importing...' : `Import ${rows.length.toLocaleString()} business(es)`}</button>
           <button className="btn secondary" type="button" disabled={importing} onClick={repairEmailRouting}>Repair: Email → Ready / No Email → Pending</button>
           <button className="btn secondary" type="button" disabled={importing} onClick={exportPendingNoEmailForScout}>Export Pending No-Email for Auto Scout</button>
           <button className="btn danger" type="button" disabled={importing} onClick={deletePendingNoEmailBusinesses}>Delete Pending No-Email</button>

@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-40-full-verification",
-  "version": "10.40.0",
+  "name": "scout-app-v10-41-bulk-import",
+  "version": "10.41.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -33,5 +33,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout v10.40.0 full verification build with scoped Gmail replies, signature sync, and a required continue-or-pause confirmation after two hours without sending progress."
+  "description": "Scout v10.41.0 with full Gmail replies/signatures, stale-job confirmation, and high-speed resumable bulk CSV import."
 }
