@@ -245,7 +245,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     if (!response.ok || json?.success === false) throw new Error(json?.error || `Import jobs failed with HTTP ${response.status}`);
     const jobs = (json.jobs || []) as BackgroundImportJob[];
     setImportJobs(jobs);
-    const active = jobs.find((job) => job.id === activeImportJobId) || jobs.find((job) => ['uploading','queued','processing','paused','failed'].includes(job.status));
+    const active = jobs.find((job) => job.id === activeImportJobId) || jobs.find((job) => ['uploading','queued','processing'].includes(job.status));
     if (active) {
       const denominator = Math.max(1, Number(active.valid_rows || active.total_rows || 0));
       const pct = active.status === 'uploading'
@@ -671,10 +671,22 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     });
     const json = await response.json().catch(() => ({}));
     if (!response.ok || json?.success === false) throw new Error(json?.error || `Import control failed with HTTP ${response.status}`);
-    if (action === 'resume') void fetch('/api/import-jobs/run', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workspaceId: workspace.id, jobId: job.id })
-    }).catch(() => undefined);
+    if (action === 'resume') {
+      setActiveImportJobId(job.id);
+      void fetch('/api/import-jobs/run', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, jobId: job.id })
+      }).catch(() => undefined);
+    }
+    if (action === 'cancel') {
+      setActiveImportJobId('');
+      setImporting(false);
+      setPercent(0);
+      setPhase(rows.length ? 'ready' : 'idle');
+      setProgress(rows.length
+        ? `Previous background job cancelled. The CSV currently loaded in this browser is ready for a new fast direct import.`
+        : 'Previous background job cancelled. Choose a CSV file above to enable a new fast direct import. Browsers cannot retain a local file after a refresh.');
+    }
     await loadImportJobs();
   }
 
@@ -722,8 +734,32 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     setErrors([]);
     try {
       const { data, error } = await supabase.rpc('delete_pending_no_email_businesses', { target_workspace: workspace.id });
-      if (error) throw error;
-      setProgress(`Deleted ${(Number(data) || 0).toLocaleString()} pending no-email business(es).`);
+      if (!error) {
+        setProgress(`Deleted ${(Number(data) || 0).toLocaleString()} pending no-email business(es).`);
+        return;
+      }
+
+      const rpcMissing = String((error as { code?: string }).code || '') === 'PGRST202'
+        || formatImportError(error).toLowerCase().includes('could not find the function')
+        || formatImportError(error).toLowerCase().includes('schema cache');
+      if (!rpcMissing) throw error;
+
+      // Compatibility fallback for projects upgraded before the delete RPC was added.
+      const pending = await fetchPendingNoEmailBusinesses(50000);
+      const ids = pending.map((business) => business.id);
+      let deleted = 0;
+      for (let index = 0; index < ids.length; index += 500) {
+        const part = ids.slice(index, index + 500);
+        const { error: deleteError } = await supabase
+          .from('businesses')
+          .delete()
+          .eq('workspace_id', workspace.id)
+          .in('id', part);
+        if (deleteError) throw deleteError;
+        deleted += part.length;
+        setProgress(`Deleting pending no-email businesses: ${deleted.toLocaleString()} / ${ids.length.toLocaleString()}...`);
+      }
+      setProgress(`Deleted ${deleted.toLocaleString()} pending no-email business(es). The compatibility fallback was used; run the v10.42.2 SQL hotfix to restore the faster server action.`);
     } catch (error) {
       setErrors([formatImportError(error)]);
     } finally {
@@ -786,7 +822,8 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         </label>
 
         <div className="actions">
-          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : `Import ${rows.length.toLocaleString()} business(es)`}</button>
+          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : rows.length ? `Import ${rows.length.toLocaleString()} business(es)` : 'Choose CSV to enable import'}</button>
+          {!rows.length ? <span className="muted">Select the CSV again after a refresh or cancelled legacy job; browsers do not retain access to local files.</span> : null}
           <button className="btn secondary" type="button" disabled={importing} onClick={repairEmailRouting}>Repair: Email → Ready / No Email → Pending</button>
           <button className="btn secondary" type="button" disabled={importing} onClick={exportPendingNoEmailForScout}>Export Pending No-Email for Auto Scout</button>
           <button className="btn danger" type="button" disabled={importing} onClick={deletePendingNoEmailBusinesses}>Delete Pending No-Email</button>
@@ -797,7 +834,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       </div>
 
       {warnings.length ? <div className="notice"><strong>Completed with note:</strong><br />{warnings.map((warning, index) => <div key={index}>{warning}</div>)}</div> : null}
-      {errors.length ? <div className="error"><strong>Import stopped:</strong><br />{errors.map((error, index) => <div key={index}>{error}</div>)}</div> : null}
+      {errors.length ? <div className="error"><strong>{['checking','importing','failed'].includes(phase) && rows.length ? 'Import stopped:' : 'Action needs attention:'}</strong><br />{errors.map((error, index) => <div key={index}>{error}</div>)}</div> : null}
 
       {result ? (
         <div className="grid grid-4">

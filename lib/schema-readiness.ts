@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.1';
+export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.2';
 
 type TableContract = {
   table: string;

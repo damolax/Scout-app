@@ -31,4 +31,4 @@ if(!planOk) failed++;
 if(failed) process.exit(1);
 console.log('PASS  default per-run is 100 and campaign override remains separate');
 console.log('PASS  same Gmail delay 90-210s and different Gmail delay 3-6s');
-console.log(`Scout v10.42.1 behavior model passed (${cases.length+3} checks).`);
+console.log(`Scout v10.42.2 behavior model passed (${cases.length+3} checks).`);

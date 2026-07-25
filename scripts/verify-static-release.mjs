@@ -5,11 +5,11 @@ const get=(p)=>fs.readFileSync(path.join(root,p),'utf8');
 const checks=[];
 function check(label,ok,detail=''){checks.push({label,ok:Boolean(ok),detail});}
 const pkg=JSON.parse(get('package.json'));
-check('Package version',pkg.version==='10.42.1',pkg.version);
+check('Package version',pkg.version==='10.42.2',pkg.version);
 const health=get('app/api/health/route.ts');
-check('Live release marker',health.includes("version: '10.42.1'")&&health.includes("fast-direct-import-run-100-pacing-hotfix"));
-check('Schema readiness contract 10.42.1',get('lib/schema-readiness.ts').includes("SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.1'"));
-check('v10.42.1 health contracts',health.includes("bulkImportContract: '10.42.1'")&&health.includes("senderHealthContract: '10.42.1'")&&health.includes("scoutingXpContract: '10.42.1'"));
+check('Live release marker',health.includes("version: '10.42.2'")&&health.includes("pending-delete-cancelled-import-unlock-hotfix"));
+check('Schema readiness contract 10.42.2',get('lib/schema-readiness.ts').includes("SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.2'"));
+check('v10.42.2 health contracts',health.includes("bulkImportContract: '10.42.2'")&&health.includes("senderHealthContract: '10.42.2'")&&health.includes("scoutingXpContract: '10.42.2'"));
 const upload=get('app/(app)/upload/UploadClient.tsx');
 const settings=get('app/(app)/settings/SettingsClient.tsx');
 const message=get('app/(app)/message/MessageClient.tsx');
@@ -43,10 +43,15 @@ check('Replies preserved',get('app/(app)/replies/RepliesClient.tsx').includes('C
 check('Signature controls preserved',get('app/(app)/settings/SettingsClient.tsx').includes('Save signature &amp; logo'));
 check('v10.42 SQL migration included',fs.existsSync(path.join(root,'database/09_V10_42_BACKGROUND_IMPORT_HEALTH_XP.sql')));
 check('One-screen wizard included',fs.existsSync(path.join(root,'SCOUT_V10_42_ONE_SCREEN_SETUP_WIZARD.html')));
-check('Target repository locked',fs.existsSync(path.join(root,'DEPLOY_V10_42_1_FULL_GIT_BASH.sh'))&&get('DEPLOY_V10_42_1_FULL_GIT_BASH.sh').includes('damolax/Scout-app.git'));
+check('Target repository locked',fs.existsSync(path.join(root,'DEPLOY_V10_42_2_FULL_GIT_BASH.sh'))&&get('DEPLOY_V10_42_2_FULL_GIT_BASH.sh').includes('damolax/Scout-app.git'));
 check('Fast direct core import enabled',upload.includes('return legacyImportRows()')&&upload.includes('Fast bulk import:'));
 check('Default max per run is 100',settings.includes('draft.default_run_limit || 100')&&message.includes('account.default_run_limit || 100'));
 check('Pacing preserved',message.includes('90–210 seconds')&&message.includes('3–6 seconds'));
+
+check('Pending no-email RPC fallback',upload.includes("String((error as { code?: string }).code || '') === 'PGRST202'")&&upload.includes('Compatibility fallback'));
+check('Cancelled legacy job unlock',upload.includes("setActiveImportJobId('')")&&upload.includes('Choose a CSV file above to enable a new fast direct import'));
+check('No-file button guidance',upload.includes('Choose CSV to enable import')&&upload.includes('browsers do not retain access to local files'));
+check('Action error label',upload.includes('Action needs attention:'));
 const failures=checks.filter(c=>!c.ok);
 for(const c of checks) console.log(`${c.ok?'PASS':'FAIL'}  ${c.label}${c.detail?` — ${c.detail}`:''}`);
 console.log(`\n${checks.length-failures.length}/${checks.length} static release checks passed.`);

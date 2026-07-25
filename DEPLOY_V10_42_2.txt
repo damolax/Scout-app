@@ -1,0 +1,7 @@
+Scout v10.42.2 deployment order
+
+1. Supabase SQL Editor: run RUN_THIS_V10_42_2_PENDING_DELETE_UNLOCK_IN_CURRENT_SUPABASE.sql.
+2. Confirm READY, delete_rpc_ready=true, version_recorded=true.
+3. Windows Git Bash: run RUN_DEPLOY_AND_KEEP_GIT_BASH_OPEN.sh from the extracted folder.
+4. Confirm GITHUB PUSH VERIFIED.
+5. Confirm live /api/health reports 10.42.2 and pending-delete-cancelled-import-unlock-hotfix.

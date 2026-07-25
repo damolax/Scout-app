@@ -1,0 +1,12 @@
+START HERE — Scout v10.42.2
+
+This hotfix fixes:
+- Delete Pending No-Email PGRST202 missing-function error.
+- Cancelled legacy background jobs no longer hold the active-job UI state.
+- The Import button clearly asks you to select the CSV again after refresh/cancellation.
+- Delete/repair/export errors no longer say "Import stopped".
+
+Exact order:
+1. Run RUN_THIS_V10_42_2_PENDING_DELETE_UNLOCK_IN_CURRENT_SUPABASE.sql in Supabase SQL Editor.
+2. Open SCOUT_V10_42_EXACT_CLICK_SETUP_WIZARD.html.
+3. Deploy with RUN_DEPLOY_AND_KEEP_GIT_BASH_OPEN.sh in Windows Git Bash.

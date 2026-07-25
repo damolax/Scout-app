@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-42-1-fast-import-run-100",
-  "version": "10.42.1",
+  "name": "scout-app-v10-42-2-pending-delete-unlock",
+  "version": "10.42.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -33,5 +33,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout v10.42.1 with fast direct core imports, adaptive sender health, owner limits, 100-per-run default, protected sender pacing, and permanent Scouting XP."
+  "description": "Scout v10.42.2 with fast direct imports, working pending-no-email deletion, cancelled legacy-job unlock, adaptive sender health, and permanent Scouting XP."
 }
