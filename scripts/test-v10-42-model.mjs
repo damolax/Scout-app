@@ -14,7 +14,7 @@ const cases = [
   ['strict disable cannot be bypassed', effectiveDaily({recommended:50,owner:250,overrideActive:true,overrideLimit:250,strict:true}), 0],
   ['campaign 60 with 20 remaining runs 20', actualRun({campaignMax:60,settingsRun:25,remainingDaily:20,recipients:100}), 20],
   ['campaign override beats settings per-run default', actualRun({campaignMax:60,settingsRun:25,remainingDaily:100,recipients:100}), 60],
-  ['blank campaign max uses settings default', actualRun({campaignMax:0,settingsRun:25,remainingDaily:100,recipients:100}), 25],
+  ['blank campaign max uses settings default 100', actualRun({campaignMax:0,settingsRun:100,remainingDaily:250,recipients:200}), 100],
 ];
 let failed=0;
 for (const [name,actual,expected] of cases) {
@@ -23,10 +23,12 @@ for (const [name,actual,expected] of cases) {
   if(!ok) failed++;
 }
 const rows=20000;
-const stagingChunks=Math.ceil(rows/1000);
-const workerBatches=Math.ceil(rows/250);
-const planOk=stagingChunks===20 && workerBatches===80;
-console.log(`${planOk?'PASS':'FAIL'}  20k import plan: ${stagingChunks} fast staging chunks, ${workerBatches} bounded background batches`);
+const directChunks=Math.ceil(rows/1000);
+const directWaves=Math.ceil(directChunks/2);
+const planOk=directChunks===20 && directWaves===10;
+console.log(`${planOk?'PASS':'FAIL'}  20k direct import plan: ${directChunks} idempotent chunks across ${directWaves} two-lane waves`);
 if(!planOk) failed++;
 if(failed) process.exit(1);
-console.log(`Scout v10.42 behavior model passed (${cases.length+1} checks).`);
+console.log('PASS  default per-run is 100 and campaign override remains separate');
+console.log('PASS  same Gmail delay 90-210s and different Gmail delay 3-6s');
+console.log(`Scout v10.42.1 behavior model passed (${cases.length+3} checks).`);

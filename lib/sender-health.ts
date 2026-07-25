@@ -138,7 +138,7 @@ export function effectiveDailyLimit(account: AnyRow) {
 
 export function effectiveRunLimit(account: AnyRow) {
   const daily = effectiveDailyLimit(account);
-  const ownerDefaultRun = Math.max(1, Number(account.default_run_limit || deploymentRunCap()));
+  const ownerDefaultRun = Math.max(1, Number(account.default_run_limit || 100));
   return Math.max(0, Math.min(daily, ownerDefaultRun, deploymentRunCap()));
 }
 

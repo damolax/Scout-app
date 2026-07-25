@@ -7,11 +7,11 @@
 set +e
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPLOY_SCRIPT="$ROOT_DIR/DEPLOY_V10_42_0_FULL_GIT_BASH.sh"
+DEPLOY_SCRIPT="$ROOT_DIR/DEPLOY_V10_42_1_FULL_GIT_BASH.sh"
 LIVE_URL="${SCOUT_LIVE_URL:-https://scout-app-oyeola.vercel.app}"
-LOG_FILE="$HOME/Downloads/scout-v10-42-deploy-$(date +%Y%m%d-%H%M%S).log"
+LOG_FILE="$HOME/Downloads/scout-v10-42-1-deploy-$(date +%Y%m%d-%H%M%S).log"
 
-printf '\nScout v10.42 deployment launcher\n'
+printf '\nScout v10.42.1 deployment launcher\n'
 printf 'Source: %s\n' "$ROOT_DIR"
 printf 'Log:    %s\n\n' "$LOG_FILE"
 

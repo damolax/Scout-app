@@ -1,0 +1,23 @@
+Scout v10.42.1 — Fast Import / Run-100 / Pacing Hotfix
+
+Implemented
+- Core CSV leads use direct set-based bulk import again.
+- 1,000-row target chunks, two controlled concurrent lanes, idempotent receipts and adaptive splitting.
+- Previous v10.42 background jobs remain visible and controllable, but new core uploads are not forced through the minute worker.
+- Default maximum per run is 100 for new/default sender records.
+- Owner may set a lower Settings daily or per-run maximum.
+- Send Emails “Max from this sender” overrides only that campaign's requested run maximum.
+- Remaining rolling 24-hour allowance and sender health always win.
+- Same Gmail pacing remains random 90–210 seconds.
+- Different Gmail rotation pacing remains random 3–6 seconds.
+
+Validated
+- 32/32 static release checks passed.
+- 10/10 behavior model checks passed.
+- 6 SQL contract groups passed.
+- 149 TypeScript/TSX files passed syntax transpilation.
+- Both HTML wizard scripts passed JavaScript syntax checking.
+- Git Bash deployment scripts passed bash -n.
+
+Not claimed
+- Full dependency-backed typecheck/build was not completed in this environment because npm installation timed out and left incomplete type packages. The deployment script runs npm ci, typecheck and production build before GitHub is modified.

@@ -1,4 +1,4 @@
-SCOUT v10.42.0 — READ THIS FIRST
+SCOUT v10.42.1 — READ THIS FIRST
 ================================
 
 This release consolidates the current Scout app into one deployable package.
@@ -7,7 +7,7 @@ Do not mix commands between Supabase SQL Editor and Windows Git Bash.
 CURRENT SCOUT APP WITH EXISTING DATA
 1. Open SCOUT_V10_42_ONE_SCREEN_SETUP_WIZARD.html.
 2. Choose Current app upgrade.
-3. Run RUN_THIS_V10_42_UPGRADE_IN_CURRENT_SUPABASE.sql in Supabase SQL Editor.
+3. Run RUN_THIS_V10_42_1_HOTFIX_IN_CURRENT_SUPABASE.sql in Supabase SQL Editor.
 4. Run database/10_VERIFY_V10_42.sql. Every passed value must be true.
 5. Follow the wizard for Google OAuth and Vercel variables.
 6. Run DEPLOY_V10_42_0_FULL_GIT_BASH.sh through the exact Git Bash block in the wizard.

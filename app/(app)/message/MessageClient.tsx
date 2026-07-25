@@ -1122,11 +1122,11 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     const raw = senderRunLimits[account.id];
     let runCap = Number.POSITIVE_INFINITY;
     if (raw === undefined || raw === null || String(raw).trim() === "") {
-      const defaultLimit = Number(account.default_run_limit || 50);
-      runCap = Number.isFinite(defaultLimit) && defaultLimit > 0 ? Math.floor(defaultLimit) : 50;
+      const defaultLimit = Number(account.default_run_limit || 100);
+      runCap = Number.isFinite(defaultLimit) && defaultLimit > 0 ? Math.floor(defaultLimit) : 100;
     } else {
       const parsed = Number(raw);
-      runCap = !Number.isFinite(parsed) || parsed <= 0 ? 50 : Math.floor(parsed);
+      runCap = !Number.isFinite(parsed) || parsed <= 0 ? 100 : Math.floor(parsed);
     }
     const remaining = senderRemainingToday(account);
     return Math.max(0, Math.min(runCap, remaining));
@@ -2817,7 +2817,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
                           className="input"
                           type="number"
                           min={1}
-                          placeholder={`Settings default: ${Number(a.default_run_limit || 50).toLocaleString()}`}
+                          placeholder={`Settings default: ${Number(a.default_run_limit || 100).toLocaleString()}`}
                           value={senderRunLimits[a.id] || ""}
                           onChange={(e) =>
                             setSenderRunLimits((cur) => ({
@@ -2831,7 +2831,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
                         <label className="label">Today's sending cap</label>
                         <div className="notice" style={{ color: "#86efac" }}>
                           {senderCountLine(a)} · run default{" "}
-                          {Number(a.default_run_limit || 50).toLocaleString()}
+                          {Number(a.default_run_limit || 100).toLocaleString()}
                         </div>
                       </div>
                     </div>
@@ -2848,7 +2848,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
                   className="input"
                   type="number"
                   min={1}
-                  placeholder={`Settings default: ${Number(connectedAccounts.find((a) => a.id === specificSenderId)?.default_run_limit || 50).toLocaleString()}`}
+                  placeholder={`Settings default: ${Number(connectedAccounts.find((a) => a.id === specificSenderId)?.default_run_limit || 100).toLocaleString()}`}
                   value={senderRunLimits[specificSenderId] || ""}
                   onChange={(e) =>
                     setSenderRunLimits((cur) => ({
@@ -3269,7 +3269,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
                       <td>{account.email}<br /><span className="muted">{senderAvailable(account) ? "Ready" : "Paused or limited"}</span></td>
                       <td>{Number(senderLast24h[account.id] || account.sent_today || 0).toLocaleString()}</td>
                       <td>{senderRemainingToday(account).toLocaleString()}</td>
-                      <td><input className="input" type="number" min={1} placeholder={String(account.default_run_limit || 50)} value={senderRunLimits[account.id] || ""} onChange={(e) => setSenderRunLimits((current) => ({ ...current, [account.id]: e.target.value }))} /></td>
+                      <td><input className="input" type="number" min={1} placeholder={String(account.default_run_limit || 100)} value={senderRunLimits[account.id] || ""} onChange={(e) => setSenderRunLimits((current) => ({ ...current, [account.id]: e.target.value }))} /></td>
                     </tr>
                   ))}
                   {!accounts.length ? <tr><td colSpan={5} className="muted">No Gmail accounts connected.</td></tr> : null}

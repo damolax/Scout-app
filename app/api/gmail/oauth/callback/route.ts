@@ -143,7 +143,7 @@ export async function GET(request: NextRequest) {
       deployment_cap: deploymentCap,
       deployment_run_cap: runCap,
       daily_limit: Math.max(1, Math.min(deploymentCap, Number(existing?.daily_limit || deploymentCap))),
-      default_run_limit: Math.max(1, Math.min(runCap, Number(existing?.default_run_limit || runCap))),
+      default_run_limit: Math.max(1, Math.min(runCap, Number(existing?.default_run_limit || 100))),
       health_stage: existing?.health_stage || 'assessment',
       health_cap: existing ? Math.max(0, Math.min(deploymentCap, Number(existing.health_cap ?? 250))) : Math.min(deploymentCap, 250),
       health_recommended_limit: existing ? Math.max(0, Math.min(deploymentCap, Number(existing.health_recommended_limit ?? existing.health_cap ?? 250))) : Math.min(deploymentCap, 250),

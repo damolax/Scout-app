@@ -116,7 +116,7 @@ function senderDraft(account: GmailAccount): SenderDraft {
   const runMaximum = senderSystemRunMax(account);
   return {
     daily_limit: String(Math.max(1, Math.min(Number(account.daily_limit || dailyMaximum), dailyMaximum))),
-    default_run_limit: String(Math.max(1, Math.min(Number(account.default_run_limit || runMaximum), runMaximum, Number(account.daily_limit || dailyMaximum)))),
+    default_run_limit: String(Math.max(1, Math.min(Number(account.default_run_limit || 100), runMaximum, Number(account.daily_limit || dailyMaximum)))),
     account_type: String(account.account_type || 'gmail')
   };
 }
@@ -259,7 +259,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       const recommendedMaximum = senderRecommendedDailyMax(account);
       const runMaximum = senderSystemRunMax(account);
       const dailyLimit = Math.max(1, Math.min(deploymentMaximum, Number(draft.daily_limit || deploymentMaximum)));
-      const runLimit = Math.max(1, Math.min(runMaximum, dailyLimit, Number(draft.default_run_limit || runMaximum)));
+      const runLimit = Math.max(1, Math.min(runMaximum, dailyLimit, Number(draft.default_run_limit || 100)));
 
       if (account.owner_override_locked || String(account.health_stage || '') === 'strict_disabled') {
         throw new Error('This sender is strictly disabled. Owner overrides are locked until Scout automatically passes the recovery check.');
@@ -706,7 +706,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
                   <div>
                     <label className="label">Preferred maximum per run</label>
                     <input className="input" type="number" min={1} max={Math.min(senderSystemRunMax(account), Number(draft.daily_limit || senderDeploymentDailyMax(account)))} value={draft.default_run_limit} onChange={(event) => patchDraft(account, { default_run_limit: event.target.value })} />
-                    <p className="muted" style={{ marginTop: 5 }}>Settings default per run. A campaign’s “Max from this sender” may override this value, but never the remaining daily allowance.</p>
+                    <p className="muted" style={{ marginTop: 5 }}>Default: 100 per run. A campaign’s “Max from this sender” may override this value, but never the remaining daily or health allowance. Pacing remains 90–210 seconds for the same Gmail and 3–6 seconds when rotating to a different Gmail.</p>
                   </div>
                   <div>
                     <label className="label">Account type</label>

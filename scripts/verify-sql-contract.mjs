@@ -6,6 +6,7 @@ const files={
  combined:path.join(root,'RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql'),
  fresh:path.join(root,'database','01_FRESH_INSTALL_V10_42.sql'),
  verify:path.join(root,'database','10_VERIFY_V10_42.sql'),
+ hotfix:path.join(root,'database','11_V10_42_1_FAST_IMPORT_RUN_DEFAULT.sql'),
  cron:path.join(root,'database','04_SET_VAULT_AND_CRON.sql.template'),
 };
 for(const [name,file] of Object.entries(files)){if(!fs.existsSync(file)){console.error(`Missing ${name}: ${file}`);process.exit(1);}}
@@ -21,7 +22,8 @@ const groups=[
  ]],
  ['combined',read(files.combined),['begin scout v10.42.0 upgrade','process_import_job_batch_v1042',"'10.42.0'"]],
  ['fresh',read(files.fresh),['scout v10.36 fresh installation','begin scout v10.42.0 features','process_import_job_batch_v1042',"'10.42.0'"]],
- ['verify',read(files.verify),['import_jobs','health_recommended_limit','process_import_job_batch_v1042','award_scouting_xp_v1042','schema:10.42.0']],
+ ['verify',read(files.verify),['import_jobs','import_businesses_bulk_v2','sender-default-run:100','schema:10.42.1']],
+ ['hotfix',read(files.hotfix),['alter column default_run_limit set default 100',"'10.42.1'",'90-210 seconds','3-6 seconds']],
  ['cron',read(files.cron),['/api/cron/import-worker','scout-import-worker-v1042','/api/cron/health-review','/api/message/run-schedules']],
 ];
 let failures=0;
@@ -32,4 +34,4 @@ if(dollarPairs%2!==0){failures++;console.error('current SQL has an unbalanced $$
 if(/create or replace function public\.reserve_sender_send\(\s*create or replace function/i.test(focused)){failures++;console.error('current SQL contains a duplicated reserve_sender_send declaration.');}
 if((focused.match(/create or replace function public\.reserve_sender_send\(/gi)||[]).length!==1){failures++;console.error('current SQL must define reserve_sender_send exactly once.');}
 if(failures) process.exit(1);
-console.log('Scout v10.42.0 SQL contracts passed.');
+console.log('Scout v10.42.1 SQL contracts passed.');

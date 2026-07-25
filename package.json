@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-42-adaptive-health-background-import",
-  "version": "10.42.0",
+  "name": "scout-app-v10-42-1-fast-import-run-100",
+  "version": "10.42.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -33,5 +33,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout v10.42 with background imports, adaptive 250/day sender health, owner overrides, progressive recovery, and permanent Scouting XP."
+  "description": "Scout v10.42.1 with fast direct core imports, adaptive sender health, owner limits, 100-per-run default, protected sender pacing, and permanent Scouting XP."
 }

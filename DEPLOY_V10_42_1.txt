@@ -1,0 +1,3 @@
+Run RUN_THIS_V10_42_1_HOTFIX_IN_CURRENT_SUPABASE.sql in Supabase first.
+Then run RUN_DEPLOY_AND_KEEP_GIT_BASH_OPEN.sh from Windows Git Bash.
+Expected live build: fast-direct-import-run-100-pacing-hotfix
