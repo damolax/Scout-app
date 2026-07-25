@@ -1,0 +1,42 @@
+SCOUT v10.42.0 — READ THIS FIRST
+================================
+
+This release consolidates the current Scout app into one deployable package.
+Do not mix commands between Supabase SQL Editor and Windows Git Bash.
+
+CURRENT SCOUT APP WITH EXISTING DATA
+1. Open SCOUT_V10_42_ONE_SCREEN_SETUP_WIZARD.html.
+2. Choose Current app upgrade.
+3. Run RUN_THIS_V10_42_UPGRADE_IN_CURRENT_SUPABASE.sql in Supabase SQL Editor.
+4. Run database/10_VERIFY_V10_42.sql. Every passed value must be true.
+5. Follow the wizard for Google OAuth and Vercel variables.
+6. Run DEPLOY_V10_42_0_FULL_GIT_BASH.sh through the exact Git Bash block in the wizard.
+7. Install database/04_SET_VAULT_AND_CRON.sql.template after replacing its URL and secret placeholders.
+8. Run Setup Readiness, reconnect Gmail, test 1,000 leads, then test 20,000 leads.
+
+NEW INDEPENDENT TEAM INSTALLATION
+1. Open SCOUT_V10_42_ONE_SCREEN_SETUP_WIZARD.html.
+2. Choose Fresh team installation.
+3. Run database/01_FRESH_INSTALL_V10_42.sql in the new Supabase project.
+4. Run database/10_VERIFY_V10_42.sql. Every passed value must be true.
+5. Continue through every wizard screen.
+
+LIMIT RULES
+- Scout system ceiling for a newly connected sender: 250 per rolling 24 hours.
+- The owner may choose any lower daily maximum.
+- Settings Maximum per run is the default for each campaign.
+- Send Emails Max from this sender overrides the Settings per-run default for that campaign only.
+- Actual sends use the lowest of campaign request, remaining owner daily allowance,
+  current sender-health allowance, and eligible recipients.
+- Strict disabled always means zero and cannot be bypassed.
+
+BACKGROUND IMPORT
+- CSV rows are staged through small idempotent requests.
+- Database processing continues through scout-import-worker-v1042 after the tab closes.
+- Individual worker transactions are bounded at 25–500 rows and adapt to database response time.
+- Completed rows survive refreshes, retries, temporary network failures, and worker restarts.
+- Duplicate, invalid, and suppressed rows remain exportable from the import job.
+
+DO NOT SHARE
+Supabase secret/service-role keys, Google OAuth secret, Gmail tokens, CRON_SECRET,
+SCHEDULE_WORKER_SECRET, Vault decrypted values, or database passwords.

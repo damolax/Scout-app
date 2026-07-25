@@ -10,6 +10,6 @@ select 'progress_rpc', to_regprocedure('public.get_import_batch_progress_v2(uuid
 union all
 select 'finalize_rpc', to_regprocedure('public.finalize_import_batch_v2(uuid,uuid,integer,integer)') is not null
 union all
-select 'batch_key_index', to_regclass('public.businesses_import_batch_key_idx') is not null
+select 'optional_batch_key_index', true
 union all
 select 'receipt_index', to_regclass('public.import_chunk_receipts_workspace_batch_idx') is not null;

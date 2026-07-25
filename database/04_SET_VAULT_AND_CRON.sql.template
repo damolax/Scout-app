@@ -1,15 +1,46 @@
--- Scout v10.40.0 Vault + Cron template. Replace the two placeholders before running.
+-- Scout v10.42.0 Vault + Cron template.
+-- Replace both placeholders before running. Safe to run again when the URL or secret changes.
 create extension if not exists pg_net;
 create extension if not exists pg_cron;
 create extension if not exists supabase_vault with schema vault;
 
-select vault.create_secret('https://YOUR-SCOUT-PROJECT.vercel.app', 'scout_app_url', 'Scout production URL')
-where not exists (select 1 from vault.decrypted_secrets where name='scout_app_url');
-select vault.create_secret('REPLACE_WITH_THE_SAME_LONG_CRON_SECRET_USED_IN_VERCEL', 'scout_cron_secret', 'Scout Cron secret')
-where not exists (select 1 from vault.decrypted_secrets where name='scout_cron_secret');
+do $$
+declare
+  app_url_value text := 'https://YOUR-SCOUT-PROJECT.vercel.app';
+  shared_secret_value text := 'REPLACE_WITH_THE_SAME_LONG_CRON_SECRET_USED_IN_VERCEL';
+  existing_id uuid;
+begin
+  if app_url_value like '%YOUR-SCOUT-PROJECT%' then
+    raise exception 'Replace YOUR-SCOUT-PROJECT before running this file.';
+  end if;
+  if length(shared_secret_value) < 24 or shared_secret_value like 'REPLACE_WITH_%' then
+    raise exception 'Replace the cron secret placeholder with the same long secret used in Vercel.';
+  end if;
+
+  select id into existing_id from vault.secrets where name='scout_app_url' limit 1;
+  if existing_id is null then
+    perform vault.create_secret(app_url_value,'scout_app_url','Scout production URL');
+  else
+    perform vault.update_secret(existing_id,app_url_value,'scout_app_url','Scout production URL');
+  end if;
+
+  existing_id := null;
+  select id into existing_id from vault.secrets where name='scout_cron_secret' limit 1;
+  if existing_id is null then
+    perform vault.create_secret(shared_secret_value,'scout_cron_secret','Scout Cron secret');
+  else
+    perform vault.update_secret(existing_id,shared_secret_value,'scout_cron_secret','Scout Cron secret');
+  end if;
+end $$;
 
 do $$ begin
-  perform cron.unschedule(jobid) from cron.job where jobname in ('scout-inbound-sync-v1040','scout-message-schedules-v1040','scout-research-worker-v1040','scout-health-review-v1040');
+  perform cron.unschedule(jobid) from cron.job where jobname in (
+    'scout-inbound-sync-v1040',
+    'scout-message-schedules-v1040',
+    'scout-research-worker-v1040',
+    'scout-health-review-v1040',
+    'scout-import-worker-v1042'
+  );
 exception when others then null; end $$;
 
 select cron.schedule('scout-inbound-sync-v1040','*/5 * * * *',$job$
@@ -27,4 +58,8 @@ $job$);
 select cron.schedule('scout-health-review-v1040','*/15 * * * *',$job$
  select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name='scout_app_url') || '/api/cron/health-review', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='scout_cron_secret')), body := '{}'::jsonb, timeout_milliseconds := 55000);
 $job$);
+select cron.schedule('scout-import-worker-v1042','* * * * *',$job$
+ select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name='scout_app_url') || '/api/cron/import-worker', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='scout_cron_secret')), body := '{"jobLimit":3,"batchSize":250}'::jsonb, timeout_milliseconds := 55000);
+$job$);
+
 select jobid,jobname,schedule,active from cron.job where jobname like 'scout-%' order by jobname;

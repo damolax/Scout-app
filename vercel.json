@@ -16,6 +16,12 @@
     },
     "app/api/cron/research-worker/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/cron/import-worker/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/import-jobs/run/route.ts": {
+      "maxDuration": 60
     }
   }
 }

@@ -1,0 +1,16 @@
+OPEN WINDOWS GIT BASH MANUALLY.
+
+Then run:
+
+cd ~/Downloads/SCOUT_FULL_VERIFICATION_V10_42_0
+chmod +x RUN_DEPLOY_AND_KEEP_GIT_BASH_OPEN.sh
+bash RUN_DEPLOY_AND_KEEP_GIT_BASH_OPEN.sh
+
+The launcher saves a timestamped log in Downloads and waits for Enter before it finishes.
+Status 0: GitHub and live Vercel verified.
+Status 2: GitHub may already be updated, but Vercel was not ready in time.
+Other status: deployment stopped before completion; read "Failed command:" in the log.
+
+To check the current GitHub/live version without deploying:
+
+bash CHECK_WHETHER_V10_42_DEPLOYED.sh

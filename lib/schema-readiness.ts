@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.40.0';
+export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.0';
 
 type TableContract = {
   table: string;
@@ -53,7 +53,11 @@ const TABLE_CONTRACTS: TableContract[] = [
       'signature_text', 'signature_html', 'signature_logo_url', 'sync_signature_to_gmail',
       'gmail_signature_synced_at', 'gmail_signature_sync_error', 'granted_scopes',
       'oauth_reconnect_required', 'last_reply_sync_at', 'last_reply_sync_status',
-      'last_reply_sync_error', 'last_reply_message_id', 'last_reply_history_id', 'raw'
+      'last_reply_sync_error', 'last_reply_message_id', 'last_reply_history_id',
+      'health_recommended_limit', 'health_score', 'health_reliability',
+      'owner_override_limit', 'owner_override_active', 'owner_override_until',
+      'owner_override_locked', 'harmful_override_streak', 'recovery_step', 'last_recovery_progress_day',
+      'strict_disabled_at', 'last_health_metrics', 'raw'
     ]
   },
   {
@@ -110,6 +114,35 @@ const TABLE_CONTRACTS: TableContract[] = [
   {
     table: 'activity_logs',
     columns: ['id', 'workspace_id', 'type', 'message', 'raw', 'created_by', 'created_at']
+  },
+
+  {
+    table: 'import_jobs',
+    columns: ['id','workspace_id','status','total_rows','staged_rows','processed_rows','inserted_rows','duplicate_rows','invalid_rows','suppressed_rows','research_rows','last_progress_at','created_at','updated_at']
+  },
+  {
+    table: 'import_job_rows',
+    columns: ['job_id','row_no','dedupe_key','row_data','status','processed_at','created_at']
+  },
+  {
+    table: 'lead_dedupe_registry',
+    columns: ['workspace_id','dedupe_key','business_id','first_import_job_id','first_seen_at','last_seen_at']
+  },
+  {
+    table: 'sender_health_daily',
+    columns: ['id','workspace_id','gmail_account_id','active_day','attempted_count','health_score','harmful','override_active','metrics','assessed_at']
+  },
+  {
+    table: 'sender_limit_audit',
+    columns: ['id','workspace_id','gmail_account_id','action','reason','metrics','created_at']
+  },
+  {
+    table: 'scouting_xp_state',
+    columns: ['workspace_id','total_xp','baseline_xp','last_confirmed_at','updated_at']
+  },
+  {
+    table: 'scouting_xp_events',
+    columns: ['id','workspace_id','event_type','points','unique_event_key','metadata','created_at']
   },
   {
     table: 'sender_send_reservations',

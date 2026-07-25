@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     const accountId = String(input.gmail_account_id || input.accountId || '').trim();
     const action = String(input.action || '').trim().toLowerCase();
     if (!workspaceId || !accountId) throw new Error('workspace_id and gmail_account_id are required.');
-    if (!['pause', 'resume', 'temporary_resume'].includes(action)) throw new Error('Unknown sender control action.');
+    if (!['pause', 'resume', 'temporary_resume', 'set_override', 'clear_override'].includes(action)) throw new Error('Unknown sender control action.');
     await requireWorkspaceAccess(workspaceId);
 
     const supabase = createAdminClient();
@@ -39,6 +39,86 @@ export async function POST(request: NextRequest) {
 
     const automaticPause = Boolean(account.pause_kind && String(account.pause_kind) !== 'manual');
     const warning = String(account.paused_reason || account.health_reason || account.last_error || 'Scout paused this Gmail account for safety.');
+
+    if (action === 'set_override') {
+      if (hardRestrictionActive(account) || account.owner_override_locked || String(account.health_stage || '') === 'strict_disabled') {
+        return NextResponse.json({ success: false, code: 'override_locked', error: 'This sender is strictly disabled. Owner overrides are locked until Scout automatically passes the recovery check.' }, { status: 423 });
+      }
+      const deploymentCap = Math.max(1, Math.min(250, Number(account.deployment_cap || 250)));
+      const recommended = Math.max(0, Math.min(deploymentCap, Number(account.health_recommended_limit ?? account.health_cap ?? 250)));
+      const requested = Math.max(1, Math.min(deploymentCap, Math.floor(Number(input.override_limit || input.limit || 0))));
+      if (!Number.isFinite(requested) || requested <= recommended) {
+        throw new Error(`Override must be above Scout's current ${recommended}/day recommendation and no higher than ${deploymentCap}/day.`);
+      }
+      const now = new Date();
+      const until = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+      const reason = String(input.reason || `Owner accepted the risk and raised the temporary ceiling from ${recommended} to ${requested}/day.`);
+      const { error: overrideError } = await supabase.from('gmail_accounts').update({
+        owner_override_limit: requested,
+        owner_override_active: true,
+        owner_override_until: until,
+        safety_override_active: true,
+        safety_override_until: until,
+        safety_override_warning: reason,
+        safety_override_acknowledged_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      }).eq('workspace_id', workspaceId).eq('id', accountId);
+      if (overrideError) throw overrideError;
+      await supabase.from('sender_limit_audit').insert({
+        workspace_id: workspaceId,
+        gmail_account_id: accountId,
+        previous_stage: account.health_stage,
+        new_stage: account.health_stage,
+        previous_recommended_limit: recommended,
+        new_recommended_limit: recommended,
+        owner_daily_limit: Number(input.owner_daily_limit || account.daily_limit || requested),
+        owner_override_limit: requested,
+        action: 'owner_risk_override_started',
+        reason,
+        metrics: account.last_health_metrics || {},
+        created_by: null,
+        created_at: now.toISOString(),
+      });
+      await createAppNotification(supabase as any, {
+        workspaceId,
+        type: 'sender_owner_override',
+        title: `Risk override active: ${account.email}`,
+        message: `Scout recommends ${recommended}/day. The owner temporarily allowed up to ${requested}/day for 24 hours. Three harmful active sending days will strictly disable this sender.`,
+        entityType: 'gmail_account',
+        entityId: accountId,
+        raw: { recommended, requested, expires_at: until },
+      });
+      return NextResponse.json({ success: true, overrideActive: true, recommended, overrideLimit: requested, expiresAt: until });
+    }
+
+    if (action === 'clear_override') {
+      const now = new Date().toISOString();
+      const { error: clearError } = await supabase.from('gmail_accounts').update({
+        owner_override_limit: null,
+        owner_override_active: false,
+        owner_override_until: null,
+        safety_override_active: false,
+        safety_override_until: null,
+        safety_override_warning: null,
+        updated_at: now,
+      }).eq('workspace_id', workspaceId).eq('id', accountId);
+      if (clearError) throw clearError;
+      await supabase.from('sender_limit_audit').insert({
+        workspace_id: workspaceId,
+        gmail_account_id: accountId,
+        previous_stage: account.health_stage,
+        new_stage: account.health_stage,
+        previous_recommended_limit: Number(account.health_recommended_limit ?? account.health_cap ?? 250),
+        new_recommended_limit: Number(account.health_recommended_limit ?? account.health_cap ?? 250),
+        owner_daily_limit: Number(account.daily_limit || 250),
+        owner_override_limit: null,
+        action: 'owner_risk_override_cleared',
+        reason: 'Owner ended the temporary risk override.',
+        metrics: account.last_health_metrics || {},
+        created_at: now,
+      });
+      return NextResponse.json({ success: true, overrideActive: false });
+    }
 
     if (action === 'pause') {
       if (automaticPause && account.safety_override_active) {

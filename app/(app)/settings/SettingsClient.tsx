@@ -88,24 +88,35 @@ function isAutomaticSafetyPause(account: GmailAccount) {
   return Boolean(account.pause_kind && String(account.pause_kind) !== 'manual');
 }
 
+function senderDeploymentDailyMax(account: GmailAccount) {
+  return Math.max(1, Math.min(250, Math.floor(Number(account.deployment_cap || 250))));
+}
+
+function senderRecommendedDailyMax(account: GmailAccount) {
+  if (hasActiveHardRestriction(account) || account.owner_override_locked || String(account.health_stage || '') === 'strict_disabled') return 0;
+  return Math.max(0, Math.min(senderDeploymentDailyMax(account), Math.floor(Number(account.health_recommended_limit ?? account.health_cap ?? 250))));
+}
+
 function senderSystemDailyMax(account: GmailAccount) {
-  const deployment = Math.max(1, Number(account.deployment_cap || 250));
-  const health = Math.max(0, Number(account.health_cap ?? deployment));
-  return Math.max(0, Math.floor(Math.min(deployment, health)));
+  const deployment = senderDeploymentDailyMax(account);
+  if (hasActiveHardRestriction(account) || account.owner_override_locked || String(account.health_stage || '') === 'strict_disabled') return 0;
+  const overrideActive = Boolean(account.owner_override_active)
+    && (!account.owner_override_until || new Date(account.owner_override_until).getTime() > Date.now());
+  return overrideActive
+    ? Math.min(deployment, Math.max(1, Number(account.owner_override_limit || deployment)))
+    : senderRecommendedDailyMax(account);
 }
 
 function senderSystemRunMax(account: GmailAccount) {
-  const systemDaily = senderSystemDailyMax(account);
-  const deploymentRun = Math.max(1, Number(account.deployment_run_cap || Math.min(Number(account.deployment_cap || 250), 50)));
-  return Math.max(0, Math.floor(Math.min(systemDaily, deploymentRun)));
+  return Math.max(1, Math.min(senderDeploymentDailyMax(account), Number(account.deployment_run_cap || senderDeploymentDailyMax(account))));
 }
 
 function senderDraft(account: GmailAccount): SenderDraft {
-  const dailyMaximum = senderSystemDailyMax(account) || Number(account.deployment_cap || 250);
-  const runMaximum = senderSystemRunMax(account) || Number(account.deployment_run_cap || 50);
+  const dailyMaximum = senderDeploymentDailyMax(account);
+  const runMaximum = senderSystemRunMax(account);
   return {
     daily_limit: String(Math.max(1, Math.min(Number(account.daily_limit || dailyMaximum), dailyMaximum))),
-    default_run_limit: String(Math.max(1, Math.min(Number(account.default_run_limit || runMaximum), runMaximum))),
+    default_run_limit: String(Math.max(1, Math.min(Number(account.default_run_limit || runMaximum), runMaximum, Number(account.daily_limit || dailyMaximum)))),
     account_type: String(account.account_type || 'gmail')
   };
 }
@@ -244,10 +255,43 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     setError('');
     try {
       const draft = drafts[account.id] || senderDraft(account);
-      const dailyMaximum = senderSystemDailyMax(account) || Number(account.deployment_cap || 250);
-      const runMaximum = senderSystemRunMax(account) || Number(account.deployment_run_cap || 50);
-      const dailyLimit = Math.max(1, Math.min(dailyMaximum, Number(draft.daily_limit || dailyMaximum)));
+      const deploymentMaximum = senderDeploymentDailyMax(account);
+      const recommendedMaximum = senderRecommendedDailyMax(account);
+      const runMaximum = senderSystemRunMax(account);
+      const dailyLimit = Math.max(1, Math.min(deploymentMaximum, Number(draft.daily_limit || deploymentMaximum)));
       const runLimit = Math.max(1, Math.min(runMaximum, dailyLimit, Number(draft.default_run_limit || runMaximum)));
+
+      if (account.owner_override_locked || String(account.health_stage || '') === 'strict_disabled') {
+        throw new Error('This sender is strictly disabled. Owner overrides are locked until Scout automatically passes the recovery check.');
+      }
+
+      if (dailyLimit > recommendedMaximum) {
+        const accepted = window.confirm(
+          `Scout currently recommends ${recommendedMaximum}/day for ${account.email}. You selected ${dailyLimit}/day. ` +
+          'This creates a 24-hour owner risk override. If harmful delivery continues for three active sending days, Scout will strictly disable this sender and lock further overrides. Continue?'
+        );
+        if (!accepted) return;
+        const response = await fetch('/api/gmail/sender-control', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: workspace.id,
+            gmail_account_id: account.id,
+            action: 'set_override',
+            override_limit: dailyLimit,
+            owner_daily_limit: dailyLimit,
+          })
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok || json?.success === false) throw new Error(json?.error || `Override failed with HTTP ${response.status}`);
+      } else if (account.owner_override_active) {
+        await fetch('/api/gmail/sender-control', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ workspace_id: workspace.id, gmail_account_id: account.id, action: 'clear_override' })
+        }).catch(() => undefined);
+      }
+
       const { error: updateError } = await supabase
         .from('gmail_accounts')
         .update({
@@ -259,7 +303,9 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         .eq('workspace_id', workspace.id)
         .eq('id', account.id);
       if (updateError) throw updateError;
-      setStatus(`Saved limits for ${account.email}.`);
+      setStatus(dailyLimit > recommendedMaximum
+        ? `Saved limits for ${account.email}. A 24-hour owner risk override is active.`
+        : `Saved limits for ${account.email}.`);
       await loadAccounts();
     } catch (err) {
       setError(formatError(err));
@@ -579,7 +625,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         {!schemaReady && schema ? (
           <div className="error" style={{ marginTop: 12 }}>
             <strong>Database update required.</strong>
-            <div style={{ marginTop: 6 }}>Run <code>RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql</code>, then return here and click Run full check.</div>
+            <div style={{ marginTop: 6 }}>Run <code>RUN_THIS_V10_42_UPGRADE_IN_CURRENT_SUPABASE.sql</code>, then return here and click Run full check.</div>
             {schema.missing?.length ? (
               <details style={{ marginTop: 8 }}>
                 <summary>Show missing database requirements</summary>
@@ -633,7 +679,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
             const paused = isPaused(account);
             const hardRestricted = hasActiveHardRestriction(account);
             const connection = String(account.connection_status || ((account.access_token || account.refresh_token) ? 'not checked' : 'needs reconnect'));
-            const reason = account.hard_restriction_reason || account.paused_reason || account.health_reason || 'Checkpoint-controlled sender health.';
+            const reason = account.hard_restriction_reason || account.paused_reason || account.health_reason || 'Adaptive sender health assessment.';
             return (
               <div className="card" key={account.id} style={{ padding: 14 }}>
                 <div className="topbar">
@@ -654,13 +700,13 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
                 <div className="grid grid-3" style={{ marginTop: 12 }}>
                   <div>
                     <label className="label">Preferred daily maximum</label>
-                    <input className="input" type="number" min={1} max={senderSystemDailyMax(account) || 250} value={draft.daily_limit} onChange={(event) => patchDraft(account, { daily_limit: event.target.value })} />
-                    <p className="muted" style={{ marginTop: 5 }}>System allowance: {senderSystemDailyMax(account).toLocaleString()}/24h</p>
+                    <input className="input" type="number" min={1} max={senderDeploymentDailyMax(account)} value={draft.daily_limit} onChange={(event) => patchDraft(account, { daily_limit: event.target.value })} />
+                    <p className="muted" style={{ marginTop: 5 }}>Scout recommendation: {senderRecommendedDailyMax(account).toLocaleString()}/day · Current health ceiling: {senderSystemDailyMax(account).toLocaleString()}/day · Deployment ceiling: {senderDeploymentDailyMax(account).toLocaleString()}/day</p>
                   </div>
                   <div>
                     <label className="label">Preferred maximum per run</label>
-                    <input className="input" type="number" min={1} max={senderSystemRunMax(account) || 50} value={draft.default_run_limit} onChange={(event) => patchDraft(account, { default_run_limit: event.target.value })} />
-                    <p className="muted" style={{ marginTop: 5 }}>System run allowance: {senderSystemRunMax(account).toLocaleString()}</p>
+                    <input className="input" type="number" min={1} max={Math.min(senderSystemRunMax(account), Number(draft.daily_limit || senderDeploymentDailyMax(account)))} value={draft.default_run_limit} onChange={(event) => patchDraft(account, { default_run_limit: event.target.value })} />
+                    <p className="muted" style={{ marginTop: 5 }}>Settings default per run. A campaign’s “Max from this sender” may override this value, but never the remaining daily allowance.</p>
                   </div>
                   <div>
                     <label className="label">Account type</label>
@@ -678,6 +724,10 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
                   <div className="notice" style={{ marginTop: 8 }}>
                     <div><strong>Reason:</strong> {reason}</div>
                     <div><strong>Lifetime sent:</strong> {Number(account.lifetime_sent || account.successful_sends || account.sent_today || 0).toLocaleString()}</div>
+                    <div><strong>Health score:</strong> {Number(account.health_score ?? 100).toFixed(0)}/100 · {account.health_reliability || 'insufficient evidence'}</div>
+                    <div><strong>Scout recommendation:</strong> {senderRecommendedDailyMax(account).toLocaleString()}/day</div>
+                    {account.owner_override_active ? <div className="warning"><strong>Owner risk override:</strong> Up to {Number(account.owner_override_limit || 0).toLocaleString()}/day until {readableDate(account.owner_override_until)}</div> : null}
+                    {Number(account.harmful_override_streak || 0) > 0 ? <div><strong>Harmful override days:</strong> {Number(account.harmful_override_streak || 0)} of 3</div> : null}
                     <div><strong>Real replies recorded:</strong> {Number(account.real_replies || 0).toLocaleString()}</div>
                     {account.connection_verified_at ? <div><strong>Last Gmail check:</strong> {readableDate(account.connection_verified_at)}</div> : null}
                     <div><strong>Permissions:</strong> {account.oauth_reconnect_required ? 'Reconnect required' : 'Send + Scout-thread replies + Gmail signature'}</div>

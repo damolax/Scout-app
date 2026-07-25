@@ -31,9 +31,8 @@ create table if not exists public.import_chunk_receipts (
 create index if not exists import_chunk_receipts_workspace_batch_idx
   on public.import_chunk_receipts(workspace_id, batch_id, completed_at);
 
-create index if not exists businesses_import_batch_key_idx
-  on public.businesses(import_batch_id, normalized_key)
-  where import_batch_id is not null;
+-- The large businesses index is optional and intentionally omitted from the dashboard installer.
+-- Create it later from database/08_OPTIONAL_IMPORT_INDEX.sql during a quiet period.
 
 alter table public.import_chunk_receipts enable row level security;
 

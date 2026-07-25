@@ -33,15 +33,15 @@ export async function GET() {
 
   try {
     const supabase = createAdminClient();
-    const [workerResult, schemaResult, bulkImportResult] = await Promise.all([
+    const [workerResult, schemaResult, v1042Result] = await Promise.all([
       supabase.rpc('scout_message_worker_status'),
       checkScoutSchema(supabase, defaultWorkspaceId),
-      supabase.from('scout_schema_versions').select('version').eq('version', '10.41.0').maybeSingle()
+      supabase.from('scout_schema_versions').select('version').eq('version', '10.42.0').maybeSingle()
     ]);
     if (workerResult.error) throw workerResult.error;
     centralWorker = (Array.isArray(workerResult.data) ? workerResult.data[0] : workerResult.data) || centralWorker;
     schema = schemaResult;
-    bulkImportReady = !bulkImportResult.error && bulkImportResult.data?.version === '10.41.0';
+    bulkImportReady = !v1042Result.error && v1042Result.data?.version === '10.42.0' && schemaResult.ready;
   } catch (error) {
     databaseError = error instanceof Error ? error.message : String(error);
     centralWorker = {
@@ -60,9 +60,11 @@ export async function GET() {
     success: ready,
     ready,
     app: 'ok',
-    version: '10.41.0',
-    build: 'high-speed-resumable-bulk-import',
-    bulkImportContract: '10.41.0',
+    version: '10.42.0',
+    build: 'background-import-adaptive-sender-health-permanent-xp',
+    bulkImportContract: '10.42.0',
+    senderHealthContract: '10.42.0',
+    scoutingXpContract: '10.42.0',
     bulkImportReady,
     environmentReady,
     schemaReady,

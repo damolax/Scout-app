@@ -7,12 +7,13 @@ import { errorMessage, fetchJson, isAuthError, isTransientError, withRetry } fro
 import { Business, CsvBusinessInput, CsvInvalidRow, ImportResult, MessageCategory, Workspace } from '@/lib/types';
 
 const MAX_IMPORT_ROWS = 100000;
-const TARGET_IMPORT_CHUNK_ROWS = 5000;
-const MIN_IMPORT_CHUNK_ROWS = 250;
-const MAX_IMPORT_CHUNK_BYTES = 4_500_000;
-const IMPORT_CONCURRENCY = 3;
-const COMPACT_RAW_THRESHOLD = 5000;
+const TARGET_IMPORT_CHUNK_ROWS = 1000;
+const MIN_IMPORT_CHUNK_ROWS = 100;
+const MAX_IMPORT_CHUNK_BYTES = 1_250_000;
+const IMPORT_CONCURRENCY = 1;
+const COMPACT_RAW_THRESHOLD = 3000;
 const MAX_IMPORT_FILE_BYTES = 100 * 1024 * 1024;
+const CHUNK_COOLDOWN_MS = 200;
 const ACTIVE_QUEUE_STATUSES = ['pending', 'scanning', 'found', 'ready', 'review'];
 
 type ImportPhase = 'idle' | 'reading' | 'ready' | 'checking' | 'importing' | 'done' | 'failed';
@@ -22,9 +23,32 @@ type ImportProgressResult = { processed_count: number; inserted_count: number; s
 type ImportFinalizeResult = ImportProgressResult & { skipped_total: number };
 type AudienceCategorySelection = { id: string; name: string };
 
+type BackgroundImportJob = {
+  id: string; workspace_id: string; file_name: string; status: string; total_rows: number; valid_rows: number; staged_rows: number; processed_rows: number; inserted_rows: number; duplicate_rows: number; invalid_rows: number; suppressed_rows: number; research_rows?: number; error_message?: string | null; last_progress_at?: string | null; created_at: string; completed_at?: string | null;
+};
+
 function chunk<T>(items: T[], size: number): T[][] {
   const result: T[][] = [];
   for (let i = 0; i < items.length; i += size) result.push(items.slice(i, i + size));
+  return result;
+}
+
+function makeStageChunks<T>(items: T[], maxRows = 1000, maxBytes = 1_200_000): T[][] {
+  const result: T[][] = [];
+  let current: T[] = [];
+  let currentBytes = 2;
+  for (const item of items) {
+    let itemBytes = 2048;
+    try { itemBytes = new TextEncoder().encode(JSON.stringify(item)).length + 2; } catch {}
+    if (current.length && (current.length >= maxRows || currentBytes + itemBytes > maxBytes)) {
+      result.push(current);
+      current = [];
+      currentBytes = 2;
+    }
+    current.push(item);
+    currentBytes += itemBytes;
+  }
+  if (current.length) result.push(current);
   return result;
 }
 
@@ -193,8 +217,11 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [targetWarning, setTargetWarning] = useState<TargetWarning>(null);
   const [allowDifferentTarget, setAllowDifferentTarget] = useState(false);
+  const [importJobs, setImportJobs] = useState<BackgroundImportJob[]>([]);
+  const [activeImportJobId, setActiveImportJobId] = useState('');
 
   const selectedAudienceCategory = categories.find((c) => c.id === audienceCategoryId) || null;
+  const currentFileDuplicateRows = useMemo(() => uniqueRows(rows).duplicateRows, [rows]);
 
   async function loadCategories() {
     const { data, error } = await supabase
@@ -211,6 +238,39 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     loadCategories().catch((error) => setErrors([formatImportError(error)]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id]);
+
+  async function loadImportJobs() {
+    const response = await fetch(`/api/import-jobs?workspaceId=${encodeURIComponent(workspace.id)}`, { cache: 'no-store' });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || json?.success === false) throw new Error(json?.error || `Import jobs failed with HTTP ${response.status}`);
+    const jobs = (json.jobs || []) as BackgroundImportJob[];
+    setImportJobs(jobs);
+    const active = jobs.find((job) => job.id === activeImportJobId) || jobs.find((job) => ['uploading','queued','processing','paused','failed'].includes(job.status));
+    if (active) {
+      const denominator = Math.max(1, Number(active.valid_rows || active.total_rows || 0));
+      const pct = active.status === 'uploading'
+        ? Math.round((Number(active.staged_rows || 0) / denominator) * 100)
+        : Math.round((Number(active.processed_rows || 0) / denominator) * 100);
+      setPercent(Math.max(0, Math.min(100, pct)));
+      if (active.status === 'processing' || active.status === 'queued') {
+        setProgress(`Background import: ${Number(active.processed_rows || 0).toLocaleString()} / ${denominator.toLocaleString()} processed · ${Number(active.inserted_rows || 0).toLocaleString()} imported. You may leave this page.`);
+      } else if (active.status.startsWith('completed')) {
+        setPhase('done');
+        setProgress(`Background import completed. ${Number(active.inserted_rows || 0).toLocaleString()} imported, ${Number(active.duplicate_rows || 0).toLocaleString()} duplicate, ${Number(active.invalid_rows || 0).toLocaleString()} invalid, ${Number(active.suppressed_rows || 0).toLocaleString()} suppressed.`);
+      } else if (active.status === 'failed') {
+        setPhase('failed');
+        setProgress(`Background import needs attention: ${active.error_message || 'Unknown worker error.'}`);
+      }
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+    loadImportJobs().catch(() => undefined);
+    const timer = window.setInterval(() => { if (alive) loadImportJobs().catch(() => undefined); }, 5000);
+    return () => { alive = false; window.clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace.id, activeImportJobId]);
 
   async function ensureAudienceCategory() {
     if (audienceCategoryId) return { id: audienceCategoryId, name: selectedAudienceCategory?.name || newAudienceCategory.trim() || '' };
@@ -298,11 +358,11 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       if (!item) throw new Error('High-speed import server returned no result for this chunk.');
       return item;
     }, {
-      retries: 3,
-      baseDelayMs: 500,
-      maxDelayMs: 5000,
+      retries: 4,
+      baseDelayMs: 1000,
+      maxDelayMs: 15000,
       onRetry: (error, attempt, delayMs) => {
-        onRetry(`Temporary upload interruption. Retrying the same idempotent chunk (${attempt}/3) in ${(delayMs / 1000).toFixed(1)}s: ${formatImportError(error)}`);
+        onRetry(`Temporary upload interruption. Retrying the same idempotent chunk (${attempt}/4) in ${(delayMs / 1000).toFixed(1)}s: ${formatImportError(error)}`);
       }
     });
   }
@@ -423,7 +483,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     return Number(json.enqueued || 0);
   }
 
-  async function importRows() {
+  async function legacyImportRows() {
     if (!rows.length || importing) return;
     if (targetWarning && !allowDifferentTarget) {
       setErrors(['This looks like a different target list while unfinished businesses still exist. Tick “Import anyway” if you want to continue.']);
@@ -489,7 +549,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       const parts = makeImportChunks(deduped, compactRaw);
       const laneCount = Math.min(IMPORT_CONCURRENCY, Math.max(parts.length, 1));
       setPhase('importing');
-      setProgress(`Starting high-speed import: ${parts.length.toLocaleString()} bulk chunk(s) across ${laneCount} concurrent lane(s).${compactRaw ? ' Large-file mode stores mapped lead fields without duplicating every original CSV cell into raw JSON.' : ''}`);
+      setProgress(`Starting adaptive low-load import: ${parts.length.toLocaleString()} bulk chunk(s) across ${laneCount} concurrent lane(s).${compactRaw ? ' Large-file mode stores mapped lead fields without duplicating every original CSV cell into raw JSON.' : ''}`);
 
       let nextChunkIndex = 0;
       let skippedKeysTruncated = false;
@@ -511,7 +571,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
               const rowsPerSecond = processed / elapsedSeconds;
               const remainingSeconds = rowsPerSecond > 0 ? Math.max(0, (deduped.length - processed) / rowsPerSecond) : 0;
               setPercent(Math.min(96, Math.round((processed / Math.max(deduped.length, 1)) * 96)));
-              setProgress(`High-speed import: ${processed.toLocaleString()} / ${deduped.length.toLocaleString()} row(s) committed · ${rowsPerSecond.toFixed(0)} rows/sec · about ${Math.ceil(remainingSeconds)}s remaining.`);
+              setProgress(`Controlled import: ${processed.toLocaleString()} / ${deduped.length.toLocaleString()} row(s) committed · ${rowsPerSecond.toFixed(0)} rows/sec · about ${Math.ceil(remainingSeconds)}s remaining.`);
             },
             (message) => setProgress(message)
           );
@@ -524,7 +584,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
             skippedKeysTruncated ||= Boolean(item.skipped_keys_truncated);
             for (const key of item.skipped_keys || []) skippedKeysFromRpc.add(key);
           }
-          await new Promise((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, CHUNK_COOLDOWN_MS));
         }
       };
 
@@ -595,6 +655,138 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     } finally {
       setImporting(false);
     }
+  }
+
+  async function importRows() {
+    if (!rows.length || importing) return;
+    if (targetWarning && !allowDifferentTarget) {
+      setErrors(['This looks like a different target list while unfinished businesses still exist. Tick “Import anyway” if you want to continue.']);
+      return;
+    }
+    if (rows.length > MAX_IMPORT_ROWS) {
+      setErrors([`Import limit is ${MAX_IMPORT_ROWS.toLocaleString()} rows. Split the file before importing.`]);
+      return;
+    }
+
+    setImporting(true);
+    setResult(null);
+    setErrors([]);
+    setWarnings([]);
+    setPhase('checking');
+    setPercent(0);
+
+    try {
+      const unique = uniqueRows(rows);
+      const deduped = unique.rows;
+      const category = await ensureAudienceCategory();
+      const emailRows = deduped.filter((row) => Boolean(row.email)).length;
+      const noEmailRows = deduped.length - emailRows;
+      setProgress(`Creating a persistent background job for ${deduped.length.toLocaleString()} unique row(s)...`);
+
+      const createResponse = await fetch('/api/import-jobs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create', workspaceId: workspace.id, fileName, totalRows: rows.length,
+          validRows: deduped.length, emailRows, noEmailRows, invalidRows: invalidRows.length,
+          fileDuplicateRows: unique.duplicateRows.length, categoryId: category.id || null,
+          categoryName: category.name || null, headers, enqueueResearch,
+        })
+      });
+      const createJson = await createResponse.json().catch(() => ({}));
+      if (!createResponse.ok || createJson?.success === false) throw new Error(createJson?.error || `Could not create import job (HTTP ${createResponse.status}).`);
+      const jobId = String(createJson.job?.id || '');
+      if (!jobId) throw new Error('Import job was created without an ID.');
+      setActiveImportJobId(jobId);
+
+      const compactRaw = deduped.length >= COMPACT_RAW_THRESHOLD;
+      const stagedPayload = [
+        ...deduped.map((row, index) => ({
+          row_no: index,
+          dedupe_key: row.normalized_key,
+          row_data: toRpcRows([row], compactRaw)[0],
+          status: 'pending',
+        })),
+        ...unique.duplicateRows.map((row, index) => ({
+          row_no: deduped.length + index,
+          dedupe_key: row.normalized_key || `file-duplicate:${index}`,
+          row_data: { ...toRpcRows([row], compactRaw)[0], reason: 'Duplicate row inside this CSV file.' },
+          status: 'file_duplicate',
+        })),
+        ...invalidRows.map((row, index) => ({
+          row_no: deduped.length + unique.duplicateRows.length + index,
+          dedupe_key: `invalid:${row.rowNumber}:${index}`,
+          row_data: { reason: row.reason, raw: row.raw || {} },
+          status: 'invalid',
+        })),
+      ];
+      const stageParts = makeStageChunks(stagedPayload, 1000, 1_200_000);
+      let next = 0;
+      let staged = 0;
+      const uploadLane = async () => {
+        while (true) {
+          const index = next++;
+          if (index >= stageParts.length) return;
+          const part = stageParts[index];
+          const response = await withRetry(async () => {
+            const value = await fetch('/api/import-jobs', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ action: 'upload_rows', workspaceId: workspace.id, jobId, rows: part })
+            });
+            const json = await value.json().catch(() => ({}));
+            if (!value.ok || json?.success === false) throw new Error(json?.error || `Row staging failed with HTTP ${value.status}`);
+            return json;
+          }, {
+            retries: 4,
+            baseDelayMs: 750,
+            maxDelayMs: 8000,
+            onRetry: (error, attempt, delayMs) => setProgress(`Temporary staging interruption. Retrying safe chunk ${index + 1}/${stageParts.length} (${attempt}/4) in ${(delayMs/1000).toFixed(1)}s: ${formatImportError(error)}`)
+          });
+          staged += part.length;
+          setPercent(Math.min(99, Math.round((staged / Math.max(1, stagedPayload.length)) * 100)));
+          setProgress(`Accepting file: ${staged.toLocaleString()} / ${stagedPayload.length.toLocaleString()} source row record(s) safely staged. Background processing starts after acceptance.`);
+        }
+      };
+      await Promise.all([uploadLane(), uploadLane()]);
+
+      const finish = await fetch('/api/import-jobs', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'finish_upload', workspaceId: workspace.id, jobId })
+      });
+      const finishJson = await finish.json().catch(() => ({}));
+      if (!finish.ok || finishJson?.success === false) throw new Error(finishJson?.error || `Could not queue import job (HTTP ${finish.status}).`);
+
+      setPhase('done');
+      setPercent(100);
+      setProgress(`File accepted. ${deduped.length.toLocaleString()} unique row(s) are queued for background processing. You may close or refresh this page; Scout will continue.`);
+      setImporting(false);
+      void fetch('/api/import-jobs/run', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId: workspace.id, jobId, batchSize: 250 })
+      }).then(() => loadImportJobs()).catch(() => undefined);
+      await loadImportJobs();
+    } catch (error) {
+      setErrors([formatImportError(error)]);
+      setPhase('failed');
+      setProgress('The file was not fully accepted. Completed staging chunks are idempotent; retrying the same file will not duplicate staged rows.');
+      setImporting(false);
+    }
+  }
+
+  async function controlImportJob(job: BackgroundImportJob, action: 'pause' | 'resume' | 'cancel') {
+    setErrors([]);
+    const response = await fetch('/api/import-jobs', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action, workspaceId: workspace.id, jobId: job.id })
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || json?.success === false) throw new Error(json?.error || `Import control failed with HTTP ${response.status}`);
+    if (action === 'resume') void fetch('/api/import-jobs/run', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspaceId: workspace.id, jobId: job.id })
+    }).catch(() => undefined);
+    await loadImportJobs();
   }
 
   async function fetchPendingNoEmailBusinesses(maxRows = 50000) {
@@ -685,7 +877,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
             <input className="input" value={newAudienceCategory} onChange={(event) => { setNewAudienceCategory(event.target.value); if (audienceCategoryId) setAudienceCategoryId(''); }} placeholder="Airtable service, Marketing, Shopify audit" />
           </div>
         </div>
-        <p className="muted">Limit: 100,000 usable rows. Files with 5,000+ rows automatically use compact high-speed mode and three concurrent database lanes. Import divides rows clearly: emails → Ready for Message; no email → Pending for Auto Scout; duplicates are skipped/exportable; invalid rows are downloadable. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
+        <p className="muted">Limit: 100,000 usable rows. Scout accepts the file into a persistent job, then a cron-backed worker processes short adaptive batches. You may leave the page after acceptance; completed work survives refreshes, outages and retries. Import divides rows clearly: emails → Ready for Message; no email → Pending for Auto Scout; duplicates are skipped/exportable; invalid rows are downloadable. It scans email1/email2/email3/validatedEmail columns and every cell.</p>
         <div className={phase === 'failed' ? 'error' : phase === 'done' ? 'success' : 'notice'}>{progress}</div>
         <div className="progress-track" aria-label="Import progress"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>
 
@@ -705,11 +897,12 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         </label>
 
         <div className="actions">
-          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'High-speed importing...' : `Import ${rows.length.toLocaleString()} business(es)`}</button>
+          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Accepting file...' : `Queue ${rows.length.toLocaleString()} business(es)`}</button>
           <button className="btn secondary" type="button" disabled={importing} onClick={repairEmailRouting}>Repair: Email → Ready / No Email → Pending</button>
           <button className="btn secondary" type="button" disabled={importing} onClick={exportPendingNoEmailForScout}>Export Pending No-Email for Auto Scout</button>
           <button className="btn danger" type="button" disabled={importing} onClick={deletePendingNoEmailBusinesses}>Delete Pending No-Email</button>
           {invalidRows.length ? <button className="btn secondary" type="button" onClick={() => downloadInvalidRows('scout-invalid-rows.csv', invalidRows)}>Download invalid rows</button> : null}
+          {currentFileDuplicateRows.length ? <button className="btn secondary" type="button" onClick={() => downloadRawRows('scout-file-duplicates.csv', currentFileDuplicateRows)}>Download file duplicates</button> : null}
           {result?.skippedRows.length ? <button className="btn secondary" type="button" onClick={() => downloadRawRows('scout-skipped-duplicates.csv', result.skippedRows)}>Download skipped duplicates</button> : null}
         </div>
       </div>
@@ -728,6 +921,37 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
           <div className="card kpi"><div className="title">Invalid Rows</div><div className="num">{result.invalidRows.length.toLocaleString()}</div></div>
           <div className="card kpi"><div className="title">Research Jobs</div><div className="num">{(result.queuedResearch || 0).toLocaleString()}</div></div>
           <div className="card kpi"><div className="title">Batch ID</div><div className="num" style={{ fontSize: 12, wordBreak: 'break-all' }}>{result.batchId || '-'}</div></div>
+        </div>
+      ) : null}
+
+      {importJobs.length ? (
+        <div className="card" style={{ padding: 18 }}>
+          <h3>Background Import Jobs</h3>
+          <p className="muted">These jobs continue through the import worker even when this browser tab is closed.</p>
+          <div className="table-wrap"><table>
+            <thead><tr><th>File</th><th>Status</th><th>Progress</th><th>Imported</th><th>Skipped</th><th>Research</th><th>Last progress</th><th>Controls</th></tr></thead>
+            <tbody>{importJobs.map((job) => {
+              const total = Math.max(1, Number(job.valid_rows || job.total_rows || 0));
+              const done = Number(job.processed_rows || 0);
+              return <tr key={job.id}>
+                <td><strong>{job.file_name}</strong><br /><span className="muted">{job.id.slice(0, 8)}</span></td>
+                <td><span className={`status ${job.status.startsWith('completed') ? 'connected' : job.status === 'failed' ? 'error' : job.status === 'paused' ? 'paused' : ''}`}>{job.status.replace(/_/g, ' ')}</span>{job.error_message ? <div className="error">{job.error_message}</div> : null}</td>
+                <td>{done.toLocaleString()} / {total.toLocaleString()} ({Math.min(100, Math.round((done/total)*100))}%)</td>
+                <td>{Number(job.inserted_rows || 0).toLocaleString()}</td>
+                <td>{(Number(job.duplicate_rows || 0)+Number(job.invalid_rows || 0)+Number(job.suppressed_rows || 0)).toLocaleString()}</td>
+                <td>{Number(job.research_rows || 0).toLocaleString()}</td>
+                <td>{job.last_progress_at ? new Date(job.last_progress_at).toLocaleString() : '-'}</td>
+                <td><div className="actions">
+                  {['queued','processing'].includes(job.status) ? <button className="btn secondary mini" onClick={() => controlImportJob(job,'pause').catch((e)=>setErrors([formatImportError(e)]))}>Pause</button> : null}
+                  {['paused','failed'].includes(job.status) ? <button className="btn mini" onClick={() => controlImportJob(job,'resume').catch((e)=>setErrors([formatImportError(e)]))}>Continue</button> : null}
+                  {!job.status.startsWith('completed') && job.status !== 'cancelled' ? <button className="btn danger mini" onClick={() => controlImportJob(job,'cancel').catch((e)=>setErrors([formatImportError(e)]))}>Cancel</button> : null}
+                  {Number(job.duplicate_rows || 0) > 0 ? <a className="btn secondary mini" href={`/api/import-jobs/export?workspaceId=${encodeURIComponent(workspace.id)}&jobId=${encodeURIComponent(job.id)}&kind=duplicates`}>Duplicates CSV</a> : null}
+                  {Number(job.invalid_rows || 0) > 0 ? <a className="btn secondary mini" href={`/api/import-jobs/export?workspaceId=${encodeURIComponent(workspace.id)}&jobId=${encodeURIComponent(job.id)}&kind=invalid`}>Invalid CSV</a> : null}
+                  {Number(job.suppressed_rows || 0) > 0 ? <a className="btn secondary mini" href={`/api/import-jobs/export?workspaceId=${encodeURIComponent(workspace.id)}&jobId=${encodeURIComponent(job.id)}&kind=suppressed`}>Suppressed CSV</a> : null}
+                </div></td>
+              </tr>;
+            })}</tbody>
+          </table></div>
         </div>
       ) : null}
 

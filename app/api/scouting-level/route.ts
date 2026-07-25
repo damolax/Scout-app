@@ -20,22 +20,23 @@ const STAGES = [
   { name: 'Ultimate', min: 150_000_000 }
 ];
 
-async function safeCount(supabase: any, table: string, workspaceId: string, build?: (query: any) => any) {
+type CountResult = { ok: boolean; count: number; error?: string };
+
+async function countResult(supabase: any, table: string, workspaceId: string, build?: (query: any) => any): Promise<CountResult> {
   try {
     let query = supabase.from(table).select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId);
     if (build) query = build(query);
-    const { count } = await query;
-    return Number(count || 0);
-  } catch {
-    return 0;
+    const { count, error } = await query;
+    if (error) return { ok: false, count: 0, error: error.message || String(error) };
+    return { ok: true, count: Number(count || 0) };
+  } catch (error) {
+    return { ok: false, count: 0, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
 function stageFor(points: number) {
   let currentIndex = 0;
-  for (let i = 0; i < STAGES.length; i += 1) {
-    if (points >= STAGES[i].min) currentIndex = i;
-  }
+  for (let i = 0; i < STAGES.length; i += 1) if (points >= STAGES[i].min) currentIndex = i;
   const current = STAGES[currentIndex];
   const next = STAGES[currentIndex + 1] || null;
   const progress = next ? Math.max(0, Math.min(100, Math.round(((points - current.min) / (next.min - current.min)) * 100))) : 100;
@@ -47,107 +48,90 @@ export async function GET(request: NextRequest) {
   if (!workspaceId) return NextResponse.json({ success: false, error: 'workspaceId is required.' }, { status: 400 });
   try {
     await requireWorkspaceAccess(workspaceId);
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error?.message || 'Unauthorized.' }, { status: Number(error?.status || 403) });
-  }
-  const supabase = createAdminClient();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+    const supabase = createAdminClient();
 
-  const [
-    deliveredMessages,
-    sentToday,
-    trustedEmails,
-    autoScoutJobs,
-    realReplies,
-    realRepliesToday,
-    manualReplies,
-    gmailAccounts,
-    templates,
-    schedules,
-    dueFollowups,
-    noInboxRecords,
-    appActivity,
-    uniqueSenders,
-    businesses
-  ] = await Promise.all([
-    safeCount(supabase, 'sent_messages', workspaceId, (q) => q.in('status', ['sent', 'delivered'])),
-    safeCount(supabase, 'sent_messages', workspaceId, (q) => q.in('status', ['sent', 'delivered']).gte('sent_at', today.toISOString())),
-    safeCount(supabase, 'businesses', workspaceId, (q) => q.not('email', 'is', null).neq('email', '').in('status', ['ready', 'found', 'connected'])),
-    safeCount(supabase, 'email_research_jobs', workspaceId, (q) => q.in('status', ['done', 'found'])),
-    Promise.resolve(0),
-    Promise.resolve(0),
-    safeCount(supabase, 'sent_messages', workspaceId, (q) => q.eq('delivery_status', 'manual_reply_sent')),
-    safeCount(supabase, 'gmail_accounts', workspaceId, (q) => q.or('status.eq.connected,status.eq.active,status.eq.ready,status.is.null')),
-    safeCount(supabase, 'templates', workspaceId, (q) => q.or('active.eq.true,is_active.eq.true,active.is.null,is_active.is.null')),
-    safeCount(supabase, 'message_schedules', workspaceId, (q) => q.in('status', ['scheduled', 'due', 'running', 'completed'])),
-    safeCount(supabase, 'message_schedules', workspaceId, (q) => q.in('status', ['due', 'running'])),
-    safeCount(supabase, 'no_inbox_records', workspaceId),
-    safeCount(supabase, 'activity_logs', workspaceId),
-    safeCount(supabase, 'gmail_accounts', workspaceId, (q) => q.not('email', 'is', null).neq('email', '')),
-    safeCount(supabase, 'businesses', workspaceId)
-  ]);
+    const { data: existingState, error: stateError } = await supabase
+      .from('scouting_xp_state')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+    if (stateError && !String(stateError.message || '').toLowerCase().includes('does not exist')) throw stateError;
 
-  const [replyMetricsAll, replyMetricsToday] = await Promise.all([
-    fetchUnifiedReplyMetrics(supabase, workspaceId),
-    fetchUnifiedReplyMetrics(supabase, workspaceId, { start: today })
-  ]);
-  const unifiedRealReplies = replyMetricsAll.realReplies;
-  const unifiedRealRepliesToday = replyMetricsToday.realReplies;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const countPromises = [
+      countResult(supabase, 'sent_messages', workspaceId, (q) => q.in('status', ['sent', 'delivered'])),
+      countResult(supabase, 'sent_messages', workspaceId, (q) => q.in('status', ['sent', 'delivered']).gte('sent_at', today.toISOString())),
+      countResult(supabase, 'businesses', workspaceId, (q) => q.not('email', 'is', null).neq('email', '').in('status', ['ready', 'found', 'connected'])),
+      countResult(supabase, 'email_research_jobs', workspaceId, (q) => q.in('status', ['done', 'found'])),
+      countResult(supabase, 'sent_messages', workspaceId, (q) => q.eq('delivery_status', 'manual_reply_sent')),
+      countResult(supabase, 'gmail_accounts', workspaceId, (q) => q.or('status.eq.connected,status.eq.active,status.eq.ready,status.is.null')),
+      countResult(supabase, 'templates', workspaceId, (q) => q.or('active.eq.true,is_active.eq.true,active.is.null,is_active.is.null')),
+      countResult(supabase, 'message_schedules', workspaceId, (q) => q.in('status', ['scheduled', 'due', 'running', 'completed'])),
+      countResult(supabase, 'businesses', workspaceId),
+    ];
+    const [delivered, sentToday, trusted, autoScout, manualReplies, gmailAccounts, templates, schedules, businesses] = await Promise.all(countPromises);
+    const dataReliable = [delivered, sentToday, trusted, autoScout, manualReplies, gmailAccounts, templates, schedules, businesses].every((item) => item.ok);
 
-  // v10.15: level, dashboard, challenges, and replies all use the same one reply metric.
+    let replyMetrics = { realReplies: 0 } as any;
+    try { replyMetrics = await fetchUnifiedReplyMetrics(supabase, workspaceId); } catch { /* keep last permanent XP */ }
 
-  // v10.11: Make levels genuinely hard. Scouting/import volume alone should
-  // not push someone into higher mastery. Rough rule: 3,000 scouted leads with
-  // little/no reply activity should feel like Rookie, not Strategist.
-  // Replies and replies sent from Scout still matter the most,
-  // but later stages require sustained volume and pipeline activity.
-  const points = Math.round(
-    deliveredMessages * 0.25 +
-    Math.min(sentToday, 100_000) * 0.05 +
-    trustedEmails * 0.3 +
-    autoScoutJobs * 0.15 +
-    Math.min(businesses, 1_000_000) * 0.005 +
-    unifiedRealReplies * 1_500 +
-    unifiedRealRepliesToday * 200 +
-    manualReplies * 2_000 +
-    Math.min(gmailAccounts, 300) * 400 +
-    Math.min(uniqueSenders, 300) * 150 +
-    Math.min(templates, 500) * 60 +
-    Math.min(schedules, 1000) * 20 +
-    Math.min(dueFollowups, 100_000) * 0.2 +
-    Math.min(noInboxRecords, 250_000) * 0.02 +
-    Math.min(appActivity, 3000) * 0.2
-  );
-
-  return NextResponse.json({
-    success: true,
-    points,
-    ...stageFor(points),
-    stages: STAGES.map((stage, index) => ({
-      name: stage.name,
-      stageNumber: index + 1,
-      unlocked: points >= stage.min
-    })),
-    hints: [
-      unifiedRealReplies < 10 ? 'Get more prospect replies. Replies move your level the most.' : null,
-      manualReplies < Math.max(3, Math.floor(unifiedRealReplies * 0.25)) ? 'Reply to prospects from inside Scout. That shows real pipeline work.' : null,
-      trustedEmails < 25_000 ? 'Use Auto Scout to build more trusted contact emails, but volume alone will not unlock high stages.' : null,
-      deliveredMessages < 25_000 ? 'Send more clean messages from healthy Gmail accounts.' : null,
-      templates < 10 ? 'Create stronger first-message and follow-up templates.' : null,
-      gmailAccounts < 10 ? 'Connect more healthy sender accounts when you are ready to scale.' : null
-    ].filter(Boolean),
-    highlights: {
-      deliveredMessages,
-      sentToday,
-      trustedEmails,
-      autoScoutJobs,
-      realReplies: unifiedRealReplies,
-      realRepliesToday: unifiedRealRepliesToday,
-      manualReplies,
-      gmailAccounts,
-      templates,
-      schedules
+    let points = Number(existingState?.total_xp || 0);
+    let baselineCreated = false;
+    if (!existingState) {
+      if (!dataReliable) {
+        return NextResponse.json({ success: false, preservePrevious: true, error: 'Scouting Level data is temporarily unavailable. Scout did not replace the previous level with zero.' }, { status: 503 });
+      }
+      const baseline = Math.max(0, Math.round(
+        delivered.count * 0.25 +
+        trusted.count * 0.3 +
+        autoScout.count * 0.15 +
+        businesses.count * 0.005 +
+        Number(replyMetrics.realReplies || 0) * 1500 +
+        manualReplies.count * 2000 +
+        gmailAccounts.count * 400 +
+        templates.count * 60 +
+        schedules.count * 20
+      ));
+      const { data: state, error } = await supabase.from('scouting_xp_state').upsert({
+        workspace_id: workspaceId,
+        total_xp: baseline,
+        baseline_xp: baseline,
+        last_confirmed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'workspace_id' }).select('*').single();
+      if (error) throw error;
+      points = Number(state.total_xp || baseline);
+      baselineCreated = true;
     }
-  });
+
+    return NextResponse.json({
+      success: true,
+      points,
+      permanent: true,
+      baselineCreated,
+      dataReliable,
+      lastConfirmedAt: existingState?.last_confirmed_at || new Date().toISOString(),
+      ...stageFor(points),
+      stages: STAGES.map((stage, index) => ({ name: stage.name, stageNumber: index + 1, unlocked: points >= stage.min })),
+      hints: [
+        'Scouting Level is permanent and never decreases.',
+        'Clean deliveries, trusted leads, real replies and completed import jobs earn permanent XP.',
+        dataReliable ? null : 'Some live performance counts are temporarily unavailable, but your confirmed XP was preserved.'
+      ].filter(Boolean),
+      highlights: {
+        deliveredMessages: delivered.count,
+        sentToday: sentToday.count,
+        trustedEmails: trusted.count,
+        autoScoutJobs: autoScout.count,
+        realReplies: Number(replyMetrics.realReplies || 0),
+        manualReplies: manualReplies.count,
+        gmailAccounts: gmailAccounts.count,
+        templates: templates.count,
+        schedules: schedules.count,
+      }
+    });
+  } catch (error) {
+    return NextResponse.json({ success: false, preservePrevious: true, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
 }

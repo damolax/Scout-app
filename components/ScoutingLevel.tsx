@@ -16,6 +16,9 @@ type LevelData = {
   stages?: LevelStage[];
   hints?: string[];
   highlights?: Record<string, number>;
+  preservePrevious?: boolean;
+  permanent?: boolean;
+  dataReliable?: boolean;
 };
 
 export function ScoutingLevel({ workspaceId }: { workspaceId?: string | null }) {
@@ -25,10 +28,20 @@ export function ScoutingLevel({ workspaceId }: { workspaceId?: string | null }) 
   useEffect(() => {
     if (!workspaceId) return;
     let alive = true;
+    try { const cached = window.localStorage.getItem(`scout-level:${workspaceId}`); if (cached) setData(JSON.parse(cached)); } catch {}
     async function load() {
       const response = await fetch(`/api/scouting-level?workspaceId=${encodeURIComponent(workspaceId || '')}`, { cache: 'no-store' });
       const json = await response.json().catch(() => ({}));
-      if (alive) setData(json);
+      if (!alive) return;
+      if (response.ok && json?.success !== false) {
+        setData(json);
+        try { window.localStorage.setItem(`scout-level:${workspaceId}`, JSON.stringify(json)); } catch {}
+      } else if (!data) {
+        try {
+          const cached = window.localStorage.getItem(`scout-level:${workspaceId}`);
+          if (cached) setData(JSON.parse(cached));
+        } catch {}
+      }
     }
     const initial = window.setTimeout(() => load().catch(() => {}), 18000);
     const timer = window.setInterval(() => load().catch(() => {}), 300_000);
@@ -90,7 +103,7 @@ export function ScoutingLevel({ workspaceId }: { workspaceId?: string | null }) 
             <span>Replies <strong>{Number(highlights.realReplies || 0).toLocaleString()}</strong></span>
             <span>Your replies <strong>{Number(highlights.manualReplies || 0).toLocaleString()}</strong></span>
           </div>
-          <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>Easy actions help. Replies and thoughtful replies from Scout help the most. Later stages are intentionally very hard.</p>
+          <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>Permanent XP never decreases. Live performance and sender health are tracked separately.</p>
         </div>
       ) : null}
     </div>

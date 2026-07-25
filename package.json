@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-41-bulk-import",
-  "version": "10.41.0",
+  "name": "scout-app-v10-42-adaptive-health-background-import",
+  "version": "10.42.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "verify:sql-contract": "node scripts/verify-sql-contract.mjs",
     "verify:release": "npm run verify:static && npm run verify:sql-contract && npm run typecheck && npm run build",
-    "verify:static": "node scripts/verify-static-release.mjs"
+    "verify:static": "node scripts/verify-static-release.mjs && node scripts/test-v10-42-model.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",
@@ -33,5 +33,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout v10.41.0 with full Gmail replies/signatures, stale-job confirmation, and high-speed resumable bulk CSV import."
+  "description": "Scout v10.42 with background imports, adaptive 250/day sender health, owner overrides, progressive recovery, and permanent Scouting XP."
 }

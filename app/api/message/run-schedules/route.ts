@@ -11,7 +11,7 @@ import { applyCountryFilter, businessMatchesCountry, extractBusinessCountries } 
 import { resolveTemplateContent } from "@/lib/template-language";
 import { businessIdentityKeys } from "@/lib/normalize";
 import { normalizeEmailAddress, verifyEmailBasic } from "@/lib/email-verification";
-import { effectiveRunLimit, recordSenderHealthEvent } from "@/lib/sender-health";
+import { effectiveDailyLimit, effectiveRunLimit, recordSenderHealthEvent } from "@/lib/sender-health";
 import { featureFlags } from "@/lib/feature-flags";
 
 type AnyRow = Record<string, any>;
@@ -249,7 +249,9 @@ function senderCap(scheduleRaw: AnyRow, account: AnyRow, senderRunLimitOverride?
     : byId ?? byEmail ?? account.default_run_limit;
   const preferred = Number(configured || effectiveRunLimit(account));
   const safePreferred = Number.isFinite(preferred) && preferred > 0 ? Math.floor(preferred) : effectiveRunLimit(account);
-  return Math.max(0, Math.min(effectiveRunLimit(account), safePreferred));
+  // v10.42: a campaign-specific “Max from this sender” overrides only the Settings per-run default.
+  // It still cannot exceed the sender’s remaining daily/health allowance, which is enforced later.
+  return Math.max(0, Math.min(effectiveDailyLimit(account), safePreferred));
 }
 
 async function loadScheduleControl(

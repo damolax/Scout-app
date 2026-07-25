@@ -12,7 +12,7 @@ type AnyRow = Record<string, any>;
 async function repeatEvents(
   supabase: ReturnType<typeof createAdminClient>,
   account: AnyRow,
-  eventType: 'permanent_bounce' | 'message_blocked' | 'provider_limit' | 'real_reply',
+  eventType: 'permanent_bounce' | 'message_blocked' | 'provider_limit' | 'real_reply' | 'no_inbox',
   count: number,
 ) {
   for (let index = 0; index < Math.min(20, Math.max(0, count)); index += 1) {
@@ -64,7 +64,8 @@ export async function POST(request: NextRequest) {
           deadlineMs: 18000,
         });
         await repeatEvents(supabase, account, 'real_reply', Number(replies.realReplies || 0));
-        await repeatEvents(supabase, account, 'permanent_bounce', Number(bounces.bounced || bounces.noInbox || 0));
+        await repeatEvents(supabase, account, 'permanent_bounce', Number(bounces.bounced || 0));
+        await repeatEvents(supabase, account, 'no_inbox', Number(bounces.noInbox || 0));
         await repeatEvents(supabase, account, 'message_blocked', Number(bounces.blocked || 0));
         await repeatEvents(supabase, account, 'provider_limit', Number(bounces.limitNotices || 0));
         await supabase.from('gmail_accounts').update({ updated_at: new Date().toISOString() }).eq('id', account.id);

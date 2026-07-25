@@ -2,67 +2,34 @@ import fs from 'node:fs';
 import path from 'node:path';
 const root=process.cwd();
 const files={
-  upgrade:path.join(root,'RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql'),
-  fresh:path.join(root,'database','01_FRESH_INSTALL_V10_40.sql'),
-  verify:path.join(root,'database','03_VERIFY_V10_40.sql'),
-  cron:path.join(root,'database','04_SET_VAULT_AND_CRON.sql.template'),
-  bulk:path.join(root,'database','06_HIGH_SPEED_BULK_IMPORT.sql'),
+ current:path.join(root,'RUN_THIS_V10_42_UPGRADE_IN_CURRENT_SUPABASE.sql'),
+ combined:path.join(root,'RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql'),
+ fresh:path.join(root,'database','01_FRESH_INSTALL_V10_42.sql'),
+ verify:path.join(root,'database','10_VERIFY_V10_42.sql'),
+ cron:path.join(root,'database','04_SET_VAULT_AND_CRON.sql.template'),
 };
-for(const [name,file] of Object.entries(files)){
-  if(!fs.existsSync(file)){
-    console.error(`SQL contract check failed: ${name} file is missing: ${file}`);
-    process.exit(1);
-  }
-}
-const read=(file)=>fs.readFileSync(file,'utf8').toLowerCase();
-const upgrade=read(files.upgrade);
-const fresh=read(files.fresh);
-const verify=read(files.verify);
-const cron=read(files.cron);
-const bulk=read(files.bulk);
+for(const [name,file] of Object.entries(files)){if(!fs.existsSync(file)){console.error(`Missing ${name}: ${file}`);process.exit(1);}}
+const read=(f)=>fs.readFileSync(f,'utf8').toLowerCase();
 const groups=[
-  ['upgrade',upgrade,[
-    'create function public.get_due_followups',
-    'create function public.count_due_followups',
-    'create or replace function public.scout_message_worker_status',
-    'add column if not exists granted_scopes',
-    'add column if not exists email_signature_text',
-    "'10.40.0'",
-    'create table if not exists public.import_chunk_receipts',
-    'create or replace function public.import_businesses_bulk_v2',
-    "'10.41.0'",
-  ]],
-  ['fresh',fresh,[
-    'scout v10.36 fresh installation',
-    'create table if not exists public.workspaces',
-    'create table if not exists public.gmail_accounts',
-    'create table if not exists public.businesses',
-    'create table if not exists public.import_chunk_receipts',
-    'create or replace function public.import_businesses_bulk_v2',
-    "'10.41.0'",
-  ]],
-  ['verify',verify,['runtime_required_columns','reply_dedup_index','followup_queue_rpc',"version='10.40.0'"]],
-  ['cron',cron,['/api/cron/inbound-sync','/api/message/run-schedules','/api/cron/research-worker','/api/cron/health-review']],
-  ['bulk',bulk,[
-    'create table if not exists public.import_chunk_receipts',
-    'pg_advisory_xact_lock',
-    "set_config('scout.bulk_import', 'on', true)",
-    'create or replace function public.import_businesses_bulk_v2',
-    'create or replace function public.get_import_batch_progress_v2',
-    'create or replace function public.finalize_import_batch_v2',
-    "'10.41.0'::text as bulk_import_contract",
-  ]],
+ ['current',read(files.current),[
+  'create table if not exists public.import_jobs','create table if not exists public.import_job_rows',
+  'create table if not exists public.lead_dedupe_registry','process_import_job_batch_v1042',
+  'health_recommended_limit','owner_override_locked','sender_health_daily','sender_limit_audit',
+  'scouting_xp_state','scouting_xp_events','award_scouting_xp_v1042',
+  'team_registry as','research_jobs as','research_rows=research_rows+research_count',
+  'create or replace function public.reserve_sender_send',"'10.42.0'"
+ ]],
+ ['combined',read(files.combined),['begin scout v10.42.0 upgrade','process_import_job_batch_v1042',"'10.42.0'"]],
+ ['fresh',read(files.fresh),['scout v10.36 fresh installation','begin scout v10.42.0 features','process_import_job_batch_v1042',"'10.42.0'"]],
+ ['verify',read(files.verify),['import_jobs','health_recommended_limit','process_import_job_batch_v1042','award_scouting_xp_v1042','schema:10.42.0']],
+ ['cron',read(files.cron),['/api/cron/import-worker','scout-import-worker-v1042','/api/cron/health-review','/api/message/run-schedules']],
 ];
 let failures=0;
-for(const [name,text,tokens] of groups){
-  const missing=tokens.filter(token=>!text.includes(token));
-  if(missing.length){
-    failures+=missing.length;
-    console.error(`${name} contract missing:`);
-    missing.forEach(token=>console.error(`- ${token}`));
-  } else {
-    console.log(`${name} SQL contract: PASS (${tokens.length} markers)`);
-  }
-}
+for(const [name,text,tokens] of groups){const missing=tokens.filter(t=>!text.includes(t));if(missing.length){failures+=missing.length;console.error(`${name} contract missing:`);missing.forEach(t=>console.error(`- ${t}`));}else console.log(`${name} SQL contract: PASS (${tokens.length} markers)`);}
+const focused=fs.readFileSync(files.current,'utf8');
+const dollarPairs=(focused.match(/\$\$/g)||[]).length;
+if(dollarPairs%2!==0){failures++;console.error('current SQL has an unbalanced $$ delimiter count.');}
+if(/create or replace function public\.reserve_sender_send\(\s*create or replace function/i.test(focused)){failures++;console.error('current SQL contains a duplicated reserve_sender_send declaration.');}
+if((focused.match(/create or replace function public\.reserve_sender_send\(/gi)||[]).length!==1){failures++;console.error('current SQL must define reserve_sender_send exactly once.');}
 if(failures) process.exit(1);
-console.log('Scout v10.41.0 SQL contracts passed.');
+console.log('Scout v10.42.0 SQL contracts passed.');

@@ -1,0 +1,51 @@
+SCOUT v10.42.0 — AUDIT AND ACCEPTANCE
+=====================================
+
+RELEASE ID
+Version: 10.42.0
+Build marker: background-import-adaptive-sender-health-permanent-xp
+Repository target: https://github.com/damolax/Scout-app.git
+Branch: main
+
+IMPLEMENTED
+- Persistent background import jobs and staged rows.
+- Bounded adaptive import worker with timeout backoff and cautious growth.
+- Workspace and team-wide deduplication registries.
+- Persistent duplicate, invalid, and suppressed CSV exports.
+- Optional no-email research queue insertion.
+- Pause, continue, cancel, completion notifications, and permanent progress.
+- 250/day Assessment ceiling with owner-selected lower daily limits.
+- Settings per-run default and campaign-specific Max from this sender.
+- Rolling 24-hour database reservation enforcement.
+- Health stages: Assessment, Healthy, Watch, Restricted, Critical, Strict disabled, Recovering.
+- 24-hour owner risk override and three harmful active-day strict lock.
+- Progressive automatic recovery: 25, 50, 100, 175, 250.
+- Sender health separated from campaign reply performance.
+- Permanent Scouting XP ledger and last-confirmed-score preservation.
+- Existing replies, signature synchronization, and stale sending-job confirmation preserved.
+- One-task-per-screen HTML deployment wizard with required confirmation and saved progress.
+
+STATIC VALIDATION
+- TypeScript/TSX parser: 150 files, no syntax diagnostics.
+- Release checks: 26/26 passed.
+- Sender/import behavior model: 8/8 passed.
+- SQL marker groups: current, combined, fresh, verification, and cron passed.
+- Focused migration has balanced function delimiters and one final reserve_sender_send definition.
+- HTML wizard JavaScript syntax passed.
+- Git Bash deployment script syntax passed.
+
+ENVIRONMENT LIMITATION
+A dependency-backed npm ci / Next.js production build could not be completed in this
+isolated build environment because one npm package was not available in the local cache
+and external registry access was unavailable. The included deployment script performs
+npm ci, static checks, SQL checks, TypeScript checking, and the Next.js production build
+before GitHub is modified. It refuses to push when any of those checks fail.
+
+LIVE ACCEPTANCE REQUIRED
+- Supabase migration final READY result.
+- Every database/10_VERIFY_V10_42.sql row passed=true.
+- GitHub push verified by matching local and remote commit SHA.
+- Vercel health route identifies the exact v10.42 build.
+- Import cron active every minute.
+- 1,000-row and 20,000-row tests on the owner’s actual Supabase project.
+- Gmail sender-limit, override, strict-disable, recovery, replies, and signatures tested live.
