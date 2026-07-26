@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { requireWorkspaceAccess } from '@/lib/require-workspace-access';
 import { validateEmailCandidate } from '@/lib/email-candidate-rules';
+import { hostFromWebsite, isBlockedAutoScoutHost } from '@/lib/auto-scout-target';
 
 function errorMessage(error: unknown) {
   if (!error) return 'Unknown error';
@@ -17,6 +18,18 @@ function extractResearchText(raw: any) {
   } catch {
     return '';
   }
+}
+
+function extractResearchEvidence(raw: any) {
+  const research = raw?.backend_email_research || raw?.email_research || raw || {};
+  return String(
+    research?.sourceEvidence ||
+    research?.sourceUrl ||
+    research?.source_url ||
+    research?.deepWebsiteFinder?.sourceUrl ||
+    research?.deep_website_finder?.sourceUrl ||
+    ''
+  ).trim();
 }
 
 export async function POST(request: NextRequest) {
@@ -46,13 +59,16 @@ export async function POST(request: NextRequest) {
       checked += 1;
       const email = String((business as any).email || '').trim().toLowerCase();
       const sourceText = extractResearchText((business as any).raw);
-      const decision = validateEmailCandidate({ email, sourceField: 'existing_business_email', sourceText }, business as any, '', false);
-      if (!decision.valid || !decision.promote) {
+      const sourceEvidence = extractResearchEvidence((business as any).raw);
+      const targetHost = hostFromWebsite((business as any).website || (business as any).domain || '');
+      const blockedTarget = isBlockedAutoScoutHost(targetHost);
+      const decision = validateEmailCandidate({ email, sourceField: 'existing_business_email', sourceText }, business as any, sourceEvidence, false);
+      if (blockedTarget || !decision.valid || !decision.promote) {
         const raw = ((business as any).raw && typeof (business as any).raw === 'object') ? (business as any).raw : {};
         const quarantineRecord = {
           email,
           quarantined_at: new Date().toISOString(),
-          reasons: decision.reasons,
+          reasons: blockedTarget ? [`Saved website host ${targetHost || 'unknown'} is a publisher/platform, not the business website.`, ...decision.reasons] : decision.reasons,
           previous_status: (business as any).status
         };
         await supabase
@@ -70,7 +86,7 @@ export async function POST(request: NextRequest) {
           .eq('business_id', (business as any).id)
           .eq('email', email);
         quarantined += 1;
-        details.push({ businessId: (business as any).id, businessName: (business as any).name, email, reasons: decision.reasons });
+        details.push({ businessId: (business as any).id, businessName: (business as any).name, email, reasons: blockedTarget ? [`Blocked Auto Scout target: ${targetHost}`, ...decision.reasons] : decision.reasons });
       }
     }
 

@@ -67,6 +67,20 @@ function getPagesChecked(result: any) {
   return Number(result?.deepWebsiteFinder?.pagesChecked || result?.pagesChecked || result?.websitePages?.pagesChecked || 0);
 }
 
+function getPagesAttempted(result: any) {
+  return Number(result?.deepWebsiteFinder?.pagesAttempted || result?.pagesAttempted || result?.websitePages?.pagesAttempted || 0);
+}
+
+function getDecision(result: any) {
+  return result?.emailDecision || result?.deepWebsiteFinder?.decision || result?.decision || null;
+}
+
+function getTrustReason(result: any) {
+  const decision = getDecision(result);
+  const reasons = Array.isArray(decision?.reasons) ? decision.reasons.filter(Boolean) : [];
+  return String(reasons.slice(0, 2).join(' ') || result?.reason || '').trim();
+}
+
 function getReason(job: JobRow) {
   const result: any = job.result || {};
   return String(job.last_error || result?.reason || result?.emailDecision?.reasons?.[0] || result?.backendError || '').trim();
@@ -98,6 +112,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
         const business = getBusiness(job);
         const email = String(business?.email || getEmailFromResult(job.result)).trim();
         const evidence = getEvidenceFromResult(job.result);
+        const decision = getDecision(job.result);
         return {
           id: String(business?.id || job.id || ''),
           businessName: String(business?.name || '').trim(),
@@ -105,10 +120,14 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
           email,
           evidence,
           pages: getPagesChecked(job.result),
+          attempted: getPagesAttempted(job.result),
+          quality: String(decision?.quality || ''),
+          trusted: decision?.promote === true,
+          reason: getTrustReason(job.result),
           status: job.status
         };
       })
-      .filter((row) => row.email)
+      .filter((row) => row.email && row.trusted)
       .slice(0, 25);
   }, [recentJobs]);
 
@@ -156,12 +175,10 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
       next.need_emails = Math.max((totalMissing || 0) - (next.queued || 0) - (next.running || 0), 0);
 
       const { count: foundWithEmail } = await supabase
-        .from('businesses')
+        .from('email_candidates')
         .select('id', { count: 'exact', head: true })
         .eq('workspace_id', workspace.id)
-        .eq('status', 'found')
-        .not('email', 'is', null)
-        .neq('email', '');
+        .in('status', ['source_seen_candidate', 'domain_match_candidate']);
       next.found_with_email = foundWithEmail || 0;
 
       const staleSince = new Date(Date.now() - 6 * 60 * 1000).toISOString();
@@ -198,6 +215,22 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, running]);
 
+  async function cleanFalsePositives(showMessage = true) {
+    const res = await fetch('/api/research/quarantine-false-positives', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspaceId: workspace.id, limit: 1000 })
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.success) throw new Error(json.error || 'False-positive cleanup failed.');
+    const removed = Number(json.quarantined || 0);
+    if (showMessage) setMessage(removed
+      ? `Removed ${removed.toLocaleString()} false or publisher-page email(s). Those leads are back in Review and can be checked again from their real business websites.`
+      : 'No saved false-positive emails were found in the checked records.');
+    await loadStats();
+    return removed;
+  }
+
   async function runOneChunk() {
     const res = await fetch('/api/research/run-worker', {
       method: 'POST',
@@ -225,7 +258,10 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
     let totalChecked = 0;
     let totalFound = 0;
     try {
-      setMessage('Starting now. Scout will use saved website URLs only; no business-name guessing.');
+      setMessage('Checking existing saved emails first, then Scout will use the saved business websites only.');
+      let cleaned = 0;
+      try { cleaned = await cleanFalsePositives(false); } catch { /* Cleanup must not block a new search run. */ }
+      setMessage(`${cleaned ? `Removed ${cleaned.toLocaleString()} false email(s). ` : ''}Starting now. Scout will check the real saved business websites; no business-name guessing or publisher-page emails.`);
       emitLiveActivity({ kind: 'auto_scout', status: 'starting', title: 'Auto Scout starting', message: 'Finding emails from saved business websites.' });
 
       for (let round = 1; round <= MAX_ROUNDS_PER_CLICK; round += 1) {
@@ -277,14 +313,14 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
   return (
     <div className="space-y">
       <div className="notice">
-        <b>New Auto Scout process:</b> Scout uses the website already saved on each lead. It checks the homepage/contact/about/support/impressum pages, saves the best trusted email, and skips rows that only have a business name, directory page, or IP address.
+        <b>Strict Auto Scout process:</b> Scout uses the real business website saved on each lead. It follows discovered contact links before guessed paths, checks additional pages when a guessed URL fails, and saves only an email tied to that business website. Wikipedia, Forbes, Shopify and other publisher/platform pages are rejected as research targets.
       </div>
 
       <div className="grid grid-4">
         <div className="card kpi"><div className="title">Missing Emails</div><div className="num">{needsCount.toLocaleString()}</div><p className="muted">Leads without usable email and not currently being checked.</p></div>
         <div className="card kpi"><div className="title">Next Queue</div><div className="num">{queueCount.toLocaleString()}</div><p className="muted">Already prepared. The main button continues from here.</p></div>
         <div className="card kpi"><div className="title">Checking Now</div><div className="num">{runningCount.toLocaleString()}</div><p className="muted">Live website checks. Stuck checks are cleaned automatically.</p></div>
-        <div className="card kpi"><div className="title">Emails Saved</div><div className="num">{(stats.found_with_email || 0).toLocaleString()}</div><p className="muted">Trusted emails saved to leads.</p></div>
+        <div className="card kpi"><div className="title">Trusted Emails Saved</div><div className="num">{(stats.found_with_email || 0).toLocaleString()}</div><p className="muted">Accepted Auto Scout candidates with domain or same-site evidence.</p></div>
       </div>
 
       <div className="card" style={{ padding: 20 }}>
@@ -293,6 +329,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
         <div className="actions" style={{ marginTop: 14 }}>
           <button className="btn" disabled={busy || running} onClick={findEmailsNow}>{queueCount > 0 ? 'Continue finding emails' : 'Find emails now'}</button>
           {running ? <button className="btn secondary" onClick={stopAfterCurrentGroup}>Stop after current group</button> : null}
+          <button className="btn secondary" disabled={busy || running} onClick={async () => { setBusy(true); try { await cleanFalsePositives(true); } catch (error) { setMessage(`Cleanup stopped: ${fmtError(error)}`); } finally { setBusy(false); } }}>Clean saved false positives</button>
           <button className="btn secondary mini" disabled={busy || running} onClick={refreshPage}>Refresh</button>
         </div>
         <div className={message.toLowerCase().includes('stopped') || message.toLowerCase().includes('failed') ? 'error' : 'notice'} style={{ marginTop: 14 }}>{message}</div>
@@ -317,14 +354,15 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
         </div>
 
         <div className="card" style={{ padding: 18 }}>
-          <h3 style={{ marginTop: 0 }}>Emails saved</h3>
-          <div className="table-wrap"><table><thead><tr><th>Email</th><th>Business</th><th>Proof</th></tr></thead><tbody>
+          <h3 style={{ marginTop: 0 }}>Recent trusted saves</h3>
+          <div className="table-wrap"><table><thead><tr><th>Email</th><th>Business</th><th>Why trusted</th><th>Source page</th></tr></thead><tbody>
             {savedEmailRows.map((row, index) => <tr key={`${row.id}-${row.email}-${index}`}>
               <td><strong>{row.email}</strong></td>
               <td>{row.id ? <Link href={`/businesses/${row.id}`}>{row.businessName || row.id}</Link> : row.businessName || '-'}</td>
-              <td>{row.evidence ? <a href={row.evidence.startsWith('http') ? row.evidence : `https://${row.evidence}`} target="_blank" rel="noreferrer">source</a> : <span className="muted">{row.pages ? `${row.pages} page(s)` : '-'}</span>}</td>
+              <td><span className="muted">{row.reason || row.quality || 'Matched the saved business website.'}</span></td>
+              <td>{row.evidence ? <a href={row.evidence.startsWith('http') ? row.evidence : `https://${row.evidence}`} target="_blank" rel="noreferrer">{row.evidence}</a> : <span className="muted">{row.pages ? `${row.pages} fetched / ${row.attempted || row.pages} attempted` : '-'}</span>}</td>
             </tr>)}
-            {!savedEmailRows.length ? <tr><td colSpan={3} className="muted">No trusted emails saved in recent checks yet.</td></tr> : null}
+            {!savedEmailRows.length ? <tr><td colSpan={4} className="muted">No strictly trusted emails appear in recent checks. Use Clean saved false positives to remove older weak results.</td></tr> : null}
           </tbody></table></div>
         </div>
       </div>
@@ -343,7 +381,7 @@ export default function AutoScoutClient({ workspace }: { workspace: Workspace })
               <td>{business?.id ? <Link href={`/businesses/${business.id}`}><strong>{business?.name || '-'}</strong></Link> : <strong>{business?.name || '-'}</strong>}<br /><span className="muted">{business?.website || business?.domain || ''}</span></td>
               <td><span className={`trust-pill ${email ? 'trusted' : job.status === 'failed' ? 'blocked' : 'none'}`}>{status}</span></td>
               <td>{email || <span className="muted">No email saved</span>}</td>
-              <td>{pages ? `${pages}` : '-'}</td>
+              <td>{pages ? `${pages} fetched / ${getPagesAttempted(job.result) || pages} attempted` : '-'}</td>
               <td><span className="muted">{reason || (email ? 'Trusted email saved.' : 'No trusted email found on checked pages.')}</span></td>
             </tr>;
           })}

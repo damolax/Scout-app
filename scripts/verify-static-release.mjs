@@ -5,11 +5,11 @@ const get=(p)=>fs.readFileSync(path.join(root,p),'utf8');
 const checks=[];
 function check(label,ok,detail=''){checks.push({label,ok:Boolean(ok),detail});}
 const pkg=JSON.parse(get('package.json'));
-check('Package version',pkg.version==='10.42.2',pkg.version);
+check('Package version',pkg.version==='10.42.3',pkg.version);
 const health=get('app/api/health/route.ts');
-check('Live release marker',health.includes("version: '10.42.2'")&&health.includes("pending-delete-cancelled-import-unlock-hotfix"));
+check('Live release marker',health.includes("version: '10.42.3'")&&health.includes("auto-scout-contact-page-trust-fix"));
 check('Schema readiness contract 10.42.2',get('lib/schema-readiness.ts').includes("SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.2'"));
-check('v10.42.2 health contracts',health.includes("bulkImportContract: '10.42.2'")&&health.includes("senderHealthContract: '10.42.2'")&&health.includes("scoutingXpContract: '10.42.2'"));
+check('v10.42.3 health with v10.42.2 database contracts',health.includes("bulkImportContract: '10.42.2'")&&health.includes("senderHealthContract: '10.42.2'")&&health.includes("scoutingXpContract: '10.42.2'"));
 const upload=get('app/(app)/upload/UploadClient.tsx');
 const settings=get('app/(app)/settings/SettingsClient.tsx');
 const message=get('app/(app)/message/MessageClient.tsx');
@@ -43,7 +43,7 @@ check('Replies preserved',get('app/(app)/replies/RepliesClient.tsx').includes('C
 check('Signature controls preserved',get('app/(app)/settings/SettingsClient.tsx').includes('Save signature &amp; logo'));
 check('v10.42 SQL migration included',fs.existsSync(path.join(root,'database/09_V10_42_BACKGROUND_IMPORT_HEALTH_XP.sql')));
 check('One-screen wizard included',fs.existsSync(path.join(root,'SCOUT_V10_42_ONE_SCREEN_SETUP_WIZARD.html')));
-check('Target repository locked',fs.existsSync(path.join(root,'DEPLOY_V10_42_2_FULL_GIT_BASH.sh'))&&get('DEPLOY_V10_42_2_FULL_GIT_BASH.sh').includes('damolax/Scout-app.git'));
+check('Target repository locked',fs.existsSync(path.join(root,'DEPLOY_V10_42_3_FULL_GIT_BASH.sh'))&&get('DEPLOY_V10_42_3_FULL_GIT_BASH.sh').includes('damolax/Scout-app.git'));
 check('Fast direct core import enabled',upload.includes('return legacyImportRows()')&&upload.includes('Fast bulk import:'));
 check('Default max per run is 100',settings.includes('draft.default_run_limit || 100')&&message.includes('account.default_run_limit || 100'));
 check('Pacing preserved',message.includes('90–210 seconds')&&message.includes('3–6 seconds'));
@@ -52,6 +52,18 @@ check('Pending no-email RPC fallback',upload.includes("String((error as { code?:
 check('Cancelled legacy job unlock',upload.includes("setActiveImportJobId('')")&&upload.includes('Choose a CSV file above to enable a new fast direct import'));
 check('No-file button guidance',upload.includes('Choose CSV to enable import')&&upload.includes('browsers do not retain access to local files'));
 check('Action error label',upload.includes('Action needs attention:'));
+
+const autoTarget=get('lib/auto-scout-target.ts');
+const emailRules=get('lib/email-candidate-rules.ts');
+const websiteFinder=get('lib/website-email-finder.ts');
+const autoScoutUi=get('app/(app)/auto-scout/AutoScoutClient.tsx');
+check('Publisher/platform Auto Scout targets blocked', ['wikipedia.org','forbes.com','shopify.com','medium.com'].every(x=>autoTarget.includes(`'${x}'`)));
+check('Bare at/dot obfuscation disabled', !emailRules.includes('|\sat\s')&&!emailRules.includes('|\sdot\s')&&emailRules.includes('manufacture addresses such as cre@ivecommons.org'));
+check('Same-site source evidence required', emailRules.includes('evidenceMatchesBusinessSite')&&emailRules.includes('Source page does not match the saved business website'));
+check('Contact discovery uses fetched-page budget', websiteFinder.includes('while (fetchedPages < maxPages && attempts < maxAttempts')&&websiteFinder.includes('fetchedPages += 1'));
+check('Discovered links outrank guessed paths', websiteFinder.includes('65 + keywordScore + shortPathScore')&&websiteFinder.includes('queue.get(candidate) || 0, 18'));
+check('Auto Scout false-positive cleanup control', autoScoutUi.includes('Clean saved false positives')&&autoScoutUi.includes('/api/research/quarantine-false-positives'));
+check('Auto Scout proof is explicit', autoScoutUi.includes('Why trusted')&&autoScoutUi.includes('Source page'));
 const failures=checks.filter(c=>!c.ok);
 for(const c of checks) console.log(`${c.ok?'PASS':'FAIL'}  ${c.label}${c.detail?` — ${c.detail}`:''}`);
 console.log(`\n${checks.length-failures.length}/${checks.length} static release checks passed.`);

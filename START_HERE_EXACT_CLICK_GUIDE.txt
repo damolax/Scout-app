@@ -1,4 +1,0 @@
-START HERE
-
-Open SCOUT_V10_42_EXACT_CLICK_SETUP_WIZARD.html in Chrome or Edge.
-The guide gives one task per screen and identifies the website, left sidebar or page area, exact button label, and expected result.

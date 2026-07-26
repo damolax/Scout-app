@@ -1,0 +1,4 @@
+Scout v10.42.3 is a code-only Auto Scout correction.
+
+Do not run a new Supabase migration for this hotfix.
+The expected database/schema contract remains 10.42.2.

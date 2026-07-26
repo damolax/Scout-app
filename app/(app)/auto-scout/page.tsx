@@ -6,7 +6,7 @@ export default async function AutoScoutPage() {
   if (!workspace) return <div className="error">Workspace error: {error}</div>;
   return (
     <div className="stack">
-      <div className="page-title"><h2>Find Missing Emails</h2><p>One clear button: Scout uses the saved website URL, checks real website pages, and saves trusted emails.</p></div>
+      <div className="page-title"><h2>Find Missing Emails</h2><p>Scout follows the saved business website, prioritizes real contact pages, rejects publisher/platform pages, and saves only same-site trusted emails.</p></div>
       <AutoScoutClient workspace={workspace} />
     </div>
   );

@@ -172,7 +172,7 @@ function extractLinks(html: string, pageUrl: string, siteRoot: string) {
         return pathDepth <= 2 ? 8 : 0;
       } catch { return 0; }
     })();
-    const score = keywordScore + shortPathScore;
+    const score = keywordScore > 0 ? 65 + keywordScore + shortPathScore : shortPathScore;
     if (score > 0 && !links.has(url)) links.set(url, { url, label, score });
   }
   return Array.from(links.values()).sort((a, b) => b.score - a.score).slice(0, 18);
@@ -275,19 +275,28 @@ export async function findEmailsDeepFromWebsite(business: BusinessLike, options?
   queue.set(website, 100);
   try {
     const u = new URL(website);
-    if (u.protocol === 'https:') { u.protocol = 'http:'; queue.set(u.toString(), 30); }
+    if (u.protocol === 'https:') { const http = new URL(u.toString()); http.protocol = 'http:'; queue.set(http.toString(), 22); }
+    const alternateHost = new URL(u.toString());
+    alternateHost.hostname = u.hostname.startsWith('www.') ? u.hostname.replace(/^www\./, '') : `www.${u.hostname}`;
+    queue.set(alternateHost.toString(), 82);
   } catch {}
-  for (const candidate of likelyContactUrlCandidates(website)) queue.set(candidate, Math.max(queue.get(candidate) || 0, 50));
+  // Guessed paths are fallbacks. Links actually discovered on the homepage receive
+  // a much higher score and are checked before guessed 404 routes.
+  for (const candidate of likelyContactUrlCandidates(website)) queue.set(candidate, Math.max(queue.get(candidate) || 0, 18));
 
   const visited = new Set<string>();
+  let attempts = 0;
+  let fetchedPages = 0;
+  const maxAttempts = Math.max(maxPages * 5, 12);
 
-  while (visited.size < maxPages && queue.size) {
+  while (fetchedPages < maxPages && attempts < maxAttempts && queue.size) {
     const next = Array.from(queue.entries()).sort((a, b) => b[1] - a[1])[0];
     if (!next) break;
     const [url] = next;
     queue.delete(url);
     if (visited.has(url) || LOW_VALUE_LINK_RE.test(url)) continue;
     visited.add(url);
+    attempts += 1;
 
     if (/^mailto:/i.test(url)) {
       const email = decodeEntities(url.replace(/^mailto:/i, '').split(/[?#]/)[0]);
@@ -304,6 +313,7 @@ export async function findEmailsDeepFromWebsite(business: BusinessLike, options?
         pages.push({ url, status: 'failed', httpStatus: fetched.status, emails: [], linksFound: 0, reason: `HTTP/content rejected: ${fetched.status}` });
         continue;
       }
+      fetchedPages += 1;
       const html = fetched.text.slice(0, 700000);
       const pageText = htmlToText(html);
       const title = extractTitle(html);
@@ -329,7 +339,7 @@ export async function findEmailsDeepFromWebsite(business: BusinessLike, options?
 
       // If we already found a strong contact-page candidate, stop early to keep batches fast.
       const strong = acceptedCandidates.find((item) => item.promote && item.score >= 75 && /contact|impressum|imprint|about|team|mailto/i.test(item.pageUrl));
-      if (strong && visited.size >= 2) break;
+      if (strong && fetchedPages >= 2) break;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       errors.push(`${url}: ${reason}`);
@@ -343,7 +353,7 @@ export async function findEmailsDeepFromWebsite(business: BusinessLike, options?
   const bestPage = 'pageUrl' in best ? String(best.pageUrl || '') : '';
   const reason = best.email
     ? `Deep finder found ${best.email} on ${bestPage || 'website'}; ${best.reasons.join(' ')}`
-    : `No valid email found after ${visited.size} page(s).`;
+    : `No valid email found after ${fetchedPages} fetched page(s) and ${attempts} attempted URL(s).`;
 
   return {
     success: Boolean(best.email),
@@ -353,7 +363,7 @@ export async function findEmailsDeepFromWebsite(business: BusinessLike, options?
     email: best.email,
     decision: best,
     pagesChecked: pages.filter((page) => page.status === 'fetched').length,
-    pagesAttempted: visited.size,
+    pagesAttempted: attempts,
     pages,
     acceptedCandidates: deduped.slice(0, 20),
     rejectedCandidates: rejectedCandidates.slice(0, 50),

@@ -15,7 +15,10 @@ const DISPOSABLE_OR_TEST_DOMAINS = new Set([
 ]);
 
 const NON_TARGET_PUBLISHER_DOMAINS = new Set([
-  'forbes.com','wikipedia.org','medium.com','reddit.com','quora.com','crunchbase.com','bloomberg.com','reuters.com','nytimes.com','bbc.com','cnn.com','cnbc.com','github.com','npmjs.com','shopify.com','themeforest.net','wordpress.org','facebook.com','instagram.com','linkedin.com','youtube.com','tiktok.com','x.com','twitter.com','pinterest.com'
+  'forbes.com','wikipedia.org','wikimedia.org','creativecommons.org','medium.com','reddit.com','quora.com','crunchbase.com',
+  'bloomberg.com','reuters.com','nytimes.com','bbc.com','cnn.com','cnbc.com','github.com','npmjs.com','shopify.com',
+  'themeforest.net','wordpress.org','facebook.com','instagram.com','linkedin.com','youtube.com','tiktok.com','x.com','twitter.com',
+  'pinterest.com','adobe.com','adobedtm.com','doubleclick.net','googletagmanager.com','google-analytics.com'
 ]);
 
 const BAD_LOCAL_PARTS = new Set([
@@ -57,11 +60,13 @@ export type EmailCandidateDecision = {
 };
 
 function normalizeObfuscations(value: string) {
+  // Only normalize explicit bracketed/parenthesized obfuscation. Replacing every
+  // standalone word “at” or “dot” can join unrelated visible words across HTML
+  // elements and manufacture addresses such as cre@ivecommons.org.
   return value
-    .replace(/\s*(\[at\]|\(at\)|\{at\}|\sat\s)\s*/gi, '@')
-    .replace(/\s*(\[dot\]|\(dot\)|\{dot\}|\sdot\s)\s*/gi, '.')
+    .replace(/\s*(\[at\]|\(at\)|\{at\})\s*/gi, '@')
+    .replace(/\s*(\[dot\]|\(dot\)|\{dot\})\s*/gi, '.')
     .replace(/\s*@\s*/g, '@')
-    .replace(/\s*\.\s*/g, '.')
     .replace(/^mailto:/i, '');
 }
 
@@ -83,6 +88,12 @@ function domainMatches(emailDomain: string, businessDomain: string) {
   const emailRoot = rootDomain(emailDomain);
   const businessRoot = rootDomain(businessDomain);
   return Boolean(emailRoot && businessRoot && emailRoot === businessRoot);
+}
+
+function evidenceMatchesBusinessSite(sourceEvidence: string, businessDomain: string) {
+  if (!sourceEvidence || !businessDomain) return false;
+  const evidenceDomain = rootDomain(sourceEvidence);
+  return Boolean(evidenceDomain && domainMatches(evidenceDomain, businessDomain));
 }
 
 function looksLikeBlockedInfrastructureDomain(domain: string) {
@@ -135,7 +146,10 @@ export function findEmailCandidates(value: unknown) {
       const key = `${email}|${item.path}`;
       if (!email || seen.has(key)) continue;
       seen.add(key);
-      results.push({ email, sourceField: item.path, sourceText: item.value.slice(0, 240) });
+      const index = Math.max(0, Number(match.index || 0));
+      const contextStart = Math.max(0, index - 110);
+      const contextEnd = Math.min(normalizedText.length, index + String(match[0] || email).length + 150);
+      results.push({ email, sourceField: item.path, sourceText: normalizedText.slice(contextStart, contextEnd) });
     }
   }
   return results;
@@ -184,9 +198,10 @@ export function validateEmailCandidate(candidate: { email: string; sourceText?: 
   if (reasons.length) return { email, valid: false, promote: false, score: 0, quality: 'rejected', sourceEvidence, sourceField: candidate.sourceField || '', reasons };
 
   score = 35;
-  const sourceEvidenceIsContactSource = Boolean(sourceEvidence && !sourceLooksLikeCode(sourceText));
+  const sourceEvidenceIsContactSource = Boolean(sourceEvidence && evidenceMatchesBusinessSite(sourceEvidence, businessDomain) && !sourceLooksLikeCode(sourceText));
 
-  if (sourceEvidence) { score += 45; reasons.push('Seen on the business website or source page.'); }
+  if (sourceEvidenceIsContactSource) { score += 45; reasons.push('Seen on the saved business website.'); }
+  else if (sourceEvidence) { reasons.push('Source page does not match the saved business website, so it is not trusted evidence.'); }
   if (match) { score += 30; reasons.push('Email domain matches the business website/domain.'); }
   if (freeMailbox && sourceEvidenceIsContactSource) {
     score += 28;

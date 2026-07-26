@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 
-# Windows-friendly launcher for Scout v10.42.
+# Windows-friendly launcher for Scout v10.42.3
 # It preserves the full deployer's safety checks, writes a log, and waits for
 # Enter before closing when launched in a separate Git Bash window.
 
 set +e
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPLOY_SCRIPT="$ROOT_DIR/DEPLOY_V10_42_2_FULL_GIT_BASH.sh"
+DEPLOY_SCRIPT="$ROOT_DIR/DEPLOY_V10_42_3_FULL_GIT_BASH.sh"
 LIVE_URL="${SCOUT_LIVE_URL:-https://scout-app-oyeola.vercel.app}"
-LOG_FILE="$HOME/Downloads/scout-v10-42-2-deploy-$(date +%Y%m%d-%H%M%S).log"
+LOG_FILE="$HOME/Downloads/scout-v10-42-3-deploy-$(date +%Y%m%d-%H%M%S).log"
 
-printf '\nScout v10.42.2 deployment launcher\n'
+printf '\nScout v10.42.3 deployment launcher\n'
 printf 'Source: %s\n' "$ROOT_DIR"
 printf 'Log:    %s\n\n' "$LOG_FILE"
 

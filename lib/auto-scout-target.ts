@@ -6,12 +6,19 @@ const BLOCKED_HOSTS = [
   'trustpilot.com', 'www.trustpilot.com', 'yellowpages.com', 'www.yellowpages.com', 'yell.com', 'www.yell.com',
   'duckduckgo.com', 'www.duckduckgo.com', 'tiktok.com', 'www.tiktok.com', 'youtube.com', 'www.youtube.com',
   'twitter.com', 'www.twitter.com', 'x.com', 'www.x.com', 'reddit.com', 'www.reddit.com', 'pinterest.com', 'www.pinterest.com',
-  'linktr.ee', 'www.linktr.ee'
+  'linktr.ee', 'www.linktr.ee',
+  'wikipedia.org', 'www.wikipedia.org', 'wikimedia.org', 'www.wikimedia.org', 'forbes.com', 'www.forbes.com',
+  'shopify.com', 'www.shopify.com', 'medium.com', 'www.medium.com', 'reddit.com', 'www.reddit.com',
+  'quora.com', 'www.quora.com', 'crunchbase.com', 'www.crunchbase.com', 'bloomberg.com', 'www.bloomberg.com',
+  'reuters.com', 'www.reuters.com', 'github.com', 'www.github.com', 'npmjs.com', 'www.npmjs.com',
+  'themeforest.net', 'www.themeforest.net', 'wordpress.org', 'www.wordpress.org', 'creativecommons.org', 'www.creativecommons.org'
 ];
 
 const BLOCKED_SUFFIXES = [
   '.yelp.com', '.google.com', '.facebook.com', '.instagram.com', '.linkedin.com', '.trustpilot.com', '.yellowpages.com',
-  '.yell.com', '.bing.com', '.duckduckgo.com', '.tiktok.com', '.youtube.com', '.twitter.com', '.reddit.com', '.pinterest.com'
+  '.yell.com', '.bing.com', '.duckduckgo.com', '.tiktok.com', '.youtube.com', '.twitter.com', '.reddit.com', '.pinterest.com',
+  '.wikipedia.org', '.wikimedia.org', '.forbes.com', '.shopify.com', '.medium.com', '.quora.com', '.crunchbase.com',
+  '.bloomberg.com', '.reuters.com', '.github.com', '.npmjs.com', '.themeforest.net', '.wordpress.org', '.creativecommons.org'
 ];
 
 function rawWebsiteValues(row: any) {

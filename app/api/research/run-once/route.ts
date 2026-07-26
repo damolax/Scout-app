@@ -251,7 +251,7 @@ async function runOnce(request: NextRequest) {
 
       // The fresh free build checks the real public website directly from this Vercel deployment.
       await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_deep_check', `Checking website pages for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: websiteTarget, business_name: business.name || '' });
-      deepResult = await findEmailsDeepFromWebsite(websiteBusiness, { maxPages: 4, timeoutMs: 3500 });
+      deepResult = await findEmailsDeepFromWebsite(websiteBusiness, { maxPages: 6, timeoutMs: 4500 });
       await logAutoScoutActivity(supabase, job.workspace_id, 'auto_scout_pages_checked', `Checked ${deepResult.pagesChecked} page(s) for ${business.name || 'business'}`, { job_id: job.id, business_id: business.id, website: websiteTarget, business_name: business.name || '', pages_checked: deepResult.pagesChecked, pages_attempted: deepResult.pagesAttempted, source_url: deepResult.sourceUrl || '', email: deepResult.email || '' });
 
 

@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-42-2-pending-delete-unlock",
-  "version": "10.42.2",
+  "name": "scout-app-v10-42-3-auto-scout-trust-fix",
+  "version": "10.42.3",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "verify:sql-contract": "node scripts/verify-sql-contract.mjs",
     "verify:release": "npm run verify:static && npm run verify:sql-contract && npm run typecheck && npm run build",
-    "verify:static": "node scripts/verify-static-release.mjs && node scripts/test-v10-42-model.mjs"
+    "verify:static": "node scripts/verify-static-release.mjs && node scripts/test-v10-42-model.mjs && node scripts/test-auto-scout-trust.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",
@@ -33,5 +33,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout v10.42.2 with fast direct imports, working pending-no-email deletion, cancelled legacy-job unlock, adaptive sender health, and permanent Scouting XP."
+  "description": "Scout v10.42.3 with strict same-site Auto Scout evidence, contact-page retry budgeting, publisher/platform blocking, false-positive cleanup, fast direct imports, adaptive sender health, and permanent Scouting XP."
 }
