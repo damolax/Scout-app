@@ -1,25 +1,41 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.2';
+export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.5';
 
 type TableContract = {
   table: string;
   columns: string[];
 };
 
+export type SchemaState = 'good' | 'missing' | 'degraded';
+
 export type SchemaCheck = {
   key: string;
   label: string;
   ok: boolean;
+  state: SchemaState;
   detail: string;
+};
+
+export type SchemaProbe = {
+  requiredFunctions?: Record<string, boolean>;
+  contactableLeads?: number | null;
+  contactableCountError?: string | null;
+  installedVersion?: string | null;
+  [key: string]: unknown;
 };
 
 export type SchemaReadiness = {
   ready: boolean;
+  confirmedMissing: boolean;
   contractVersion: string;
+  requiredVersion: string;
+  installedVersion: string | null;
   checkedAt: string;
   checks: SchemaCheck[];
   missing: string[];
+  degraded: string[];
+  probe: SchemaProbe | null;
 };
 
 const TABLE_CONTRACTS: TableContract[] = [
@@ -161,115 +177,171 @@ function compactError(error: unknown) {
     .join(' | ') || String(error || 'Unknown database error');
 }
 
-async function checkTable(client: SupabaseClient, contract: TableContract): Promise<SchemaCheck> {
-  const select = contract.columns.join(',');
-  const { error } = await client.from(contract.table).select(select).limit(1);
-  if (error) {
-    return {
-      key: `table:${contract.table}`,
-      label: `${contract.table} table`,
-      ok: false,
-      detail: compactError(error)
-    };
-  }
+const CONFIRMED_MISSING_CODES = new Set(['42P01', '42703', '42883', 'PGRST202', 'PGRST204', 'PGRST205']);
+
+function errorCode(error: unknown) {
+  return String((error as { code?: string } | null)?.code || '').toUpperCase();
+}
+
+function isConfirmedMissingError(error: unknown) {
+  const code = errorCode(error);
+  const text = compactError(error).toLowerCase();
+  return CONFIRMED_MISSING_CODES.has(code)
+    || text.includes('does not exist')
+    || text.includes('could not find the function')
+    || text.includes('could not find the table')
+    || text.includes('schema cache') && (text.includes('not find') || text.includes('missing'));
+}
+
+function failedCheck(key: string, label: string, error: unknown): SchemaCheck {
+  const missing = isConfirmedMissingError(error);
   return {
-    key: `table:${contract.table}`,
-    label: `${contract.table} table`,
-    ok: true,
-    detail: `${contract.columns.length} required columns available.`
+    key,
+    label,
+    ok: false,
+    state: missing ? 'missing' : 'degraded',
+    detail: compactError(error)
   };
 }
 
-async function checkRpc(
-  client: SupabaseClient,
-  key: string,
-  label: string,
-  name: string,
-  args?: Record<string, unknown>
-): Promise<SchemaCheck> {
-  const { error } = await client.rpc(name, args || {});
-  if (error) {
-    return { key, label, ok: false, detail: compactError(error) };
+function goodCheck(key: string, label: string, detail: string): SchemaCheck {
+  return { key, label, ok: true, state: 'good', detail };
+}
+
+async function checkTable(client: SupabaseClient, contract: TableContract): Promise<SchemaCheck> {
+  const select = contract.columns.join(',');
+  try {
+    const { error } = await client.from(contract.table).select(select).limit(1);
+    if (error) return failedCheck(`table:${contract.table}`, `${contract.table} table`, error);
+    return goodCheck(
+      `table:${contract.table}`,
+      `${contract.table} table`,
+      `${contract.columns.length} required columns available.`
+    );
+  } catch (error) {
+    return failedCheck(`table:${contract.table}`, `${contract.table} table`, error);
   }
-  return { key, label, ok: true, detail: `${name} is callable.` };
+}
+
+function normalizeProbe(value: unknown): SchemaProbe | null {
+  const row = Array.isArray(value) ? value[0] : value;
+  return row && typeof row === 'object' ? row as SchemaProbe : null;
 }
 
 export async function checkScoutSchema(
   client: SupabaseClient,
   workspaceId?: string | null
 ): Promise<SchemaReadiness> {
-  const checks: SchemaCheck[] = await Promise.all(
-    TABLE_CONTRACTS.map((contract) => checkTable(client, contract))
-  );
-
-  checks.push(await checkRpc(
-    client,
-    'rpc:scout_message_worker_status',
-    'Message worker RPC',
-    'scout_message_worker_status'
-  ));
+  const checks = await Promise.all(TABLE_CONTRACTS.map((contract) => checkTable(client, contract)));
+  let probe: SchemaProbe | null = null;
 
   if (workspaceId) {
-    checks.push(await checkRpc(
-      client,
-      'rpc:get_due_followups',
-      'Follow-up queue RPC',
-      'get_due_followups',
-      {
-        target_workspace: workspaceId,
-        limit_rows: 1,
-        followup_segment: 'all_unanswered',
-        requested_stage: 1,
-        followup_after_hours: 72,
-        target_category_id: null,
-        target_country: ''
+    try {
+      const { data, error } = await client.rpc('scout_readiness_probe_v10425', {
+        target_workspace: workspaceId
+      });
+      if (error) {
+        checks.push(failedCheck(
+          'rpc:scout_readiness_probe_v10425',
+          'Lightweight readiness RPC',
+          error
+        ));
+      } else {
+        probe = normalizeProbe(data);
+        checks.push(goodCheck(
+          'rpc:scout_readiness_probe_v10425',
+          'Lightweight readiness RPC',
+          'Metadata-only schema and bounded lead-count probe is callable.'
+        ));
+
+        const requiredFunctions = probe?.requiredFunctions || {};
+        for (const [name, exists] of Object.entries(requiredFunctions)) {
+          checks.push(exists
+            ? goodCheck(`function:${name}`, `${name} function`, 'Function exists in the current database schema.')
+            : { key: `function:${name}`, label: `${name} function`, ok: false, state: 'missing', detail: 'Function is not installed.' });
+        }
+
+        if (probe?.contactableCountError) {
+          checks.push({
+            key: 'probe:contactable-count',
+            label: 'Contactable lead count',
+            ok: false,
+            state: 'degraded',
+            detail: String(probe.contactableCountError)
+          });
+        } else {
+          checks.push(goodCheck(
+            'probe:contactable-count',
+            'Contactable lead count',
+            `${Number(probe?.contactableLeads || 0).toLocaleString()} current contactable leads confirmed.`
+          ));
+        }
       }
-    ));
-    checks.push(await checkRpc(
-      client,
-      'rpc:count_due_followups',
-      'Follow-up count RPC',
-      'count_due_followups',
-      {
-        target_workspace: workspaceId,
-        followup_segment: 'all_unanswered',
-        requested_stage: 1,
-        followup_after_hours: 72,
-        target_category_id: null,
-        target_country: ''
-      }
-    ));
+    } catch (error) {
+      checks.push(failedCheck(
+        'rpc:scout_readiness_probe_v10425',
+        'Lightweight readiness RPC',
+        error
+      ));
+    }
   } else {
     checks.push({
-      key: 'rpc:followups',
-      label: 'Follow-up RPCs',
+      key: 'probe:workspace',
+      label: 'Workspace readiness probe',
       ok: false,
-      detail: 'Workspace ID unavailable, so follow-up RPCs could not be checked.'
+      state: 'degraded',
+      detail: 'Workspace ID is unavailable, so the workspace-specific readiness probe was skipped.'
     });
   }
 
-  const { data: versionRow, error: versionError } = await client
-    .from('scout_schema_versions')
-    .select('version,applied_at,notes')
-    .eq('version', SCOUT_SCHEMA_CONTRACT_VERSION)
-    .maybeSingle();
-  checks.push({
-    key: 'schema:version',
-    label: 'Deployed SQL version',
-    ok: !versionError && Boolean(versionRow?.version),
-    detail: versionError
-      ? compactError(versionError)
-      : versionRow?.version
-        ? `SQL contract ${versionRow.version} was recorded at ${versionRow.applied_at || 'an unknown time'}.`
-        : `SQL contract ${SCOUT_SCHEMA_CONTRACT_VERSION} has not been recorded. Run the bundled Supabase SQL.`
-  });
+  let installedVersion: string | null = typeof probe?.installedVersion === 'string'
+    ? probe.installedVersion
+    : null;
 
-  const missing = checks.filter((check) => !check.ok).map((check) => `${check.label}: ${check.detail}`);
+  try {
+    const { data, error } = await client
+      .from('scout_schema_versions')
+      .select('version,applied_at,notes')
+      .order('applied_at', { ascending: false })
+      .limit(1);
+    if (error) {
+      checks.push(failedCheck('schema:version', 'Installed SQL version', error));
+    } else {
+      const row = Array.isArray(data) ? data[0] : null;
+      installedVersion = String(row?.version || installedVersion || '') || null;
+      const versionMatches = installedVersion === SCOUT_SCHEMA_CONTRACT_VERSION;
+      checks.push(versionMatches
+        ? goodCheck('schema:version', 'Installed SQL version', `Required and installed schema are ${SCOUT_SCHEMA_CONTRACT_VERSION}.`)
+        : {
+          key: 'schema:version',
+          label: 'Installed SQL version',
+          ok: false,
+          state: 'missing',
+          detail: `App requires ${SCOUT_SCHEMA_CONTRACT_VERSION}; latest installed version is ${installedVersion || 'not recorded'}.`
+        });
+    }
+  } catch (error) {
+    checks.push(failedCheck('schema:version', 'Installed SQL version', error));
+  }
+
+  const missing = checks
+    .filter((check) => check.state === 'missing')
+    .map((check) => `${check.label}: ${check.detail}`);
+  const degraded = checks
+    .filter((check) => check.state === 'degraded')
+    .map((check) => `${check.label}: ${check.detail}`);
+  const confirmedMissing = missing.length > 0;
+
   return {
-    ready: missing.length === 0,
+    ready: !confirmedMissing,
+    confirmedMissing,
     contractVersion: SCOUT_SCHEMA_CONTRACT_VERSION,
+    requiredVersion: SCOUT_SCHEMA_CONTRACT_VERSION,
+    installedVersion,
     checkedAt: new Date().toISOString(),
     checks,
-    missing
+    missing,
+    degraded,
+    probe
   };
 }

@@ -9,13 +9,20 @@ import { getCurrentWorkspace } from '@/lib/workspace';
 export const dynamic = 'force-dynamic';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  let userEmail: string | undefined;
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+    userEmail = data.user?.email;
+  } catch {
+    // Keep the Scout shell available. Individual pages can recover through the
+    // nearest error boundary if the temporary connection problem continues.
+  }
+
   const { workspace } = await getCurrentWorkspace();
 
-
   return (
-    <AppShellClient workspaceName={workspace?.name} userEmail={user?.email}>
+    <AppShellClient workspaceName={workspace?.name} userEmail={userEmail}>
       <main className="main">
         <div className="main-topbar">
           <div>

@@ -21,17 +21,27 @@ type IdentityDraft = {
 
 type HealthRow = {
   name: string;
-  status: 'Good' | 'Warning' | 'Fix needed';
+  status: 'Good' | 'Warning' | 'Degraded' | 'Fix needed';
   detail: string;
 };
 
 type SchemaPayload = {
   success?: boolean;
   ready?: boolean;
+  confirmedMissing?: boolean;
   contractVersion?: string;
+  requiredVersion?: string;
+  installedVersion?: string | null;
   checkedAt?: string;
-  checks?: Array<{ key: string; label: string; ok: boolean; detail: string }>;
+  checks?: Array<{ key: string; label: string; ok: boolean; state?: 'good' | 'missing' | 'degraded'; detail: string }>;
   missing?: string[];
+  degraded?: string[];
+  probe?: {
+    contactableLeads?: number | null;
+    contactableCountError?: string | null;
+    requiredFunctions?: Record<string, boolean>;
+    [key: string]: unknown;
+  } | null;
   error?: string;
 };
 
@@ -47,6 +57,22 @@ function formatError(error: unknown) {
   } catch {
     return String(error);
   }
+}
+
+function formatHealthDetail(value: unknown): string {
+  if (value === null || value === undefined || value === '') return 'No additional detail was returned.';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(formatHealthDetail).filter(Boolean).join(' · ');
+  if (typeof value === 'object') {
+    const row = value as Record<string, unknown>;
+    const preferred = ['message', 'error', 'detail', 'state', 'status', 'reason']
+      .map((key) => row[key])
+      .filter((item) => item !== null && item !== undefined && item !== '');
+    if (preferred.length) return preferred.map(formatHealthDetail).join(' · ');
+    try { return JSON.stringify(value); } catch { return 'Structured health detail was returned.'; }
+  }
+  return String(value);
 }
 
 function normalizeEmail(value: unknown) {
@@ -123,7 +149,7 @@ function senderDraft(account: GmailAccount): SenderDraft {
 
 function toneClass(status: HealthRow['status']) {
   if (status === 'Good') return 'connected';
-  if (status === 'Warning') return 'paused';
+  if (status === 'Warning' || status === 'Degraded') return 'paused';
   return 'error';
 }
 
@@ -148,11 +174,14 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [healthBusy, setHealthBusy] = useState(false);
+  const [deepHealthBusy, setDeepHealthBusy] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
 
   const activeSenders = accounts.filter((account) => ['connected', 'ready'].includes(String(account.status || '').toLowerCase()) && !isPaused(account));
   const pausedSenders = accounts.filter((account) => isPaused(account) || !['connected', 'ready'].includes(String(account.status || '').toLowerCase()));
-  const schemaReady = schema?.ready === true;
+  const schemaBlocking = schema?.confirmedMissing === true;
+  const schemaReady = schema?.ready === true && !schemaBlocking;
+  const schemaDegraded = !schemaBlocking && Boolean(schema?.degraded?.length);
 
   async function loadAccounts() {
     const { data, error: loadError } = await supabase
@@ -248,6 +277,26 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
 
   function patchDraft(account: GmailAccount, patch: Partial<SenderDraft>) {
     setDrafts((current) => ({ ...current, [account.id]: { ...(current[account.id] || senderDraft(account)), ...patch } }));
+  }
+
+  function prepareRecommendedDefaults(account: GmailAccount) {
+    const recommendedDaily = Math.max(1, Math.min(senderDeploymentDailyMax(account), senderRecommendedDailyMax(account) || senderDeploymentDailyMax(account)));
+    const recommendedRun = Math.max(1, Math.min(100, senderSystemRunMax(account), recommendedDaily));
+    patchDraft(account, { daily_limit: String(recommendedDaily), default_run_limit: String(recommendedRun) });
+    setStatus(`Recommended limits prepared for ${account.email}. Click Save limits to apply them.`);
+  }
+
+  function prepareRecommendedDefaultsForAll() {
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const account of accounts) {
+        const recommendedDaily = Math.max(1, Math.min(senderDeploymentDailyMax(account), senderRecommendedDailyMax(account) || senderDeploymentDailyMax(account)));
+        const recommendedRun = Math.max(1, Math.min(100, senderSystemRunMax(account), recommendedDaily));
+        next[account.id] = { ...(current[account.id] || senderDraft(account)), daily_limit: String(recommendedDaily), default_run_limit: String(recommendedRun) };
+      }
+      return next;
+    });
+    setStatus('Recommended limits were prepared for all senders. Review each account and click Save limits; nothing was saved automatically.');
   }
 
   async function saveSender(account: GmailAccount) {
@@ -488,50 +537,111 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     }
   }
 
-  async function runFullCheck() {
+  function contactableCacheKey() {
+    return `scout:last-confirmed-contactable:${workspace.id}`;
+  }
+
+  function readCachedContactable() {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(contactableCacheKey());
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { count?: number; confirmedAt?: string };
+      return Number.isFinite(parsed.count) ? { count: Number(parsed.count), confirmedAt: String(parsed.confirmedAt || '') } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function cacheContactable(count: number) {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(contactableCacheKey(), JSON.stringify({ count, confirmedAt: new Date().toISOString() }));
+    } catch {
+      // A browser storage restriction must not fail the readiness check.
+    }
+  }
+
+  async function runFastCheck() {
     setHealthBusy(true);
     setError('');
+    const results = await Promise.allSettled([
+      checkSchema(),
+      fetch('/api/health', { cache: 'no-store' }).then(async (response) => ({ response, json: await response.json().catch(() => ({})) })),
+      checkOauth(),
+      supabase
+        .from('templates')
+        .select('id,template_type,active')
+        .eq('workspace_id', workspace.id)
+        .eq('active', true)
+        .limit(200)
+    ]);
+
     try {
-      const [schemaResult, appHealthResponse, leadsResult, templatesResult] = await Promise.all([
-        checkSchema(),
-        fetch('/api/health', { cache: 'no-store' }),
-        supabase
-          .from('businesses')
-          .select('id', { count: 'exact', head: true })
-          .eq('workspace_id', workspace.id)
-          .in('status', ['ready', 'found', 'connected'])
-          .not('email', 'is', null)
-          .neq('email', ''),
-        supabase
-          .from('templates')
-          .select('id,template_type,active')
-          .eq('workspace_id', workspace.id)
-          .eq('active', true)
-          .limit(200)
-      ]);
-      const appHealth = await appHealthResponse.json().catch(() => ({}));
-      const oauth = await checkOauth();
-      const templates = (templatesResult.data || []) as Array<{ template_type?: string | null }>;
+      const schemaResult = results[0].status === 'fulfilled'
+        ? results[0].value
+        : ({ ready: true, confirmedMissing: false, degraded: [formatError(results[0].reason)] } as SchemaPayload);
+      const healthResult = results[1].status === 'fulfilled' ? results[1].value : null;
+      const appHealth = healthResult?.json || {};
+      const oauth = results[2].status === 'fulfilled'
+        ? results[2].value
+        : { ready: oauthReady === true, detail: `OAuth status temporarily unavailable. ${formatError(results[2].reason)}` };
+      const templatesResult = results[3].status === 'fulfilled' ? results[3].value : null;
+      const templates = (templatesResult?.data || []) as Array<{ template_type?: string | null }>;
       const initialTemplates = templates.filter((template) => String(template.template_type || 'initial') === 'initial').length;
       const followupTemplates = templates.filter((template) => String(template.template_type || '') === 'follow_up').length;
+      const templateError = results[3].status === 'rejected'
+        ? formatError(results[3].reason)
+        : templatesResult?.error
+          ? formatError(templatesResult.error)
+          : '';
+
+      const currentContactable = typeof schemaResult.probe?.contactableLeads === 'number'
+        ? schemaResult.probe.contactableLeads
+        : null;
+      if (currentContactable !== null) cacheContactable(currentContactable);
+      const cachedContactable = readCachedContactable();
+      const contactable = currentContactable ?? cachedContactable?.count ?? null;
+      const countUnavailable = currentContactable === null;
+
+      const schemaStatus: HealthRow['status'] = schemaResult.confirmedMissing
+        ? 'Fix needed'
+        : schemaResult.degraded?.length
+          ? 'Degraded'
+          : 'Good';
+      const installed = schemaResult.installedVersion || 'not confirmed';
+      const required = schemaResult.requiredVersion || schemaResult.contractVersion || '10.42.5';
+
+      const environmentStatus: HealthRow['status'] = !healthResult
+        ? 'Degraded'
+        : appHealth?.environmentReady === false || appHealth?.workerConfigured === false
+          ? 'Fix needed'
+          : appHealth?.degraded || appHealth?.databaseError
+            ? 'Degraded'
+            : 'Good';
+
       const rows: HealthRow[] = [
         {
           name: 'Supabase schema',
-          status: schemaResult.ready ? 'Good' : 'Fix needed',
-          detail: schemaResult.ready
-            ? `Schema contract ${schemaResult.contractVersion || 'current'} passed. Required tables, columns, and follow-up RPCs are available.`
-            : `${schemaResult.missing?.length || 1} database requirement(s) are missing. Run RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql, then check again.`
+          status: schemaStatus,
+          detail: schemaResult.confirmedMissing
+            ? `${schemaResult.missing?.length || 1} confirmed database object(s) are missing. Run RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql.`
+            : schemaResult.degraded?.length
+              ? `Required ${required}; installed ${installed}. Schema objects are present, but ${schemaResult.degraded.length} non-blocking check(s) were temporarily degraded.`
+              : `Required ${required}; installed ${installed}. Required tables, columns and functions are present.`
         },
         {
           name: 'Environment and worker',
-          status: appHealth?.environmentReady && appHealth?.workerReady ? 'Good' : 'Fix needed',
-          detail: appHealth?.environmentReady && appHealth?.workerReady
-            ? 'Supabase server keys, Google OAuth keys, worker secrets, and the message worker are ready.'
-            : String(appHealth?.databaseError || appHealth?.centralWorker?.error || 'One or more Vercel environment or worker checks failed.')
+          status: environmentStatus,
+          detail: !healthResult
+            ? `Health endpoint temporarily unavailable. ${formatError(results[1].status === 'rejected' ? results[1].reason : '')}`
+            : environmentStatus === 'Good'
+              ? 'Vercel environment and worker secrets are configured. The fast check did not execute a queue scan.'
+              : formatHealthDetail(appHealth?.databaseError || appHealth?.workerProbe?.error || appHealth?.env || 'One or more environment or worker settings need attention.')
         },
         {
           name: 'Google OAuth',
-          status: oauth.ready ? 'Good' : 'Fix needed',
+          status: results[2].status === 'rejected' ? 'Degraded' : oauth.ready ? 'Good' : 'Fix needed',
           detail: oauth.detail
         },
         {
@@ -541,13 +651,19 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         },
         {
           name: 'Contactable leads',
-          status: Number(leadsResult.count || 0) > 0 ? 'Good' : 'Warning',
-          detail: `${Number(leadsResult.count || 0).toLocaleString()} ready/found/connected lead(s) with email.`
+          status: countUnavailable ? 'Degraded' : Number(contactable || 0) > 0 ? 'Good' : 'Warning',
+          detail: contactable === null
+            ? 'Current count is temporarily unavailable. Scout did not replace the failed result with zero.'
+            : countUnavailable
+              ? `Last confirmed ${Number(contactable).toLocaleString()} ready/found/connected lead(s) with email${cachedContactable?.confirmedAt ? ` at ${readableDate(cachedContactable.confirmedAt)}` : ''}. Current count is temporarily unavailable.`
+              : `${Number(contactable).toLocaleString()} ready/found/connected lead(s) with email.`
         },
         {
           name: 'Templates',
-          status: initialTemplates > 0 ? 'Good' : 'Fix needed',
-          detail: `${initialTemplates} active initial template(s), ${followupTemplates} follow-up template(s).`
+          status: templateError ? 'Degraded' : initialTemplates > 0 ? 'Good' : 'Fix needed',
+          detail: templateError
+            ? `Template status temporarily unavailable. ${templateError}`
+            : `${initialTemplates} active initial template(s), ${followupTemplates} follow-up template(s).`
         },
         {
           name: 'Reply intelligence',
@@ -559,12 +675,47 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       ];
       setHealthRows(rows);
       setStatus(rows.some((row) => row.status === 'Fix needed')
-        ? 'Check complete. Fix the red items before sending.'
-        : 'Check complete. Core sending setup is ready.');
+        ? 'Fast check complete. Fix only the confirmed red items before sending.'
+        : rows.some((row) => row.status === 'Degraded')
+          ? 'Fast check complete. Core setup is available; temporary checks are shown as degraded.'
+          : 'Fast check complete. Core sending setup is ready.');
     } catch (err) {
       setError(formatError(err));
     } finally {
       setHealthBusy(false);
+    }
+  }
+
+  async function runDeepWorkerTest() {
+    setDeepHealthBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/health?deep=1&workspaceId=${encodeURIComponent(workspace.id)}`, { cache: 'no-store' });
+      const json = await response.json().catch(() => ({}));
+      const state = String(json?.workerProbe?.state || (json?.workerReady ? 'good' : 'degraded'));
+      const row: HealthRow = {
+        name: 'Environment and worker',
+        status: state === 'missing' || json?.workerConfigured === false ? 'Fix needed' : state === 'degraded' ? 'Degraded' : 'Good',
+        detail: state === 'good'
+          ? `Lightweight worker ping passed${json?.workerProbe?.activeJobPresent ? '; an active scheduled job is present' : '; no active scheduled job is currently waiting'}.`
+          : formatHealthDetail(json?.workerProbe?.error || json?.databaseError || json?.error || 'Worker ping was temporarily degraded.')
+      };
+      setHealthRows((current) => {
+        const withoutWorker = current.filter((item) => item.name !== 'Environment and worker');
+        return [...withoutWorker.slice(0, 1), row, ...withoutWorker.slice(1)];
+      });
+      setStatus(row.status === 'Fix needed'
+        ? 'Deep worker test found a confirmed configuration problem.'
+        : row.status === 'Degraded'
+          ? 'Deep worker test was temporarily degraded. Gmail settings remain available.'
+          : 'Deep worker test passed.');
+    } catch (err) {
+      setHealthRows((current) => current.map((row) => row.name === 'Environment and worker'
+        ? { ...row, status: 'Degraded', detail: `Worker test temporarily unavailable. ${formatError(err)}` }
+        : row));
+      setStatus('Deep worker test was temporarily unavailable. This is not a missing-schema result.');
+    } finally {
+      setDeepHealthBusy(false);
     }
   }
 
@@ -580,7 +731,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
     ]).then((results) => {
       const failure = results.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
       if (failure) setError(formatError(failure.reason));
-      else setStatus('Settings loaded. Run the full check before a large campaign.');
+      else setStatus('Settings loaded. Run the fast check before a large campaign.');
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id]);
@@ -596,8 +747,8 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
       <div className="grid grid-3">
         <div className="card kpi">
           <div className="title">Database</div>
-          <div className="num">{schema === null ? '…' : schemaReady ? 'Ready' : 'Fix'}</div>
-          <p className="muted">Schema contract {schema?.contractVersion || 'checking'}</p>
+          <div className="num">{schema === null ? '…' : schemaBlocking ? 'Fix' : schemaDegraded ? 'Degraded' : 'Ready'}</div>
+          <p className="muted">Required {schema?.requiredVersion || schema?.contractVersion || '10.42.5'} · Installed {schema?.installedVersion || 'checking'}</p>
         </div>
         <div className="card kpi">
           <div className="title">Active Senders</div>
@@ -615,23 +766,39 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         <div className="topbar">
           <div>
             <h3>Setup Readiness</h3>
-            <p className="muted">One check confirms the current Supabase tables and columns, follow-up functions, Vercel environment, worker, OAuth, senders, leads, and templates.</p>
+            <p className="muted">The fast check confirms schema metadata, environment, OAuth, senders, cached lead totals and templates without executing worker queues. The deep worker test is separate.</p>
           </div>
-          <button className="btn" type="button" disabled={healthBusy} onClick={runFullCheck}>
-            {healthBusy ? 'Checking…' : 'Run full check'}
-          </button>
+          <div className="actions">
+            <button className="btn" type="button" disabled={healthBusy || deepHealthBusy} onClick={runFastCheck}>
+              {healthBusy ? 'Checking…' : 'Run fast check'}
+            </button>
+            <button className="btn secondary" type="button" disabled={healthBusy || deepHealthBusy} onClick={runDeepWorkerTest}>
+              {deepHealthBusy ? 'Testing…' : 'Run deep worker test'}
+            </button>
+          </div>
         </div>
 
-        {!schemaReady && schema ? (
+        {schemaBlocking && schema ? (
           <div className="error" style={{ marginTop: 12 }}>
             <strong>Database update required.</strong>
-            <div style={{ marginTop: 6 }}>Run <code>RUN_THIS_V10_42_UPGRADE_IN_CURRENT_SUPABASE.sql</code>, then return here and click Run full check.</div>
+            <div style={{ marginTop: 6 }}>Run <code>RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql</code>, then return here and click <strong>Run fast check</strong>.</div>
             {schema.missing?.length ? (
               <details style={{ marginTop: 8 }}>
-                <summary>Show missing database requirements</summary>
+                <summary>Show confirmed missing database requirements</summary>
                 <ul>{schema.missing.slice(0, 12).map((item) => <li key={item}>{item}</li>)}</ul>
               </details>
             ) : null}
+          </div>
+        ) : null}
+
+        {!schemaBlocking && schema?.degraded?.length ? (
+          <div className="warning" style={{ marginTop: 12 }}>
+            <strong>Temporary database degradation.</strong>
+            <div style={{ marginTop: 6 }}>Scout found no confirmed missing object. Gmail settings remain available while these checks recover.</div>
+            <details style={{ marginTop: 8 }}>
+              <summary>Show degraded checks</summary>
+              <ul>{schema.degraded.slice(0, 12).map((item) => <li key={item}>{item}</li>)}</ul>
+            </details>
           </div>
         ) : null}
 
@@ -651,7 +818,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
             </table>
           </div>
         ) : (
-          <div className="notice" style={{ marginTop: 12 }}>Run the full check after every code or SQL update. Scout will show a red Database status when a required table, column, or RPC is missing.</div>
+          <div className="notice" style={{ marginTop: 12 }}>Run the fast check after every code or SQL update. Only a confirmed missing table, column or function appears red; temporary timeouts appear as Degraded.</div>
         )}
 
         <div className="warning" style={{ marginTop: 12 }}>
@@ -666,12 +833,13 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
             <p className="muted">Connect Gmail, verify access, and set preferred limits. Scout still enforces the lower health and deployment limits automatically.</p>
           </div>
           <div className="actions">
-            <button className="btn" type="button" disabled={busy || !schemaReady} onClick={connectGmail}>Connect Gmail</button>
+            <button className="btn" type="button" disabled={busy || schemaBlocking} onClick={connectGmail}>Connect Gmail</button>
             <button className="btn secondary" type="button" disabled={busy} onClick={() => loadAccounts().catch((err) => setError(formatError(err)))}>Refresh</button>
+            <button className="btn secondary" type="button" disabled={busy || !accounts.length} onClick={prepareRecommendedDefaultsForAll}>Prepare recommended defaults</button>
           </div>
         </div>
 
-        {!schemaReady ? <div className="notice" style={{ marginTop: 12 }}>Gmail connection is disabled until the database schema check passes.</div> : null}
+        {schemaBlocking ? <div className="notice" style={{ marginTop: 12 }}>Gmail connection is disabled only because a required database object is confirmed missing.</div> : schemaDegraded ? <div className="warning" style={{ marginTop: 12 }}>Some readiness checks are temporarily degraded. Gmail connection, verification and limit controls remain available.</div> : null}
 
         <div className="stack" style={{ marginTop: 14 }}>
           {accounts.map((account) => {
@@ -715,7 +883,10 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
                       <option value="workspace">Google Workspace</option>
                       <option value="other">Other</option>
                     </select>
-                    <button className="btn" style={{ marginTop: 8 }} type="button" disabled={busy} onClick={() => saveSender(account)}>Save limits</button>
+                    <div className="actions" style={{ marginTop: 8 }}>
+                      <button className="btn" type="button" disabled={busy} onClick={() => saveSender(account)}>Save limits</button>
+                      <button className="btn secondary" type="button" disabled={busy} onClick={() => prepareRecommendedDefaults(account)}>Use recommended</button>
+                    </div>
                   </div>
                 </div>
 
@@ -745,7 +916,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
               </div>
             );
           })}
-          {!accounts.length ? <div className="notice">No Gmail accounts connected. Run the database check, then click Connect Gmail.</div> : null}
+          {!accounts.length ? <div className="notice">No Gmail accounts connected. Run the fast check, then click Connect Gmail.</div> : null}
         </div>
       </div>
 
@@ -825,7 +996,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
             <button className="btn secondary" type="button" disabled={!extensionBase} onClick={() => copyText(extensionIngestUrl, 'Extension ingest URL')}>Copy</button>
           </div>
           <div className="actions" style={{ marginTop: 12 }}>
-            <button className="btn" type="button" disabled={busy || !schemaReady} onClick={saveWorkspace}>Save app setup</button>
+            <button className="btn" type="button" disabled={busy || schemaBlocking} onClick={saveWorkspace}>Save app setup</button>
           </div>
         </div>
       </details>

@@ -1,0 +1,75 @@
+SCOUT V10.42.5 — READINESS AND PAGE STABILITY AUDIT
+====================================================
+
+Release markers
+---------------
+Version: 10.42.5
+Build: readiness-timeout-classification-page-recovery-fix
+Required schema: 10.42.5
+Target repository: https://github.com/damolax/Scout-app.git
+Target branch: main
+
+Problems corrected
+------------------
+1. PostgreSQL 57014 timeouts are classified as Degraded, not as missing schema.
+2. The fast Settings check uses a metadata-only database probe and does not execute message-worker or follow-up queue scans.
+3. The deep worker ping is separate and bounded.
+4. Structured health responses are rendered safely instead of [object Object].
+5. A failed contactable-lead count preserves the last confirmed count and never substitutes zero.
+6. Gmail connection, sender verification, limit controls, signatures and app setup are blocked only when a required database object is confirmed missing.
+7. Settings shows both the app-required schema version and the installed database version.
+8. Temporary workspace/auth/Supabase reads receive bounded safe retries.
+9. A segment-level Scout error boundary keeps the existing Scout shell/menu available and automatically retries transient page loads.
+10. The root recovery screen states that saved data is retained and avoids replaying completed mutations.
+11. v10.42.4 indexed Ready Email Detection remains included in the combined SQL and release.
+12. Owner-selected sender limits are preserved; recommended 250 daily / 100 per run values are prepared only after an explicit click and are not saved silently.
+
+Database additions
+------------------
+- public.scout_readiness_probe_v10425(uuid)
+- public.scout_message_worker_ping_v10425(uuid)
+- businesses_contactable_readiness_v10425_idx
+- message_schedules_worker_ping_v10425_idx
+- templates_readiness_v10425_idx
+- public.scout_schema_versions record 10.42.5
+
+Validation completed in the artifact environment
+------------------------------------------------
+- 61/61 static release checks passed.
+- All SQL contract groups passed.
+- 10/10 sender/import behavior-model checks passed.
+- 12/12 Auto Scout trust checks passed.
+- 150/150 TypeScript/TSX files passed TypeScript syntax transpilation.
+- Both Git Bash scripts passed bash -n.
+- Both HTML setup guides passed JavaScript syntax validation.
+- The final ZIP was tested by extracting it into a clean directory and rerunning the release checks.
+
+Dependency-backed build limitation
+----------------------------------
+A complete npm ci, tsc --noEmit and Next.js production build could not be completed inside this isolated artifact environment because the internal npm package registry returned HTTP 503 for required packages. This is not recorded as a successful build.
+
+The included deployment script enforces, in order, before GitHub is changed:
+- npm ci
+- npm run verify:static
+- npm run verify:sql-contract
+- npm run typecheck
+- npm run build
+
+The script prints GITHUB PUSH VERIFIED only after the validated commit is confirmed on GitHub main.
+
+Acceptance after deployment
+---------------------------
+1. /api/health returns version 10.42.5 and build readiness-timeout-classification-page-recovery-fix.
+2. schema.contractVersion is 10.42.5 and confirmedMissing is false.
+3. Settings → Run fast check does not execute worker/follow-up queue scans.
+4. A 57014 timeout appears as Degraded, not Database update required.
+5. No [object Object] appears.
+6. Gmail controls remain active while checks are only Degraded.
+7. Contactable leads shows a current or last-confirmed value, never false zero after failure.
+8. Settings → Run deep worker test reports Good, Degraded or confirmed Fix independently.
+9. Ready Email Detection → Needs detection loads without the old exact-count timeout.
+10. A temporary page interruption keeps the Scout shell/menu visible and offers safe retry.
+
+Not included in this release
+----------------------------
+The planned Auto Scout server-concurrency change targeting 60 websites in about one minute is intentionally not included. This release is the requested readiness and stability correction before that next performance build.

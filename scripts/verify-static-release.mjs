@@ -5,11 +5,11 @@ const get=(p)=>fs.readFileSync(path.join(root,p),'utf8');
 const checks=[];
 function check(label,ok,detail=''){checks.push({label,ok:Boolean(ok),detail});}
 const pkg=JSON.parse(get('package.json'));
-check('Package version',pkg.version==='10.42.3',pkg.version);
+check('Package version',pkg.version==='10.42.5',pkg.version);
 const health=get('app/api/health/route.ts');
-check('Live release marker',health.includes("version: '10.42.3'")&&health.includes("auto-scout-contact-page-trust-fix"));
-check('Schema readiness contract 10.42.2',get('lib/schema-readiness.ts').includes("SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.2'"));
-check('v10.42.3 health with v10.42.2 database contracts',health.includes("bulkImportContract: '10.42.2'")&&health.includes("senderHealthContract: '10.42.2'")&&health.includes("scoutingXpContract: '10.42.2'"));
+check('Live release marker',health.includes("version: '10.42.5'")&&health.includes("readiness-timeout-classification-page-recovery-fix"));
+check('Schema readiness contract 10.42.5',get('lib/schema-readiness.ts').includes("SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.5'"));
+check('v10.42.5 health with v10.42.5 database contracts',health.includes('SCOUT_SCHEMA_CONTRACT_VERSION')&&health.includes('requiredSchemaVersion'));
 const upload=get('app/(app)/upload/UploadClient.tsx');
 const settings=get('app/(app)/settings/SettingsClient.tsx');
 const message=get('app/(app)/message/MessageClient.tsx');
@@ -43,7 +43,7 @@ check('Replies preserved',get('app/(app)/replies/RepliesClient.tsx').includes('C
 check('Signature controls preserved',get('app/(app)/settings/SettingsClient.tsx').includes('Save signature &amp; logo'));
 check('v10.42 SQL migration included',fs.existsSync(path.join(root,'database/09_V10_42_BACKGROUND_IMPORT_HEALTH_XP.sql')));
 check('One-screen wizard included',fs.existsSync(path.join(root,'SCOUT_V10_42_ONE_SCREEN_SETUP_WIZARD.html')));
-check('Target repository locked',fs.existsSync(path.join(root,'DEPLOY_V10_42_3_FULL_GIT_BASH.sh'))&&get('DEPLOY_V10_42_3_FULL_GIT_BASH.sh').includes('damolax/Scout-app.git'));
+check('Target repository locked',fs.existsSync(path.join(root,'DEPLOY_V10_42_5_FULL_GIT_BASH.sh'))&&get('DEPLOY_V10_42_5_FULL_GIT_BASH.sh').includes('damolax/Scout-app.git'));
 check('Fast direct core import enabled',upload.includes('return legacyImportRows()')&&upload.includes('Fast bulk import:'));
 check('Default max per run is 100',settings.includes('draft.default_run_limit || 100')&&message.includes('account.default_run_limit || 100'));
 check('Pacing preserved',message.includes('90–210 seconds')&&message.includes('3–6 seconds'));
@@ -64,6 +64,37 @@ check('Contact discovery uses fetched-page budget', websiteFinder.includes('whil
 check('Discovered links outrank guessed paths', websiteFinder.includes('65 + keywordScore + shortPathScore')&&websiteFinder.includes('queue.get(candidate) || 0, 18'));
 check('Auto Scout false-positive cleanup control', autoScoutUi.includes('Clean saved false positives')&&autoScoutUi.includes('/api/research/quarantine-false-positives'));
 check('Auto Scout proof is explicit', autoScoutUi.includes('Why trusted')&&autoScoutUi.includes('Source page'));
+
+const verifyUi=get('app/(app)/verify/VerifyClient.tsx');
+const verifyPerfSql=get('database/10_V10_42_4_READY_DETECTION_PERFORMANCE.sql');
+check('Ready Detection avoids exact counts',!verifyUi.includes("count: 'exact'")&&verifyUi.includes('ready_email_detection_stats_v10424'));
+check('Ready Detection uses lightweight cursor pages',verifyUi.includes('ready_email_detection_page_v10424')&&verifyUi.includes('PageCursor')&&verifyUi.includes('PAGE_SIZE + 1'));
+check('Ready Detection uses set-based database detection',verifyUi.includes('run_ready_email_detection_v10424')&&!verifyUi.includes('UPDATE_CONCURRENCY'));
+check('Ready Detection SQL indexes queue',verifyPerfSql.includes('businesses_ready_detection_queue_v10424_idx'));
+check('Ready Detection single aggregate stats',verifyPerfSql.includes('count(*) filter')&&verifyPerfSql.includes('ready_email_detection_stats_v10424'));
+check('Ready Detection redetection preserves raw JSON',verifyPerfSql.includes("- 'verification' - 'ready_email_detection'")&&verifyPerfSql.includes('queue_ready_email_redetection_v10424'));
+
+
+const readiness=get('lib/schema-readiness.ts');
+const settingsReadiness=get('app/(app)/settings/SettingsClient.tsx');
+const schemaHealth=get('app/api/health/schema/route.ts');
+const workspaceLoader=get('lib/workspace.ts');
+const shellError=get('app/(app)/error.tsx');
+const rootError=get('app/error.tsx');
+const readinessSql=get('RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql');
+check('Readiness uses metadata probe instead of worker queue execution',readiness.includes('scout_readiness_probe_v10425')&&!readiness.includes("'scout_message_worker_status'\n  )")&&!readiness.includes("'get_due_followups',"));
+check('Timeouts are classified as degraded',readiness.includes("state: missing ? 'missing' : 'degraded'")&&readiness.includes("CONFIRMED_MISSING_CODES"));
+check('Settings never substitutes failed lead count with zero',settingsReadiness.includes('last-confirmed-contactable')&&settingsReadiness.includes('Scout did not replace the failed result with zero'));
+check('Gmail is blocked only by confirmed missing schema',settingsReadiness.includes('schemaBlocking')&&settingsReadiness.includes('disabled={busy || schemaBlocking}'));
+check('Structured health errors are rendered safely',settingsReadiness.includes('formatHealthDetail')&&!settingsReadiness.includes('String(appHealth?.databaseError'));
+check('Fast and deep readiness are separated',settingsReadiness.includes('Run fast check')&&settingsReadiness.includes('Run deep worker test')&&health.includes("url.searchParams.get('deep') === '1'"));
+check('Recoverable in-shell page boundary',shellError.includes('Retrying this page automatically')&&shellError.includes('reset()')&&rootError.includes('without repeating a completed send'));
+check('Workspace loading retries transient failures',workspaceLoader.includes('withRetry')&&workspaceLoader.includes('attempts ?? 2'));
+check('Schema endpoint does not turn transient errors into missing schema',schemaHealth.includes('confirmedMissing: false')&&schemaHealth.includes('status: 200'));
+check('v10.42.5 SQL installer included',fs.existsSync(path.join(root,'RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql'))&&readinessSql.includes("'10.42.5'"));
+check('Lightweight readiness RPC installed',readinessSql.includes('scout_readiness_probe_v10425')&&readinessSql.includes('scout_message_worker_ping_v10425'));
+check('Contactable and worker indexes installed',readinessSql.includes('businesses_contactable_readiness_v10425_idx')&&readinessSql.includes('message_schedules_worker_ping_v10425_idx'));
+
 const failures=checks.filter(c=>!c.ok);
 for(const c of checks) console.log(`${c.ok?'PASS':'FAIL'}  ${c.label}${c.detail?` — ${c.detail}`:''}`);
 console.log(`\n${checks.length-failures.length}/${checks.length} static release checks passed.`);

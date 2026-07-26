@@ -5,22 +5,26 @@ import { createClient } from '@/lib/supabase-browser';
 import { Business, BusinessStatus, Workspace } from '@/lib/types';
 
 const PAGE_SIZE = 100;
-const VERIFY_CHUNK_SIZE = 5000;
-const UPDATE_CONCURRENCY = 50;
+const DETECT_RPC_BATCH = 2000;
 const MAX_DETECT_PER_RUN = 50000;
-const DISPOSABLE_DOMAINS = new Set(['mailinator.com','10minutemail.com','tempmail.com','guerrillamail.com','yopmail.com','trashmail.com']);
-const FREE_PROVIDER_DOMAINS = new Set(['gmail.com','yahoo.com','outlook.com','hotmail.com','icloud.com','aol.com','proton.me','protonmail.com']);
-const ROLE_PREFIXES = new Set(['info','support','hello','contact','sales','admin','office','service','shop','orders','team','crm']);
 
 type VerifyFilter = 'has_email' | 'needs_verification' | 'ready' | 'review' | 'invalid' | 'all';
-type VerifyStats = Record<string, number> & { total?: number; has_email?: number };
+type VerifyStats = {
+  total: number;
+  has_email: number;
+  found: number;
+  ready: number;
+  review: number;
+  invalid_no_inbox: number;
+  needs_detection: number;
+};
+type PageCursor = { updated_at: string; id: string };
 type BackendVerifyResult = {
-  email: string;
+  email?: string;
   status?: string;
   score?: number;
   readyToContact?: boolean;
   provider?: string;
-  providerStatus?: string;
   providerReason?: string;
   validFormat?: boolean;
   hasMx?: boolean;
@@ -29,15 +33,7 @@ type BackendVerifyResult = {
   checkedAt?: string;
   [key: string]: unknown;
 };
-
-type VerifySummary = {
-  checked: number;
-  ready: number;
-  review: number;
-  invalid: number;
-  skippedAlreadyChecked: number;
-  errors: number;
-};
+type DetectionSummary = { checked: number; ready: number; review: number; invalid: number };
 
 function formatError(error: unknown) {
   if (!error) return 'Unknown error.';
@@ -56,34 +52,35 @@ function normalizeEmail(email: unknown) {
 }
 
 function alreadyDetected(business: Business) {
+  if (business.email_verified_at) return true;
+  if (business.email_verification_status && business.email_verification_status !== 'unchecked') return true;
   const raw = (business.raw || {}) as Record<string, any>;
   const checkedEmail = normalizeEmail(raw?.verification?.email || raw?.ready_email_detection?.email || '');
-  return Boolean(raw?.verification || raw?.verification_checked_at) && (!checkedEmail || checkedEmail === normalizeEmail(business.email));
+  return Boolean(raw?.verification || raw?.ready_email_detection || raw?.verification_checked_at) && (!checkedEmail || checkedEmail === normalizeEmail(business.email));
 }
 
-function detectReadyEmail(emailValue: unknown): BackendVerifyResult {
-  const email = normalizeEmail(emailValue);
-  const checkedAt = new Date().toISOString();
-  const validFormat = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(email);
-  const [prefix = '', domain = ''] = email.split('@');
-  const hasUsableDomain = !!domain && domain.includes('.') && !domain.startsWith('.') && !domain.endsWith('.');
-  const isDisposable = DISPOSABLE_DOMAINS.has(domain);
-  const isRoleBased = ROLE_PREFIXES.has(prefix);
-  const isFreeProvider = FREE_PROVIDER_DOMAINS.has(domain);
-
-  if (!email || !validFormat || !hasUsableDomain) {
-    return { email, status: 'bad_format', score: 0, readyToContact: false, provider: 'free_ready_detector', providerReason: 'Invalid email format or missing domain.', validFormat: false, hasMx: undefined, isRoleBased, isFreeProvider, checkedAt };
+function reasonFromVerification(business: Business) {
+  const raw = (business.raw || {}) as Record<string, any>;
+  const result = raw.verification as BackendVerifyResult | undefined;
+  if (result) {
+    return [
+      result.status ? `status=${result.status}` : '',
+      typeof result.score !== 'undefined' ? `score=${result.score}` : '',
+      result.provider ? `provider=${result.provider}` : '',
+      result.providerReason ? `reason=${result.providerReason}` : '',
+      result.isRoleBased ? 'role_email' : '',
+      result.isFreeProvider ? 'free_provider' : ''
+    ].filter(Boolean).join(' · ');
   }
-  if (isDisposable) {
-    return { email, status: 'invalid', score: 10, readyToContact: false, provider: 'free_ready_detector', providerReason: 'Disposable/temporary email domain.', validFormat, hasMx: undefined, isRoleBased, isFreeProvider, checkedAt };
+  if (business.email_verified_at || business.email_verification_status) {
+    return [
+      business.email_verification_status ? `status=${business.email_verification_status}` : '',
+      typeof business.score === 'number' ? `score=${business.score}` : '',
+      business.email_verification_reason ? `reason=${business.email_verification_reason}` : '',
+      business.email_role_label ? `role=${business.email_role_label}` : ''
+    ].filter(Boolean).join(' · ');
   }
-  const score = isRoleBased ? 90 : isFreeProvider ? 82 : 88;
-  const reason = isRoleBased
-    ? 'Valid format and role/business inbox style. Accepted for outreach.'
-    : isFreeProvider
-      ? 'Valid format and personal/free-mail inbox style. Accepted for outreach, but watch bounce/reply results.'
-      : 'Valid format and business-domain email. Accepted for outreach.';
-  return { email, status: 'valid', score, readyToContact: true, provider: 'free_ready_detector', providerReason: reason, validFormat, hasMx: undefined, isRoleBased, isFreeProvider, checkedAt };
+  return 'Not detected';
 }
 
 function csvEscape(value: unknown) {
@@ -93,53 +90,26 @@ function csvEscape(value: unknown) {
 
 function downloadCsv(name: string, rows: Array<Record<string, unknown>>) {
   if (!rows.length) return;
-  const headers = Array.from(rows.reduce((set, row) => {
+  const headers = Array.from(rows.reduce<Set<string>>((set, row) => {
     Object.keys(row).forEach((key) => set.add(key));
     return set;
   }, new Set<string>()));
   const lines = [headers.join(',')];
-  for (const row of rows) lines.push(headers.map((h) => csvEscape(row[h])).join(','));
+  for (const row of rows) lines.push(headers.map((header) => csvEscape(row[header])).join(','));
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
   URL.revokeObjectURL(url);
 }
 
-function statusFromVerification(result?: BackendVerifyResult): BusinessStatus {
-  if (!result) return 'review';
-  const status = String(result.status || '').toLowerCase();
-  const score = Number(result.score || 0);
-  if (result.readyToContact || (status === 'valid' && score >= 70)) return 'ready';
-  if (['invalid', 'undeliverable', 'bad_format'].includes(status) || result.validFormat === false || result.hasMx === false) return 'invalid';
-  return 'review';
-}
-
-function reasonFromVerification(result?: BackendVerifyResult) {
-  if (!result) return 'No detection result.';
-  return [
-    result.status ? `status=${result.status}` : '',
-    typeof result.score !== 'undefined' ? `score=${result.score}` : '',
-    result.provider ? `provider=${result.provider}` : '',
-    result.providerReason ? `reason=${result.providerReason}` : '',
-    result.isRoleBased ? 'role_email' : '',
-    result.isFreeProvider ? 'free_provider' : ''
-  ].filter(Boolean).join(' · ');
-}
-
-async function parallelLimit<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
-  let cursor = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++;
-      await worker(items[index]);
-    }
-  });
-  await Promise.all(runners);
+function asRow<T extends Record<string, unknown>>(data: unknown): T | null {
+  if (Array.isArray(data)) return (data[0] || null) as T | null;
+  return (data || null) as T | null;
 }
 
 export default function VerifyClient({ workspace }: { workspace: Workspace }) {
@@ -148,14 +118,17 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState<VerifyFilter>('needs_verification');
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [limitText, setLimitText] = useState('5000');
   const [page, setPage] = useState(0);
-  const [total, setTotal] = useState(0);
-  const [stats, setStats] = useState<VerifyStats>({});
+  const [cursorStack, setCursorStack] = useState<Array<PageCursor | null>>([null]);
+  const [hasNext, setHasNext] = useState(false);
+  const [stats, setStats] = useState<VerifyStats>({ total: 0, has_email: 0, found: 0, ready: 0, review: 0, invalid_no_inbox: 0, needs_detection: 0 });
+  const [statsWarning, setStatsWarning] = useState('');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [message, setMessage] = useState('Load contacts with emails, then run Ready Email Detection. No paid verifier is used. Already-detected emails are skipped.');
+  const [message, setMessage] = useState('Ready Email Detection uses indexed pages and set-based database updates. Already-detected emails are skipped.');
   const [error, setError] = useState('');
   const [lastResults, setLastResults] = useState<Array<Record<string, unknown>>>([]);
   const selectedIds = Object.keys(selected).filter((id) => selected[id]);
@@ -166,222 +139,189 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
     return Math.max(1, Math.min(MAX_DETECT_PER_RUN, Number(raw) || 5000));
   }
 
-  function applyFilter(query: any) {
-    if (filter === 'has_email') query = query.not('email', 'is', null).neq('email', '');
-    if (filter === 'needs_verification') query = query.not('email', 'is', null).neq('email', '').in('status', ['pending', 'found', 'review']);
-    if (filter === 'ready') query = query.eq('status', 'ready');
-    if (filter === 'review') query = query.eq('status', 'review');
-    if (filter === 'invalid') query = query.in('status', ['invalid', 'no_inbox', 'bounced']);
-    return query;
+  function matchingEstimate() {
+    if (appliedSearch) return null;
+    if (filter === 'has_email') return stats.has_email;
+    if (filter === 'needs_verification') return stats.needs_detection;
+    if (filter === 'ready') return stats.ready;
+    if (filter === 'review') return stats.review;
+    if (filter === 'invalid') return stats.invalid_no_inbox;
+    return stats.total;
   }
 
   async function loadStats() {
-    const next: VerifyStats = {};
-    const { count: totalCount } = await supabase.from('businesses').select('id', { count: 'exact', head: true }).eq('workspace_id', workspace.id);
-    next.total = totalCount || 0;
-    const { count: hasEmail } = await supabase.from('businesses').select('id', { count: 'exact', head: true }).eq('workspace_id', workspace.id).not('email', 'is', null).neq('email', '');
-    next.has_email = hasEmail || 0;
-    await Promise.all(['pending', 'found', 'ready', 'review', 'invalid', 'no_inbox', 'bounced'].map(async (status) => {
-      const { count } = await supabase.from('businesses').select('id', { count: 'exact', head: true }).eq('workspace_id', workspace.id).eq('status', status);
-      next[status] = count || 0;
-    }));
-    setStats(next);
+    const { data, error: statsError } = await supabase.rpc('ready_email_detection_stats_v10424', { target_workspace: workspace.id });
+    if (statsError) {
+      setStatsWarning(`Totals are temporarily unavailable: ${formatError(statsError)}`);
+      return;
+    }
+    const row = asRow<Record<string, unknown>>(data);
+    if (!row) return;
+    setStats({
+      total: Number(row.total_count || 0),
+      has_email: Number(row.has_email_count || 0),
+      found: Number(row.found_count || 0),
+      ready: Number(row.ready_count || 0),
+      review: Number(row.review_count || 0),
+      invalid_no_inbox: Number(row.invalid_no_inbox_count || 0),
+      needs_detection: Number(row.needs_detection_count || 0)
+    });
+    setStatsWarning('');
   }
 
-  async function loadBusinesses(nextPage = page) {
+  async function loadBusinesses(nextPage = 0, explicitCursor?: PageCursor | null, nextSearch = appliedSearch) {
     setLoading(true);
     setError('');
     try {
-      const from = nextPage * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-      let query = supabase
-        .from('businesses')
-        .select('*', { count: 'exact' })
-        .eq('workspace_id', workspace.id)
-        .order('updated_at', { ascending: false })
-        .range(from, to);
-      query = applyFilter(query);
-      const cleanSearch = search.trim().replace(/[%_]/g, '');
-      if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
-      const { data, count, error: loadError } = await query;
+      const cursor = typeof explicitCursor === 'undefined' ? (cursorStack[nextPage] || null) : explicitCursor;
+      const { data, error: loadError } = await supabase.rpc('ready_email_detection_page_v10424', {
+        target_workspace: workspace.id,
+        target_filter: filter,
+        target_search: nextSearch || null,
+        before_updated_at: cursor?.updated_at || null,
+        before_id: cursor?.id || null,
+        page_limit: PAGE_SIZE + 1
+      });
       if (loadError) throw loadError;
-      setBusinesses((data || []) as Business[]);
-      setTotal(count || 0);
+      const rows = (data || []) as Business[];
+      const nextAvailable = rows.length > PAGE_SIZE;
+      const visible = rows.slice(0, PAGE_SIZE);
+      setBusinesses(visible);
+      setHasNext(nextAvailable);
       setPage(nextPage);
       setSelected({});
-      setMessage(`Showing ${(data || []).length.toLocaleString()} preview contact(s) from ${Number(count || 0).toLocaleString()} matching contact(s). This page displays 100 rows only, but Detect Next ${requestedLimit().toLocaleString()} / Detect All Matching can process the larger eligible set up to ${MAX_DETECT_PER_RUN.toLocaleString()} at a time.`);
+      const estimate = nextSearch ? null : matchingEstimate();
+      setMessage(estimate === null
+        ? `Showing ${visible.length.toLocaleString()} lightweight result(s) for this search. Exact full-table recounting is intentionally skipped.`
+        : `Showing ${visible.length.toLocaleString()} contact(s). Approximately ${estimate.toLocaleString()} match this filter; totals refresh separately without blocking the page.`);
     } catch (err) {
-      setError(formatError(err));
+      const text = formatError(err);
+      setError(text.includes('PGRST202') ? `Ready Detection performance SQL is not installed. Run RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql. ${text}` : text);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadBusinesses(0);
-    loadStats();
+    setCursorStack([null]);
+    setPage(0);
+    void Promise.all([loadBusinesses(0, null, appliedSearch), loadStats()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
-  const detectorNote = 'Free ready-email detector: no paid verifier. It accepts business or personal emails with valid format and a usable domain. It cannot prove inbox delivery before sending; true no-inbox/bounce is caught after sending and will not count as a response.';
-
   async function refresh() {
-    await Promise.all([loadBusinesses(page), loadStats()]);
+    await Promise.all([loadBusinesses(page, cursorStack[page] || null, appliedSearch), loadStats()]);
   }
 
-  async function fetchNextBatch() {
-    const max = requestedLimit();
-    const rows: Business[] = [];
-    for (let from = 0; rows.length < max; from += 1000) {
-      const to = from + 999;
-      let query = supabase
-        .from('businesses')
-        .select('*')
-        .eq('workspace_id', workspace.id)
-        .not('email', 'is', null)
-        .neq('email', '')
-        .in('status', ['pending', 'found', 'review'])
-        .order('updated_at', { ascending: true })
-        .range(from, to);
-      const cleanSearch = search.trim().replace(/[%_]/g, '');
-      if (cleanSearch) query = query.or(`name.ilike.%${cleanSearch}%,email.ilike.%${cleanSearch}%,domain.ilike.%${cleanSearch}%,website.ilike.%${cleanSearch}%`);
-      const { data, error: batchError } = await query;
-      if (batchError) throw batchError;
-      const chunk = (data || []) as Business[];
-      rows.push(...chunk.filter((b) => b.email && !alreadyDetected(b)));
-      if (chunk.length < 1000) break;
-    }
-    return rows.slice(0, max);
+  async function fetchLastResults(since: string, maxRows: number) {
+    const { data } = await supabase
+      .from('businesses')
+      .select('name,email,status,score,email_verification_status,email_verification_reason,email_role_label,website,email_verified_at')
+      .eq('workspace_id', workspace.id)
+      .gte('email_verified_at', since)
+      .order('email_verified_at', { ascending: false })
+      .limit(Math.min(Math.max(maxRows, 1), 5000));
+    setLastResults(((data || []) as Array<Record<string, unknown>>).map((row) => ({
+      name: row.name,
+      email: row.email,
+      business_status: row.status,
+      detection_status: row.email_verification_status,
+      score: row.score,
+      reason: row.email_verification_reason,
+      role: row.email_role_label,
+      website: row.website,
+      checked_at: row.email_verified_at
+    })));
   }
 
-  async function persistVerification(targets: Business[], results: BackendVerifyResult[], skippedAlreadyChecked = 0) {
-    const byEmail = new Map(results.map((item) => [normalizeEmail(item.email), item]));
-    const checkedAt = new Date().toISOString();
-    const candidateRows: Array<Record<string, unknown>> = [];
-    const rowsForDownload: Array<Record<string, unknown>> = [];
-    const summary: VerifySummary = { checked: 0, ready: 0, review: 0, invalid: 0, skippedAlreadyChecked, errors: 0 };
-
-    await parallelLimit(targets, UPDATE_CONCURRENCY, async (business) => {
-      const result = byEmail.get(normalizeEmail(business.email));
-      if (!result) {
-        summary.errors += 1;
-        rowsForDownload.push({ name: business.name, email: business.email, status: 'missing_result', reason: 'Detector did not return this email.' });
-        return;
-      }
-      const nextStatus = statusFromVerification(result);
-      const score = typeof result.score === 'number' ? result.score : business.score;
-      const raw = { ...(business.raw || {}), verification: result, ready_email_detection: result, verification_checked_at: checkedAt };
-      const { error: updateError } = await supabase
-        .from('businesses')
-        .update({ status: nextStatus, score, raw })
-        .eq('workspace_id', workspace.id)
-        .eq('id', business.id);
-      if (updateError) throw updateError;
-      candidateRows.push({
-        workspace_id: workspace.id,
-        business_id: business.id,
-        email: normalizeEmail(business.email),
-        source: 'free_ready_detector',
-        score,
-        status: String(result.status || nextStatus),
-        raw: result
-      });
-      summary.checked += 1;
-      if (nextStatus === 'ready') summary.ready += 1;
-      else if (nextStatus === 'invalid') summary.invalid += 1;
-      else summary.review += 1;
-      rowsForDownload.push({ name: business.name, email: business.email, business_status: nextStatus, detection_status: result.status || '', score: score || '', provider: result.provider || '', reason: reasonFromVerification(result) });
+  async function runDetectionChunk(limit: number, ids: string[] | null) {
+    const { data, error: runError } = await supabase.rpc('run_ready_email_detection_v10424', {
+      target_workspace: workspace.id,
+      target_limit: limit,
+      target_search: ids ? null : (appliedSearch || null),
+      target_ids: ids
     });
-
-    for (let i = 0; i < candidateRows.length; i += 500) {
-      const chunk = candidateRows.slice(i, i + 500);
-      const { error: upsertError } = await supabase.from('email_candidates').upsert(chunk, { onConflict: 'workspace_id,business_id,email' });
-      if (upsertError) throw upsertError;
-    }
-
-    setLastResults(rowsForDownload);
-    return summary;
+    if (runError) throw runError;
+    const row = asRow<Record<string, unknown>>(data) || {};
+    return {
+      checked: Number(row.checked_count || 0),
+      ready: Number(row.ready_count || 0),
+      review: Number(row.review_count || 0),
+      invalid: Number(row.invalid_count || 0)
+    } satisfies DetectionSummary;
   }
 
-  async function verifyContacts(mode: 'selected' | 'page' | 'next') {
+  async function verifyContacts(mode: 'selected' | 'page' | 'next', explicitIds?: string[]) {
     setBusy(true);
     setError('');
     setProgress(0);
     setLastResults([]);
+    const startedAt = new Date().toISOString();
+    const summary: DetectionSummary = { checked: 0, ready: 0, review: 0, invalid: 0 };
     try {
-      let targets: Business[] = [];
-      if (mode === 'selected') targets = businesses.filter((b) => selected[b.id] && b.email);
-      if (mode === 'page') targets = businesses.filter((b) => b.email);
-      if (mode === 'next') targets = await fetchNextBatch();
-      const beforeSkip = targets.length;
-      targets = targets.filter((b) => !alreadyDetected(b));
-      const skippedAlreadyChecked = beforeSkip - targets.length;
-      const byEmail = new Map<string, Business>();
-      for (const business of targets) {
-        const email = normalizeEmail(business.email);
-        if (email && !byEmail.has(email)) byEmail.set(email, business);
+      const requested = requestedLimit();
+      if (mode === 'selected' || mode === 'page') {
+        const source = mode === 'selected'
+          ? businesses.filter((business) => (explicitIds ? explicitIds.includes(business.id) : selected[business.id]) && business.email && !alreadyDetected(business))
+          : businesses.filter((business) => business.email && !alreadyDetected(business));
+        const ids = Array.from(new Set(source.map((business) => business.id))).slice(0, requested);
+        if (!ids.length) {
+          setMessage('No undetected contacts with emails were found for this action.');
+          return;
+        }
+        for (let index = 0; index < ids.length; index += DETECT_RPC_BATCH) {
+          const chunk = ids.slice(index, index + DETECT_RPC_BATCH);
+          const result = await runDetectionChunk(chunk.length, chunk);
+          summary.checked += result.checked;
+          summary.ready += result.ready;
+          summary.review += result.review;
+          summary.invalid += result.invalid;
+          setProgress(Math.round(((index + chunk.length) / ids.length) * 100));
+          setMessage(`Detecting and saving in one database operation: ${Math.min(index + chunk.length, ids.length).toLocaleString()} / ${ids.length.toLocaleString()}`);
+        }
+      } else {
+        let remaining = requested;
+        while (remaining > 0) {
+          const batch = Math.min(DETECT_RPC_BATCH, remaining);
+          const result = await runDetectionChunk(batch, null);
+          summary.checked += result.checked;
+          summary.ready += result.ready;
+          summary.review += result.review;
+          summary.invalid += result.invalid;
+          remaining -= result.checked;
+          setProgress(Math.round(Math.min(100, (summary.checked / requested) * 100)));
+          setMessage(`Set-based detection: ${summary.checked.toLocaleString()} / ${requested.toLocaleString()} processed.`);
+          if (result.checked < batch) break;
+        }
       }
-      targets = Array.from(byEmail.values()).slice(0, requestedLimit());
-      if (!targets.length) {
-        setMessage(skippedAlreadyChecked ? `No new emails to detect. ${skippedAlreadyChecked.toLocaleString()} already-detected contact(s) were skipped.` : 'No contacts with emails were found for this action. No-email businesses should go to Auto Scout.');
-        return;
-      }
-
-      const started = performance.now();
-      setMessage(`Detecting ${targets.length.toLocaleString()} ready email(s) with the free local detector...`);
-      const allResults: BackendVerifyResult[] = [];
-      for (let i = 0; i < targets.length; i += VERIFY_CHUNK_SIZE) {
-        const chunk = targets.slice(i, i + VERIFY_CHUNK_SIZE);
-        allResults.push(...chunk.map((b) => detectReadyEmail(b.email)));
-        setProgress(Math.round(Math.min(95, ((i + chunk.length) / targets.length) * 70)));
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-
-      setMessage('Saving ready-email detection results to Supabase...');
-      const summary = await persistVerification(targets, allResults, skippedAlreadyChecked);
-      const seconds = ((performance.now() - started) / 1000).toFixed(1);
       setProgress(100);
       setSelected({});
-      setMessage(`Detected ${summary.checked.toLocaleString()} email(s) in ${seconds}s. Ready: ${summary.ready.toLocaleString()}, Review: ${summary.review.toLocaleString()}, Invalid: ${summary.invalid.toLocaleString()}, Already skipped: ${summary.skippedAlreadyChecked.toLocaleString()}, Errors: ${summary.errors.toLocaleString()}.`);
-      await refresh();
+      setMessage(`Detected ${summary.checked.toLocaleString()} email(s). Ready: ${summary.ready.toLocaleString()}, Review: ${summary.review.toLocaleString()}, Invalid: ${summary.invalid.toLocaleString()}.`);
+      await fetchLastResults(startedAt, summary.checked);
+      setCursorStack([null]);
+      setPage(0);
+      await Promise.all([loadBusinesses(0, null, appliedSearch), loadStats()]);
     } catch (err) {
-      setError(formatError(err));
+      const text = formatError(err);
+      setError(text.includes('PGRST202') ? `Ready Detection performance SQL is not installed. Run RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql. ${text}` : text);
     } finally {
       setBusy(false);
     }
   }
-
 
   async function queueForAutoScout(ids: string[], clearEmail = false) {
     if (!ids.length) return;
     setBusy(true);
     setError('');
     try {
-      const targets = businesses.filter((b) => ids.includes(b.id));
-      const now = new Date().toISOString();
-      const updates = clearEmail
-        ? { email: null, status: 'pending' as BusinessStatus, raw: { redetect_requested_at: now, redetect_reason: 'selected_from_verify_clear_email' } }
-        : { status: 'pending' as BusinessStatus, raw: { redetect_requested_at: now, redetect_reason: 'selected_from_verify' } };
-      for (const business of targets) {
-        const raw = { ...(business.raw || {}), ...(updates.raw as Record<string, unknown>) };
-        const patch: Record<string, unknown> = { status: updates.status, raw, updated_at: now };
-        if (clearEmail) patch.email = null;
-        const { error: updateError } = await supabase.from('businesses').update(patch).eq('workspace_id', workspace.id).eq('id', business.id);
-        if (updateError) throw updateError;
-      }
-      const jobRows = ids.map((id) => ({ workspace_id: workspace.id, business_id: id, status: 'queued', attempts: 0, priority: 250, raw: { source: 'verify_redetect', clearEmail, requested_at: now } }));
-      const { error: jobError } = await supabase.from('email_research_jobs').upsert(jobRows, { onConflict: 'workspace_id,business_id', ignoreDuplicates: false });
-      if (jobError) {
-        if (String(jobError.message || '').includes("'raw' column") || String(jobError.message || '').includes('raw')) {
-          const fallbackRows = ids.map((id) => ({ workspace_id: workspace.id, business_id: id, status: 'queued', attempts: 0, priority: 250 }));
-          const { error: fallbackError } = await supabase.from('email_research_jobs').upsert(fallbackRows, { onConflict: 'workspace_id,business_id', ignoreDuplicates: false });
-          if (fallbackError) throw fallbackError;
-        } else {
-          throw jobError;
-        }
-      }
+      const { data, error: queueError } = await supabase.rpc('queue_ready_email_redetection_v10424', {
+        target_workspace: workspace.id,
+        target_ids: ids,
+        clear_email: clearEmail
+      });
+      if (queueError) throw queueError;
       setSelected({});
-      setMessage(`${ids.length.toLocaleString()} contact(s) queued for Auto Scout email redetection${clearEmail ? ' and their old email was removed' : ''}.`);
+      setMessage(`${Number(data || ids.length).toLocaleString()} contact(s) queued for Auto Scout${clearEmail ? ' and their old email was removed' : ''}.`);
       await refresh();
     } catch (err) {
       setError(formatError(err));
@@ -408,26 +348,15 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
     }
   }
 
-
   async function deleteAllInvalidEmails() {
-    if (!window.confirm('Delete all invalid, bounced, and no-inbox leads from this workspace?')) return;
+    if (!window.confirm('Delete all invalid, bounced, blocked and no-inbox leads from this workspace?')) return;
     setBusy(true);
     setError('');
     try {
-      const { data, error: selectError } = await supabase
-        .from('businesses')
-        .select('id')
-        .eq('workspace_id', workspace.id)
-        .in('status', ['invalid', 'no_inbox', 'bounced', 'blocked'])
-        .limit(50000);
-      if (selectError) throw selectError;
-      const ids = (data || []).map((row: any) => row.id).filter(Boolean);
-      for (let i = 0; i < ids.length; i += 500) {
-        const { error: deleteError } = await supabase.from('businesses').delete().eq('workspace_id', workspace.id).in('id', ids.slice(i, i + 500));
-        if (deleteError) throw deleteError;
-      }
+      const { data, error: deleteError } = await supabase.rpc('delete_invalid_ready_detection_v10424', { target_workspace: workspace.id });
+      if (deleteError) throw deleteError;
       setSelected({});
-      setMessage(`Deleted ${ids.length.toLocaleString()} invalid/no-inbox lead(s).`);
+      setMessage(`Deleted ${Number(data || 0).toLocaleString()} invalid/no-inbox lead(s) with one set-based operation.`);
       await refresh();
     } catch (err) {
       setError(formatError(err));
@@ -455,25 +384,50 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
 
   function toggleAll(value: boolean) {
     if (!value) return setSelected({});
-    setSelected(Object.fromEntries(businesses.filter((b) => b.email).map((b) => [b.id, true])));
+    setSelected(Object.fromEntries(businesses.filter((business) => business.email).map((business) => [business.id, true])));
   }
 
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  function applySearch() {
+    const clean = search.trim().replace(/[%_]/g, '');
+    setAppliedSearch(clean);
+    setCursorStack([null]);
+    setPage(0);
+    void loadBusinesses(0, null, clean);
+  }
+
+  function goNext() {
+    const last = businesses[businesses.length - 1];
+    if (!last || !hasNext) return;
+    const cursor = { updated_at: last.updated_at, id: last.id };
+    setCursorStack((current) => {
+      const next = current.slice(0, page + 1);
+      next[page + 1] = cursor;
+      return next;
+    });
+    void loadBusinesses(page + 1, cursor, appliedSearch);
+  }
+
+  function goPrevious() {
+    if (page <= 0) return;
+    void loadBusinesses(page - 1, cursorStack[page - 1] || null, appliedSearch);
+  }
+
   const nextLabel = limitText.trim() ? `Detect Next ${requestedLimit().toLocaleString()}` : 'Detect All Matching';
+  const estimate = matchingEstimate();
 
   return (
     <div className="stack">
       <div className="grid grid-4">
-        <div className="card kpi"><div className="title">Has Email</div><div className="num">{(stats.has_email || 0).toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Found</div><div className="num">{(stats.found || 0).toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Ready</div><div className="num">{(stats.ready || 0).toLocaleString()}</div></div>
-        <div className="card kpi"><div className="title">Invalid / No Inbox</div><div className="num">{((stats.invalid || 0) + (stats.no_inbox || 0) + (stats.bounced || 0)).toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Has Email</div><div className="num">{stats.has_email.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Found</div><div className="num">{stats.found.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Ready</div><div className="num">{stats.ready.toLocaleString()}</div></div>
+        <div className="card kpi"><div className="title">Invalid / No Inbox</div><div className="num">{stats.invalid_no_inbox.toLocaleString()}</div></div>
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <div className="actions" style={{ justifyContent: 'space-between' }}>
           <div className="actions" style={{ flex: 1 }}>
-            <input className="input" style={{ maxWidth: 320 }} placeholder="Search name, email, website..." value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') loadBusinesses(0); }} />
+            <input className="input" style={{ maxWidth: 320 }} placeholder="Search name, email, website..." value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applySearch(); }} />
             <select className="select" style={{ maxWidth: 210 }} value={filter} onChange={(event) => { setFilter(event.target.value as VerifyFilter); setPage(0); }}>
               <option value="needs_verification">Needs detection</option>
               <option value="has_email">All with email</option>
@@ -483,20 +437,20 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
               <option value="all">All businesses</option>
             </select>
             <input className="input" style={{ maxWidth: 160 }} type="text" inputMode="numeric" placeholder="blank = all" value={limitText} onChange={(event) => setLimitText(event.target.value.replace(/[^0-9]/g, ''))} />
-            <button className="btn secondary" type="button" disabled={loading || busy} onClick={() => loadBusinesses(0)}>Search</button>
+            <button className="btn secondary" type="button" disabled={loading || busy} onClick={applySearch}>Search</button>
           </div>
           <button className="btn secondary" type="button" disabled={loading || busy} onClick={refresh}>Refresh</button>
         </div>
-        
         {busy ? <div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div> : null}
         <div className={error ? 'error' : 'success'} style={{ marginTop: 12 }}>{error || message}</div>
+        {statsWarning ? <div className="muted" style={{ marginTop: 8 }}>{statsWarning}</div> : null}
       </div>
 
       <div className="card" style={{ padding: 18 }}>
         <div className="actions" style={{ marginBottom: 12 }}>
           <span className="badge">Selected: {selectedIds.length.toLocaleString()}</span>
           <button className="btn" type="button" disabled={!selectedIds.length || busy} onClick={() => verifyContacts('selected')}>Detect Selected</button>
-          <button className="btn secondary" type="button" disabled={!businesses.some((b) => b.email) || busy} onClick={() => verifyContacts('page')}>Detect Current Page</button>
+          <button className="btn secondary" type="button" disabled={!businesses.some((business) => business.email) || busy} onClick={() => verifyContacts('page')}>Detect Current Page</button>
           <button className="btn secondary" type="button" disabled={busy} onClick={() => verifyContacts('next')}>{nextLabel}</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'ready')}>Mark Ready</button>
           <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => updateStatus(selectedIds, 'review')}>Mark Review</button>
@@ -510,38 +464,29 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
 
         <div className="table-wrap">
           <table>
-            <thead>
-              <tr>
-                <th><input type="checkbox" checked={businesses.length > 0 && selectedIds.length === businesses.filter((b) => b.email).length} onChange={(event) => toggleAll(event.target.checked)} /></th>
-                <th>Business</th><th>Email</th><th>Status</th><th>Score</th><th>Detection</th><th>Website</th><th>Actions</th>
-              </tr>
-            </thead>
+            <thead><tr><th><input type="checkbox" checked={businesses.length > 0 && selectedIds.length === businesses.filter((business) => business.email).length} onChange={(event) => toggleAll(event.target.checked)} /></th><th>Business</th><th>Email</th><th>Status</th><th>Score</th><th>Detection</th><th>Website</th><th>Actions</th></tr></thead>
             <tbody>
-              {businesses.map((b) => {
-                const raw = (b.raw || {}) as Record<string, any>;
-                const verificationData = raw.verification as BackendVerifyResult | undefined;
-                return (
-                  <tr key={b.id}>
-                    <td><input type="checkbox" disabled={!b.email} checked={!!selected[b.id]} onChange={(event) => setSelected((current) => ({ ...current, [b.id]: event.target.checked }))} /></td>
-                    <td><strong>{b.name || '-'}</strong><br /><span className="muted">{b.category || ''} {b.location ? `· ${b.location}` : ''}</span></td>
-                    <td>{b.email || <span className="muted">No email · send to Auto Scout</span>}</td>
-                    <td><span className={`status ${b.status}`}>{b.status.replace('_', ' ')}</span></td>
-                    <td>{b.score ?? '-'}</td>
-                    <td>{verificationData ? <span className="muted">{reasonFromVerification(verificationData)}</span> : <span className="muted">Not detected</span>}</td>
-                    <td>{b.website || b.domain || <span className="muted">No site</span>}</td>
-                    <td><div className="actions compact"><button className="btn secondary" type="button" disabled={!b.email || alreadyDetected(b) || busy} onClick={() => { setSelected({ [b.id]: true }); setTimeout(() => verifyContacts('selected'), 0); }}>{alreadyDetected(b) ? 'Checked' : 'Detect'}</button><button className="btn secondary" type="button" disabled={busy} onClick={() => queueForAutoScout([b.id], false)}>Redetect</button></div></td>
-                  </tr>
-                );
-              })}
+              {businesses.map((business) => (
+                <tr key={business.id}>
+                  <td><input type="checkbox" disabled={!business.email} checked={!!selected[business.id]} onChange={(event) => setSelected((current) => ({ ...current, [business.id]: event.target.checked }))} /></td>
+                  <td><strong>{business.name || '-'}</strong><br /><span className="muted">{business.category || ''} {business.location ? `· ${business.location}` : ''}</span></td>
+                  <td>{business.email || <span className="muted">No email · send to Auto Scout</span>}</td>
+                  <td><span className={`status ${business.status}`}>{business.status.replace('_', ' ')}</span></td>
+                  <td>{business.score ?? '-'}</td>
+                  <td><span className="muted">{reasonFromVerification(business)}</span></td>
+                  <td>{business.website || business.domain || <span className="muted">No site</span>}</td>
+                  <td><div className="actions compact"><button className="btn secondary" type="button" disabled={!business.email || alreadyDetected(business) || busy} onClick={() => void verifyContacts('selected', [business.id])}>{alreadyDetected(business) ? 'Checked' : 'Detect'}</button><button className="btn secondary" type="button" disabled={busy} onClick={() => queueForAutoScout([business.id], false)}>Redetect</button></div></td>
+                </tr>
+              ))}
               {!businesses.length ? <tr><td colSpan={8} className="muted">No contacts found for this filter.</td></tr> : null}
             </tbody>
           </table>
         </div>
 
         <div className="actions" style={{ justifyContent: 'space-between', marginTop: 14 }}>
-          <button className="btn secondary" type="button" disabled={page <= 0 || loading || busy} onClick={() => loadBusinesses(page - 1)}>Previous</button>
-          <span className="muted">Page {page + 1} of {pages.toLocaleString()} · {total.toLocaleString()} matching</span>
-          <button className="btn secondary" type="button" disabled={page + 1 >= pages || loading || busy} onClick={() => loadBusinesses(page + 1)}>Next</button>
+          <button className="btn secondary" type="button" disabled={page <= 0 || loading || busy} onClick={goPrevious}>Previous</button>
+          <span className="muted">Page {page + 1} · {businesses.length.toLocaleString()} shown{estimate !== null && !appliedSearch ? ` · about ${estimate.toLocaleString()} matching` : hasNext ? ' · more results available' : ''}</span>
+          <button className="btn secondary" type="button" disabled={!hasNext || loading || busy} onClick={goNext}>Next</button>
         </div>
       </div>
     </div>

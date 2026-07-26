@@ -1,9 +1,0 @@
-START HERE — Scout v10.42.3 Auto Scout trust fix
-
-1. No new Supabase SQL is required.
-2. Open SCOUT_V10_42_3_EXACT_CLICK_SETUP_WIZARD.html.
-3. Follow one screen at a time.
-4. Deploy with RUN_DEPLOY_AND_KEEP_GIT_BASH_OPEN.sh.
-5. Confirm GITHUB PUSH VERIFIED and live build auto-scout-contact-page-trust-fix.
-6. In Scout Auto Scout, click Clean saved false positives.
-7. Requeue and retest innovativelivingsolutions.ca.

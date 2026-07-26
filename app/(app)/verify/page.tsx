@@ -8,7 +8,7 @@ export default async function VerifyPage() {
     <div className="stack">
       <div className="page-title">
         <h2>Ready Email Detection</h2>
-        <p>No paid verifier. Contacts with valid business or personal emails are marked Ready; no-email contacts remain Pending for Auto Scout; bounces/no-inbox are cleaned after sending.</p>
+        <p>Fast indexed detection with no paid verifier. The page loads lightweight records, totals refresh separately, and bulk detection saves results with set-based database operations.</p>
       </div>
       <VerifyClient workspace={workspace} />
     </div>

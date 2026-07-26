@@ -49,7 +49,7 @@ export async function ensureMessageWorker(origin: string): Promise<MessageWorker
         ready: false,
         configured: false,
         appUrl,
-        error: `Central worker setup failed: ${error.message}. Run RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql once, then use Settings → Run full check.`,
+        error: `Central worker setup failed: ${error.message}. Run RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql once, then use Settings → Run fast check.`,
       };
     }
     const result = Array.isArray(data) ? data[0] : data;

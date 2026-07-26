@@ -8,6 +8,8 @@ const files={
  verify:path.join(root,'database','10_VERIFY_V10_42.sql'),
  hotfix:path.join(root,'database','11_V10_42_1_FAST_IMPORT_RUN_DEFAULT.sql'),
  pendingDelete:path.join(root,'database','12_V10_42_2_PENDING_DELETE_UNLOCK.sql'),
+ readyDetection:path.join(root,'database','10_V10_42_4_READY_DETECTION_PERFORMANCE.sql'),
+ readiness:path.join(root,'RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql'),
  cron:path.join(root,'database','04_SET_VAULT_AND_CRON.sql.template'),
 };
 for(const [name,file] of Object.entries(files)){if(!fs.existsSync(file)){console.error(`Missing ${name}: ${file}`);process.exit(1);}}
@@ -26,6 +28,8 @@ const groups=[
  ['verify',read(files.verify),['import_jobs','import_businesses_bulk_v2','sender-default-run:100','schema:10.42.2']],
  ['hotfix',read(files.hotfix),['alter column default_run_limit set default 100',"'10.42.1'",'90-210 seconds','3-6 seconds']],
  ['pending-delete',read(files.pendingDelete),['delete_pending_no_email_businesses',"'10.42.2'",'scout_v10422_status','delete_rpc_ready']],
+ ['ready-detection',read(files.readyDetection),['ready_email_detection_stats_v10424','ready_email_detection_page_v10424','run_ready_email_detection_v10424','businesses_ready_detection_queue_v10424_idx',"'10.42.4'"]],
+ ['readiness',read(files.readiness),['scout_readiness_probe_v10425','scout_message_worker_ping_v10425','businesses_contactable_readiness_v10425_idx','message_schedules_worker_ping_v10425_idx',"'10.42.5'"]],
  ['cron',read(files.cron),['/api/cron/import-worker','scout-import-worker-v1042','/api/cron/health-review','/api/message/run-schedules']],
 ];
 let failures=0;
@@ -36,4 +40,4 @@ if(dollarPairs%2!==0){failures++;console.error('current SQL has an unbalanced $$
 if(/create or replace function public\.reserve_sender_send\(\s*create or replace function/i.test(focused)){failures++;console.error('current SQL contains a duplicated reserve_sender_send declaration.');}
 if((focused.match(/create or replace function public\.reserve_sender_send\(/gi)||[]).length!==1){failures++;console.error('current SQL must define reserve_sender_send exactly once.');}
 if(failures) process.exit(1);
-console.log('Scout v10.42.2 SQL contracts passed.');
+console.log('Scout v10.42.5 SQL contracts passed.');

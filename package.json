@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-42-3-auto-scout-trust-fix",
-  "version": "10.42.3",
+  "name": "scout-app-v10-42-5-readiness-stability-fix",
+  "version": "10.42.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -33,5 +33,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout v10.42.3 with strict same-site Auto Scout evidence, contact-page retry budgeting, publisher/platform blocking, false-positive cleanup, fast direct imports, adaptive sender health, and permanent Scouting XP."
+  "description": "Scout v10.42.5 with accurate readiness classification, lightweight worker probes, recoverable page loading, indexed Ready Email Detection, strict Auto Scout trust, fast imports, adaptive sender health, and permanent Scouting XP."
 }
