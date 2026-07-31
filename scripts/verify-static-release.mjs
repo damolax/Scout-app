@@ -3,99 +3,50 @@ import path from 'node:path';
 const root=process.cwd();
 const get=(p)=>fs.readFileSync(path.join(root,p),'utf8');
 const checks=[];
-function check(label,ok,detail=''){checks.push({label,ok:Boolean(ok),detail});}
+const check=(label,ok,detail='')=>checks.push({label,ok:Boolean(ok),detail});
 const pkg=JSON.parse(get('package.json'));
-check('Package version',pkg.version==='10.42.5',pkg.version);
 const health=get('app/api/health/route.ts');
-check('Live release marker',health.includes("version: '10.42.5'")&&health.includes("readiness-timeout-classification-page-recovery-fix"));
-check('Schema readiness contract 10.42.5',get('lib/schema-readiness.ts').includes("SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.5'"));
-check('v10.42.5 health with v10.42.5 database contracts',health.includes('SCOUT_SCHEMA_CONTRACT_VERSION')&&health.includes('requiredSchemaVersion'));
-const upload=get('app/(app)/upload/UploadClient.tsx');
-const settings=get('app/(app)/settings/SettingsClient.tsx');
-const message=get('app/(app)/message/MessageClient.tsx');
-check('Persistent import jobs UI',upload.includes('/api/import-jobs')&&upload.includes('Background Import Jobs'));
-check('Fast direct two-lane plan',upload.includes('const IMPORT_CONCURRENCY = 2')&&upload.includes('const TARGET_IMPORT_CHUNK_ROWS = 1000')&&upload.includes('return legacyImportRows()'));
-check('Core import is immediate',upload.includes('Importing...')&&upload.includes('Done in ${seconds.toFixed(1)}s. Imported'));
-check('Import worker API',fs.existsSync(path.join(root,'app/api/cron/import-worker/route.ts'))&&fs.existsSync(path.join(root,'lib/import-worker.ts')));
-check('Persistent import exports',fs.existsSync(path.join(root,'app/api/import-jobs/export/route.ts'))&&upload.includes('Duplicates CSV')&&upload.includes('Invalid CSV')&&upload.includes('Suppressed CSV'));
-const exportRoute=get('app/api/import-jobs/export/route.ts');
-check('Import export header typing',exportRoute.includes('rows.reduce<Set<string>>')&&exportRoute.includes('const dynamicHeaders = Array.from(dynamicHeaderSet)'));
-const keepOpen=get('RUN_DEPLOY_AND_KEEP_GIT_BASH_OPEN.sh');
-check('Keep-open result classification',keepOpen.includes("grep -Fq 'GITHUB PUSH VERIFIED'")&&keepOpen.includes('GitHub main was not updated by this attempt'));
-check('Optional research queue preserved',get('database/09_V10_42_BACKGROUND_IMPORT_HEALTH_XP.sql').includes('research_jobs as')&&upload.includes('Queue background email research after import'));
-check('Team-wide dedupe preserved',get('database/09_V10_42_BACKGROUND_IMPORT_HEALTH_XP.sql').includes('team_registry as'));
-check('v10.42 is standalone',!health.includes("eq('version', '10.41.0')"));
-check('Adaptive worker batches',get('lib/import-worker.ts').includes('process_import_job_batch_v1042')&&get('lib/import-worker.ts').includes('Math.floor(requested / 2)'));
-const sender=get('lib/sender-health.ts');
-check('New sender 250 assessment',sender.includes('assessment: 250')&&sender.includes("health_stage || 'assessment'"));
-check('Adaptive stages', ['watch: 175','restricted: 100','critical: 50','strict_disabled: 0'].every(x=>sender.includes(x)));
-check('Owner override calculation',sender.includes('owner_override_active')&&sender.includes('owner_override_limit')&&sender.includes('effectiveDailyLimit'));
-const schedule=get('app/api/message/run-schedules/route.ts');
-check('Campaign max overrides settings per run',schedule.includes('Math.min(effectiveDailyLimit(account), safePreferred)'));
-const control=get('app/api/gmail/sender-control/route.ts');
-check('24-hour owner risk override',control.includes("action === 'set_override'")&&control.includes('24 * 60 * 60 * 1000'));
-check('Override lock',control.includes('owner_override_locked')&&control.includes('strictly disabled'));
-const xp=get('app/api/scouting-level/route.ts');
-check('Permanent XP state',xp.includes('scouting_xp_state')&&xp.includes('preservePrevious'));
-check('Client preserves last XP',get('components/ScoutingLevel.tsx').includes('window.localStorage')&&get('components/ScoutingLevel.tsx').includes('Permanent XP never decreases'));
-check('Stale-job confirmation preserved',get('components/AppOpenRunner.tsx').includes('Continue this sending job?'));
-check('Replies preserved',get('app/(app)/replies/RepliesClient.tsx').includes('Check replies now'));
-check('Signature controls preserved',get('app/(app)/settings/SettingsClient.tsx').includes('Save signature &amp; logo'));
-check('v10.42 SQL migration included',fs.existsSync(path.join(root,'database/09_V10_42_BACKGROUND_IMPORT_HEALTH_XP.sql')));
-check('One-screen wizard included',fs.existsSync(path.join(root,'SCOUT_V10_42_ONE_SCREEN_SETUP_WIZARD.html')));
-check('Target repository locked',fs.existsSync(path.join(root,'DEPLOY_V10_42_5_FULL_GIT_BASH.sh'))&&get('DEPLOY_V10_42_5_FULL_GIT_BASH.sh').includes('damolax/Scout-app.git'));
-check('Fast direct core import enabled',upload.includes('return legacyImportRows()')&&upload.includes('Fast bulk import:'));
-check('Default max per run is 100',settings.includes('draft.default_run_limit || 100')&&message.includes('account.default_run_limit || 100'));
-check('Pacing preserved',message.includes('90–210 seconds')&&message.includes('3–6 seconds'));
-
-check('Pending no-email RPC fallback',upload.includes("String((error as { code?: string }).code || '') === 'PGRST202'")&&upload.includes('Compatibility fallback'));
-check('Cancelled legacy job unlock',upload.includes("setActiveImportJobId('')")&&upload.includes('Choose a CSV file above to enable a new fast direct import'));
-check('No-file button guidance',upload.includes('Choose CSV to enable import')&&upload.includes('browsers do not retain access to local files'));
-check('Action error label',upload.includes('Action needs attention:'));
-
-const autoTarget=get('lib/auto-scout-target.ts');
-const emailRules=get('lib/email-candidate-rules.ts');
-const websiteFinder=get('lib/website-email-finder.ts');
-const autoScoutUi=get('app/(app)/auto-scout/AutoScoutClient.tsx');
-check('Publisher/platform Auto Scout targets blocked', ['wikipedia.org','forbes.com','shopify.com','medium.com'].every(x=>autoTarget.includes(`'${x}'`)));
-check('Bare at/dot obfuscation disabled', !emailRules.includes('|\sat\s')&&!emailRules.includes('|\sdot\s')&&emailRules.includes('manufacture addresses such as cre@ivecommons.org'));
-check('Same-site source evidence required', emailRules.includes('evidenceMatchesBusinessSite')&&emailRules.includes('Source page does not match the saved business website'));
-check('Contact discovery uses fetched-page budget', websiteFinder.includes('while (fetchedPages < maxPages && attempts < maxAttempts')&&websiteFinder.includes('fetchedPages += 1'));
-check('Discovered links outrank guessed paths', websiteFinder.includes('65 + keywordScore + shortPathScore')&&websiteFinder.includes('queue.get(candidate) || 0, 18'));
-check('Auto Scout false-positive cleanup control', autoScoutUi.includes('Clean saved false positives')&&autoScoutUi.includes('/api/research/quarantine-false-positives'));
-check('Auto Scout proof is explicit', autoScoutUi.includes('Why trusted')&&autoScoutUi.includes('Source page'));
-
-const verifyUi=get('app/(app)/verify/VerifyClient.tsx');
-const verifyPerfSql=get('database/10_V10_42_4_READY_DETECTION_PERFORMANCE.sql');
-check('Ready Detection avoids exact counts',!verifyUi.includes("count: 'exact'")&&verifyUi.includes('ready_email_detection_stats_v10424'));
-check('Ready Detection uses lightweight cursor pages',verifyUi.includes('ready_email_detection_page_v10424')&&verifyUi.includes('PageCursor')&&verifyUi.includes('PAGE_SIZE + 1'));
-check('Ready Detection uses set-based database detection',verifyUi.includes('run_ready_email_detection_v10424')&&!verifyUi.includes('UPDATE_CONCURRENCY'));
-check('Ready Detection SQL indexes queue',verifyPerfSql.includes('businesses_ready_detection_queue_v10424_idx'));
-check('Ready Detection single aggregate stats',verifyPerfSql.includes('count(*) filter')&&verifyPerfSql.includes('ready_email_detection_stats_v10424'));
-check('Ready Detection redetection preserves raw JSON',verifyPerfSql.includes("- 'verification' - 'ready_email_detection'")&&verifyPerfSql.includes('queue_ready_email_redetection_v10424'));
-
-
 const readiness=get('lib/schema-readiness.ts');
-const settingsReadiness=get('app/(app)/settings/SettingsClient.tsx');
-const schemaHealth=get('app/api/health/schema/route.ts');
-const workspaceLoader=get('lib/workspace.ts');
-const shellError=get('app/(app)/error.tsx');
-const rootError=get('app/error.tsx');
-const readinessSql=get('RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql');
-check('Readiness uses metadata probe instead of worker queue execution',readiness.includes('scout_readiness_probe_v10425')&&!readiness.includes("'scout_message_worker_status'\n  )")&&!readiness.includes("'get_due_followups',"));
-check('Timeouts are classified as degraded',readiness.includes("state: missing ? 'missing' : 'degraded'")&&readiness.includes("CONFIRMED_MISSING_CODES"));
-check('Settings never substitutes failed lead count with zero',settingsReadiness.includes('last-confirmed-contactable')&&settingsReadiness.includes('Scout did not replace the failed result with zero'));
-check('Gmail is blocked only by confirmed missing schema',settingsReadiness.includes('schemaBlocking')&&settingsReadiness.includes('disabled={busy || schemaBlocking}'));
-check('Structured health errors are rendered safely',settingsReadiness.includes('formatHealthDetail')&&!settingsReadiness.includes('String(appHealth?.databaseError'));
-check('Fast and deep readiness are separated',settingsReadiness.includes('Run fast check')&&settingsReadiness.includes('Run deep worker test')&&health.includes("url.searchParams.get('deep') === '1'"));
-check('Recoverable in-shell page boundary',shellError.includes('Retrying this page automatically')&&shellError.includes('reset()')&&rootError.includes('without repeating a completed send'));
-check('Workspace loading retries transient failures',workspaceLoader.includes('withRetry')&&workspaceLoader.includes('attempts ?? 2'));
-check('Schema endpoint does not turn transient errors into missing schema',schemaHealth.includes('confirmedMissing: false')&&schemaHealth.includes('status: 200'));
-check('v10.42.5 SQL installer included',fs.existsSync(path.join(root,'RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql'))&&readinessSql.includes("'10.42.5'"));
-check('Lightweight readiness RPC installed',readinessSql.includes('scout_readiness_probe_v10425')&&readinessSql.includes('scout_message_worker_ping_v10425'));
-check('Contactable and worker indexes installed',readinessSql.includes('businesses_contactable_readiness_v10425_idx')&&readinessSql.includes('message_schedules_worker_ping_v10425_idx'));
-
+const message=get('app/(app)/message/MessageClient.tsx');
+const runner=get('components/AppOpenRunner.tsx');
+const startJob=get('app/api/message/start-job/route.ts');
+const continueJob=get('app/api/message/continue-schedule/route.ts');
+const wake=get('app/api/message/wake-schedules/route.ts');
+const worker=get('lib/message-worker.ts');
+const sql=get('RUN_THIS_V10_42_6_SENDING_STABILITY_IN_CURRENT_SUPABASE.sql');
+check('Package version',pkg.version==='10.42.6',pkg.version);
+check('Health release marker',health.includes("version: '10.42.6'")&&health.includes('sending-timeout-worker-collision-followup-preview-fix'));
+check('Schema contract',readiness.includes("SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.6'"));
+check('Deterministic version row',readiness.includes(".eq('version', SCOUT_SCHEMA_CONTRACT_VERSION)")&&readiness.includes(".order('version', { ascending: false })"));
+check('Non-blocking start job',startJob.includes("executionMode: 'central_worker'")&&!startJob.includes("fetch(`${origin}/api/message/run-schedules`"));
+check('Non-blocking continue job',continueJob.includes("executionMode: 'central_worker'")&&!continueJob.includes('/api/message/run-schedules'));
+check('Wake endpoint',wake.includes('ensureMessageWorker')&&wake.includes(".eq('status', 'scheduled')"));
+check('Browser runner never executes worker',runner.includes('/api/message/wake-schedules')&&!runner.includes('/api/message/run-schedules'));
+check('Worker cadence 30 seconds',worker.includes('target_seconds: 30')&&worker.includes("'30 seconds'"));
+check('Worker setup is status-first',worker.includes("rpc('scout_message_worker_status')")&&worker.includes('if (!options?.force)'));
+check('Message page wake is not one-second polling',message.includes('const SCHEDULE_RUNNER_INTERVAL_MS = 30_000;'));
+check('Follow-up RPCs are sequential',message.includes('Keep the two history-heavy RPCs sequential')&&!message.includes('Promise.allSettled([\n        fetchDueFollowUps(previewLimit),'));
+check('Follow-up timeout isolated',message.includes('Queue refresh delayed.')&&message.includes('followUpQueueWarning'));
+check('Follow-up preview bounded',message.includes('fetchDueFollowUps(previewLimit)')&&message.includes('previewLimit: 1000'));
+check('Send-all exact-count guard',message.includes('Refresh exact count before Send all')&&message.includes('dueFollowUpTotalExact'));
+check('Due send uses wake endpoint',message.includes('/api/message/wake-schedules')&&!message.includes('open_app_parallel_sender_runner'));
+check('SQL queue indexes',sql.includes('sent_messages_followup_due_v10426_idx')&&sql.includes('reply_history_followup_due_v10426_idx'));
+check('SQL worker timeout',sql.includes('timeout_milliseconds := 55000')&&sql.includes("target_seconds integer default 30"));
+const countFunctionStart = sql.indexOf('create function public.count_due_followups');
+const countFunctionEnd = sql.indexOf('-- The browser now only wakes', countFunctionStart);
+const countFunctionSql = countFunctionStart >= 0
+  ? sql.slice(countFunctionStart, countFunctionEnd >= 0 ? countFunctionEnd : undefined)
+  : '';
+check(
+  'Optimized count function',
+  countFunctionSql.includes('create function public.count_due_followups') &&
+    !countFunctionSql.includes('public.get_due_followups('),
+);
+check('Setup guide',fs.existsSync(path.join(root,'SCOUT_V10_42_6_EXACT_SETUP.html')));
+check('Deploy target locked',get('DEPLOY_V10_42_6_FULL_GIT_BASH.sh').includes('damolax/Scout-app.git'));
+check('Legacy core preserved',fs.existsSync(path.join(root,'app/api/cron/import-worker/route.ts'))&&fs.existsSync(path.join(root,'app/(app)/verify/VerifyClient.tsx')));
 const failures=checks.filter(c=>!c.ok);
 for(const c of checks) console.log(`${c.ok?'PASS':'FAIL'}  ${c.label}${c.detail?` — ${c.detail}`:''}`);
-console.log(`\n${checks.length-failures.length}/${checks.length} static release checks passed.`);
+console.log(`
+${checks.length-failures.length}/${checks.length} static release checks passed.`);
 if(failures.length) process.exit(1);

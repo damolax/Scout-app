@@ -1,6 +1,6 @@
 {
-  "name": "scout-app-v10-42-5-readiness-stability-fix",
-  "version": "10.42.5",
+  "name": "scout-app-v10-42-6-sending-stability-fix",
+  "version": "10.42.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -33,5 +33,5 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Scout v10.42.5 with accurate readiness classification, lightweight worker probes, recoverable page loading, indexed Ready Email Detection, strict Auto Scout trust, fast imports, adaptive sender health, and permanent Scouting XP."
+  "description": "Scout v10.42.6 with non-blocking scheduled sending, collision-safe worker wakeups, resilient follow-up queue previews, deterministic schema version checks, and the full v10.42.5 stability baseline."
 }

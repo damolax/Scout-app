@@ -22,7 +22,7 @@ export function workerSecret() {
   ).trim();
 }
 
-export async function ensureMessageWorker(origin: string): Promise<MessageWorkerSetup> {
+export async function ensureMessageWorker(origin: string, options?: { force?: boolean }): Promise<MessageWorkerSetup> {
   const appUrl = normalizeAppUrl(process.env.NEXT_PUBLIC_APP_URL || origin);
   const secret = workerSecret();
   if (!appUrl) {
@@ -39,17 +39,36 @@ export async function ensureMessageWorker(origin: string): Promise<MessageWorker
 
   try {
     const supabase = createAdminClient();
+
+    if (!options?.force) {
+      const { data: statusData, error: statusError } = await supabase.rpc('scout_message_worker_status');
+      if (!statusError) {
+        const status = Array.isArray(statusData) ? statusData[0] : statusData;
+        const schedule = String(status?.schedule || '').trim().toLowerCase();
+        const cadenceReady = schedule === '30 seconds' || schedule === '30 second';
+        if (Boolean(status?.ready) && cadenceReady) {
+          return {
+            ready: true,
+            configured: true,
+            jobName: String(status?.job_name || 'scout-message-worker-every-15-seconds'),
+            schedule: String(status?.schedule || '30 seconds'),
+            appUrl,
+          };
+        }
+      }
+    }
+
     const { data, error } = await supabase.rpc('configure_scout_message_worker', {
       target_app_url: appUrl,
       target_worker_secret: secret,
-      target_seconds: 15,
+      target_seconds: 30,
     });
     if (error) {
       return {
         ready: false,
         configured: false,
         appUrl,
-        error: `Central worker setup failed: ${error.message}. Run RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql once, then use Settings → Run fast check.`,
+        error: `Central worker setup failed: ${error.message}. Run RUN_THIS_V10_42_6_SENDING_STABILITY_IN_CURRENT_SUPABASE.sql once, then use Settings → Run fast check.`,
       };
     }
     const result = Array.isArray(data) ? data[0] : data;
@@ -57,7 +76,7 @@ export async function ensureMessageWorker(origin: string): Promise<MessageWorker
       ready: Boolean(result?.ready ?? true),
       configured: true,
       jobName: String(result?.job_name || 'scout-message-worker-every-15-seconds'),
-      schedule: String(result?.schedule || '15 seconds'),
+      schedule: String(result?.schedule || '30 seconds'),
       appUrl,
     };
   } catch (error) {

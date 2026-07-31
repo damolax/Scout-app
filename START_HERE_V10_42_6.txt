@@ -1,0 +1,24 @@
+SCOUT V10.42.6 — START HERE
+
+1. Supabase SQL Editor
+Run: RUN_THIS_V10_42_6_SENDING_STABILITY_IN_CURRENT_SUPABASE.sql
+Confirm the final row says READY and all required checks are true.
+
+2. Run verification
+Run: VERIFY_SCOUT_V10_42_6.sql
+Every passed result should be true.
+
+3. Deploy
+Open SCOUT_V10_42_6_EXACT_SETUP.html and follow the Git Bash command exactly.
+The deployment log must contain GITHUB PUSH VERIFIED.
+
+4. Live acceptance
+/api/health must show version 10.42.6, build sending-timeout-worker-collision-followup-preview-fix, schema contract 10.42.6, and confirmedMissing false.
+Run Settings fast check and deep worker test.
+Send a controlled 5-email job before a larger campaign.
+
+WHAT CHANGED IN THIS FIX
+- A send button now queues the job immediately instead of waiting for the worker.
+- The Send Emails page no longer checks every second.
+- Browser checks only confirm the central worker; they never execute a second sending chunk.
+- Follow-up preview/count timeouts stay inside the Follow-ups card and do not appear as a failed send.

@@ -196,7 +196,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
         : `Showing ${visible.length.toLocaleString()} contact(s). Approximately ${estimate.toLocaleString()} match this filter; totals refresh separately without blocking the page.`);
     } catch (err) {
       const text = formatError(err);
-      setError(text.includes('PGRST202') ? `Ready Detection performance SQL is not installed. Run RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql. ${text}` : text);
+      setError(text.includes('PGRST202') ? `Ready Detection performance SQL is not installed. Run RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql. ${text}` : text);
     } finally {
       setLoading(false);
     }
@@ -303,7 +303,7 @@ export default function VerifyClient({ workspace }: { workspace: Workspace }) {
       await Promise.all([loadBusinesses(0, null, appliedSearch), loadStats()]);
     } catch (err) {
       const text = formatError(err);
-      setError(text.includes('PGRST202') ? `Ready Detection performance SQL is not installed. Run RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql. ${text}` : text);
+      setError(text.includes('PGRST202') ? `Ready Detection performance SQL is not installed. Run RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql. ${text}` : text);
     } finally {
       setBusy(false);
     }

@@ -1,8 +1,0 @@
-SCOUT V10.42.5 — START HERE
-
-1. Run RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql in the current Supabase project.
-2. Run VERIFY_SCOUT_V10_42_5.sql and confirm every passed value is true.
-3. Open SCOUT_V10_42_5_EXACT_CLICK_SETUP_WIZARD.html and follow it one screen at a time.
-4. Deploy with RUN_DEPLOY_AND_KEEP_GIT_BASH_OPEN.sh.
-
-Do not run a separate v10.42.4 SQL. It is already included in the v10.42.5 installer.

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
 import { createAppNotification } from '@/lib/notifications';
 import { businessIdentityKeys } from '@/lib/normalize';
-import { ensureMessageWorker, workerSecret } from '@/lib/message-worker';
+import { ensureMessageWorker } from '@/lib/message-worker';
 import { featureFlags } from '@/lib/feature-flags';
 
 function formatError(error: unknown) {
@@ -137,74 +137,30 @@ export async function POST(request: NextRequest) {
     const workerSetup = await ensureMessageWorker(request.nextUrl.origin);
 
     const shouldRunNow = body.runNow !== false && scheduleFor.getTime() <= Date.now() + 60_000;
-    let workerKick: any = null;
-    if (shouldRunNow) {
-      const origin = request.nextUrl.origin;
-      const secret = workerSecret();
-      const firstRunTargetLimit = Math.max(1, selectedSenderIds.length);
-      const cookie = request.headers.get('cookie') || '';
-      try {
-        const workerResponse = await fetch(`${origin}/api/message/run-schedules`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(cookie ? { cookie } : {}),
-            ...(secret ? { 'x-schedule-worker-secret': secret } : {}),
-          },
-          body: JSON.stringify({
-            limit: 1,
-            scheduleId: data.id,
-            workspaceId,
-            targetLimit: firstRunTargetLimit,
-            token: secret,
-          }),
-          signal: AbortSignal.timeout(55_000),
-          cache: 'no-store',
-        });
-        workerKick = await workerResponse.json().catch(() => ({ success: workerResponse.ok }));
-        if (!workerResponse.ok && workerKick?.success !== false) {
-          workerKick = { ...workerKick, success: false, error: `Worker returned HTTP ${workerResponse.status}.` };
-        }
-      } catch (kickError) {
-        workerKick = { success: false, error: kickError instanceof Error ? kickError.message : String(kickError) };
-      }
-    }
-
-    const firstResult = Array.isArray(workerKick?.results) ? workerKick.results[0] : null;
-    const firstSent = Math.max(0, Number(firstResult?.sent || 0));
-    const firstAttempted = Math.max(0, Number(firstResult?.attempted || 0));
-    const workerExecutionFailed = Boolean(
-      shouldRunNow &&
-      (workerKick?.success === false || firstResult?.status === 'failed')
-    );
-    const workerFailed = workerExecutionFailed || (!workerSetup.ready && firstSent === 0);
-    const startState = firstSent > 0
-      ? workerSetup.ready ? 'sending' : 'warning'
-      : workerFailed
-        ? 'failed'
-        : 'queued';
-    const startMessage = firstSent > 0
-      ? workerSetup.ready
-        ? `${firstSent.toLocaleString()} message${firstSent === 1 ? '' : 's'} sent. Scout will continue the remaining contacts in the background.`
-        : `${firstSent.toLocaleString()} message${firstSent === 1 ? '' : 's'} sent, but background continuation is not ready: ${workerSetup.error || 'central worker setup failed'}`
-      : workerFailed
-        ? String(firstResult?.reason || workerKick?.error || workerSetup.error || 'The central worker could not start this job.')
-        : firstAttempted > 0
-          ? `The first worker cycle ran. Scout will continue the remaining contacts in the background.`
-          : `The job is queued. Scout will retry automatically when a selected Gmail reaches its next safe sending slot.`;
+    const workerFailed = !workerSetup.ready;
+    const startState = workerFailed ? 'warning' : 'queued';
+    const startMessage = workerFailed
+      ? `The job was saved, but the central worker needs attention: ${workerSetup.error || 'worker setup is not ready'}`
+      : shouldRunNow
+        ? 'The job is queued. The central worker will start it automatically within about 30 seconds using the saved sender limits and cooldowns.'
+        : `The job is scheduled for ${scheduleFor.toLocaleString()}. The central worker will start it automatically when it becomes due.`;
+    const workerKick = {
+      success: workerSetup.ready,
+      accepted: true,
+      mode: 'central_worker',
+      synchronousExecution: false,
+    };
+    const firstSent = 0;
+    const firstAttempted = 0;
 
     try {
       await createAppNotification(supabase as any, {
         workspaceId,
         userId: user.id,
-        type: startState === 'failed' ? 'job_failed' : startState === 'sending' ? 'job_started' : startState === 'warning' ? 'job_warning' : 'job_queued',
-        title: startState === 'failed'
-          ? `${type === 'follow_up' ? 'Follow-up' : 'Message'} job did not start`
-          : startState === 'sending'
-            ? `${type === 'follow_up' ? 'Follow-up' : 'Message'} sending started`
-            : startState === 'warning'
-              ? `${type === 'follow_up' ? 'Follow-up' : 'Message'} sent with worker warning`
-              : `${type === 'follow_up' ? 'Follow-up' : 'Message'} job queued`,
+        type: startState === 'warning' ? 'job_warning' : 'job_queued',
+        title: startState === 'warning'
+          ? `${type === 'follow_up' ? 'Follow-up' : 'Message'} job queued with worker warning`
+          : `${type === 'follow_up' ? 'Follow-up' : 'Message'} job queued`,
         message: startMessage,
         entityType: 'message_schedule',
         entityId: data.id,
@@ -220,18 +176,19 @@ export async function POST(request: NextRequest) {
     } catch {}
 
     return NextResponse.json({
-      success: !workerFailed,
-      error: workerFailed ? startMessage : undefined,
+      success: true,
+      warning: workerFailed ? startMessage : undefined,
       schedule: data,
       startState,
       startMessage,
       firstSent,
       firstAttempted,
-      startedWorker: shouldRunNow,
+      startedWorker: workerSetup.ready,
+      executionMode: 'central_worker',
       workerKick,
       workerSetup,
       teamDuplicatesBlocked,
-    }, { status: workerFailed ? 503 : 200 });
+    }, { status: 200 });
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 500 });
   }

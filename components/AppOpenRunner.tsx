@@ -5,8 +5,8 @@ import { emitLiveActivity } from "@/lib/live-activity-client";
 
 const LOCK_KEY = "scout_v10_open_app_runner_lock";
 const LAST_RUN_KEY = "scout_v10_open_app_runner_last_run";
-const RUN_INTERVAL_MS = 5_000;
-const LOCK_TTL_MS = 60_000;
+const RUN_INTERVAL_MS = 60_000;
+const LOCK_TTL_MS = 20_000;
 
 const INBOUND_LOCK_KEY = "scout_v10_25_inbound_sync_lock";
 const INBOUND_LAST_RUN_KEY = "scout_v10_25_inbound_sync_last_run";
@@ -17,8 +17,10 @@ const STALE_CHECK_INTERVAL_MS = 5 * 60_000;
 
 type RunnerResponse = {
   success?: boolean;
-  ran?: number;
-  results?: Array<{ sent?: number; failed?: number; skipped?: number }>;
+  accepted?: boolean;
+  due?: boolean;
+  workerReady?: boolean;
+  warning?: string;
   error?: string;
 };
 
@@ -144,43 +146,31 @@ export function AppOpenRunner({ workspaceId }: { workspaceId?: string | null }) 
     setActive(true);
     window.localStorage.setItem(lastRunKey, String(now()));
     try {
-      const response = await fetch("/api/message/run-schedules", {
+      const response = await fetch("/api/message/wake-schedules", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          limit: 1,
-          source: "v10_40_stale_confirmation_app_runner",
-        }),
+        body: JSON.stringify({ workspaceId, source: "v10_42_6_non_blocking_app_wake" }),
       });
       const json = (await response.json().catch(() => ({}))) as RunnerResponse;
       if (!response.ok || json?.success === false) {
-        const message = json?.error || `Open app runner failed with HTTP ${response.status}`;
+        const message = json?.error || `Worker wake failed with HTTP ${response.status}`;
         emitLiveActivity({
           kind: "schedule",
           status: "runner_note",
-          title: "Schedule check",
+          title: "Worker check",
           message,
           createdAt: new Date().toISOString(),
         });
         return;
       }
-      const ran = Number(json.ran || 0);
-      if (ran > 0) {
-        const results = Array.isArray(json.results) ? json.results : [];
-        const sent = results.reduce((sum, row) => sum + Number(row.sent || 0), 0);
-        const failed = results.reduce((sum, row) => sum + Number(row.failed || 0), 0);
-        const skipped = results.reduce((sum, row) => sum + Number(row.skipped || 0), 0);
-        if (sent > 0 || failed > 0 || skipped > 0) {
-          emitLiveActivity({
-            kind: "schedule",
-            status: failed > 0 ? "failed" : sent > 0 ? "sent" : "running",
-            title: sent > 0 ? "Schedule progress" : failed > 0 ? "Schedule issue" : "Schedule update",
-            message: `Processed ${ran} due schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}.`,
-            countText: sent > 0 ? `${sent} sent` : failed > 0 ? `${failed} failed` : `${skipped} skipped`,
-            createdAt: new Date().toISOString(),
-          });
-        }
+      if (json?.due && json?.workerReady === false) {
+        emitLiveActivity({
+          kind: "schedule",
+          status: "runner_note",
+          title: "Schedule waiting",
+          message: json.warning || "A due schedule is waiting, but the central worker needs attention in Settings.",
+          createdAt: new Date().toISOString(),
+        });
       }
     } finally {
       busyRef.current = false;

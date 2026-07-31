@@ -1,0 +1,16 @@
+SCOUT V10.42.6 — LOCAL VALIDATION RESULTS
+
+Passed in the packaging environment
+- 22/22 release structure checks
+- 10/10 sending safety and limits model checks
+- 12/12 Auto Scout trust checks
+- SQL contract checks for incremental, combined, upgrade and fresh-install SQL
+- JSON parsing for package.json, package-lock.json and vercel.json
+- Bash syntax for both deployment scripts
+- TypeScript/TSX parser validation: 152 files, 0 syntax errors
+- Setup HTML closing/integrity checks
+
+Dependency-registry limitation
+- A clean npm dependency installation could not be completed in this environment because the configured package gateway returned HTTP 503 Service Temporarily Unavailable.
+- Therefore the full TypeScript typecheck and Next.js production build could not be rerun locally after the final source edits.
+- The included deployment script runs npm ci, verify:static, verify:sql-contract, typecheck and build before any GitHub push. If any of those checks fails on the deployment computer, GitHub main is not updated.

@@ -4,9 +4,10 @@ set -Eeuo pipefail
 SOURCE_DIR="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 REPO_URL="https://github.com/damolax/Scout-app.git"
 BRANCH="main"
-WORK_DIR="${HOME}/scout-v10-42-5-deploy"
-EXPECTED_VERSION="10.42.5"
-EXPECTED_BUILD="readiness-timeout-classification-page-recovery-fix"
+WORK_DIR="${HOME}/scout-v10-42-6-deploy"
+EXPECTED_VERSION="10.42.6"
+EXPECTED_BUILD="sending-timeout-worker-collision-followup-preview-fix"
+EXPECTED_SCHEMA="10.42.6"
 LIVE_URL="${SCOUT_LIVE_URL:-https://scout-app-oyeola.vercel.app}"
 
 fail(){ echo; echo "ERROR: $*" >&2; return 1; }
@@ -25,11 +26,12 @@ command -v git >/dev/null || fail "Git is not installed."
 command -v npm >/dev/null || fail "Node.js/npm is not installed."
 command -v node >/dev/null || fail "Node.js is not installed."
 [ -f "$SOURCE_DIR/package.json" ] || fail "package.json not found in $SOURCE_DIR"
-[ -f "$SOURCE_DIR/SCOUT_V10_42_ONE_SCREEN_SETUP_WIZARD.html" ] || fail "The one-screen deployment wizard is missing."
+[ -f "$SOURCE_DIR/SCOUT_V10_42_6_EXACT_SETUP.html" ] || fail "The v10.42.6 setup guide is missing."
+[ -f "$SOURCE_DIR/RUN_THIS_V10_42_6_SENDING_STABILITY_IN_CURRENT_SUPABASE.sql" ] || fail "The v10.42.6 SQL patch is missing."
 
 ACTUAL_VERSION="$(cd "$SOURCE_DIR" && node -p "require('./package.json').version")"
 [ "$ACTUAL_VERSION" = "$EXPECTED_VERSION" ] || fail "Expected Scout $EXPECTED_VERSION but package.json says $ACTUAL_VERSION."
-grep -Fq "$REPO_URL" "$SOURCE_DIR/DEPLOY_V10_42_5_FULL_GIT_BASH.sh" || fail "Deployment target verification failed."
+grep -Fq "$REPO_URL" "$SOURCE_DIR/DEPLOY_V10_42_6_FULL_GIT_BASH.sh" || fail "Deployment target verification failed."
 
 echo "Target repository: $REPO_URL"
 echo "Target branch:     $BRANCH"
@@ -42,7 +44,7 @@ cd "$WORK_DIR"
 git checkout "$BRANCH"
 git pull --ff-only origin "$BRANCH"
 
-BACKUP_BRANCH="backup-before-v10-42-5-$(date +%Y%m%d-%H%M%S)"
+BACKUP_BRANCH="backup-before-v10-42-6-$(date +%Y%m%d-%H%M%S)"
 git branch "$BACKUP_BRANCH"
 git push origin "$BACKUP_BRANCH"
 
@@ -63,7 +65,7 @@ git add -A
 if git diff --cached --quiet; then
   echo "No source changes were detected. GitHub main already matches this package."
 else
-  git commit -m "Fix readiness timeouts and recover Scout pages safely"
+  git commit -m "Fix Scout scheduled sending timeouts and worker collisions"
   git push origin "$BRANCH"
 fi
 
@@ -83,7 +85,7 @@ if command -v curl >/dev/null && [ -n "$LIVE_URL" ]; then
   for _ in $(seq 1 42); do
     BODY="$(curl -fsS --max-time 12 "${LIVE_URL%/}/api/health" 2>/dev/null || true)"
     if printf '%s' "$BODY" | node -e '
-      let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.exit(j?.version==="10.42.5"&&j?.build==="readiness-timeout-classification-page-recovery-fix"&&j?.bulkImportReady===true&&j?.schema?.contractVersion==="10.42.5"&&j?.confirmedMissing===false?0:1)}catch{process.exit(1)}});'; then
+      let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.exit(j?.version==="10.42.6"&&j?.build==="sending-timeout-worker-collision-followup-preview-fix"&&j?.bulkImportReady===true&&j?.schema?.contractVersion==="10.42.6"&&j?.confirmedMissing===false?0:1)}catch{process.exit(1)}});'; then
       VERIFIED="true"
       break
     fi
@@ -91,8 +93,8 @@ if command -v curl >/dev/null && [ -n "$LIVE_URL" ]; then
   done
   if [ "$VERIFIED" != "true" ]; then
     echo
-    echo "GitHub is updated, but live v10.42.5 verification is not ready."
-    echo "Check Vercel Deployments, then verify the v10.42.5 schema and worker configuration using the HTML wizard."
+    echo "GitHub is updated, but live v10.42.6 verification is not ready."
+    echo "Check Vercel Deployments, then use SCOUT_V10_42_6_EXACT_SETUP.html."
     exit 2
   fi
 fi
@@ -102,9 +104,7 @@ echo "DEPLOYMENT VERIFIED"
 echo "Code version:             $EXPECTED_VERSION"
 echo "Build marker:             $EXPECTED_BUILD"
 echo "Repository:               $REPO_URL"
-echo "Schema contract:          10.42.5"
-echo "Fast direct core import:   preserved"
-echo "Adaptive sender health:   included"
-echo "Permanent Scouting XP:    preserved"
-echo "Ready Detection fix:      preserved
-Readiness stability fix:   included"
+echo "Schema contract:          $EXPECTED_SCHEMA"
+echo "Non-blocking schedule wake: included"
+echo "Follow-up timeout handling: included"
+echo "Central worker setup:       included"

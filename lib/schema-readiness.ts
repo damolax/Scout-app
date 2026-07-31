@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.5';
+export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.6';
 
 type TableContract = {
   table: string;
@@ -299,26 +299,39 @@ export async function checkScoutSchema(
     : null;
 
   try {
-    const { data, error } = await client
+    // Check the required row directly. Applied timestamps can tie when several
+    // migrations are recorded inside one SQL transaction, so timestamp-only
+    // ordering is not a reliable schema-version test.
+    const required = await client
       .from('scout_schema_versions')
       .select('version,applied_at,notes')
-      .order('applied_at', { ascending: false })
-      .limit(1);
-    if (error) {
-      checks.push(failedCheck('schema:version', 'Installed SQL version', error));
+      .eq('version', SCOUT_SCHEMA_CONTRACT_VERSION)
+      .maybeSingle();
+    if (required.error) {
+      checks.push(failedCheck('schema:version', 'Installed SQL version', required.error));
+    } else if (required.data) {
+      installedVersion = SCOUT_SCHEMA_CONTRACT_VERSION;
+      checks.push(goodCheck('schema:version', 'Installed SQL version', `Required and installed schema are ${SCOUT_SCHEMA_CONTRACT_VERSION}.`));
     } else {
-      const row = Array.isArray(data) ? data[0] : null;
-      installedVersion = String(row?.version || installedVersion || '') || null;
-      const versionMatches = installedVersion === SCOUT_SCHEMA_CONTRACT_VERSION;
-      checks.push(versionMatches
-        ? goodCheck('schema:version', 'Installed SQL version', `Required and installed schema are ${SCOUT_SCHEMA_CONTRACT_VERSION}.`)
-        : {
+      const latest = await client
+        .from('scout_schema_versions')
+        .select('version,applied_at,notes')
+        .order('applied_at', { ascending: false })
+        .order('version', { ascending: false })
+        .limit(1);
+      if (latest.error) {
+        checks.push(failedCheck('schema:version', 'Installed SQL version', latest.error));
+      } else {
+        const row = Array.isArray(latest.data) ? latest.data[0] : null;
+        installedVersion = String(row?.version || installedVersion || '') || null;
+        checks.push({
           key: 'schema:version',
           label: 'Installed SQL version',
           ok: false,
           state: 'missing',
           detail: `App requires ${SCOUT_SCHEMA_CONTRACT_VERSION}; latest installed version is ${installedVersion || 'not recorded'}.`
         });
+      }
     }
   } catch (error) {
     checks.push(failedCheck('schema:version', 'Installed SQL version', error));

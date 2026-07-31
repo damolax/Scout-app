@@ -22,6 +22,9 @@
     },
     "app/api/import-jobs/run/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/message/wake-schedules/route.ts": {
+      "maxDuration": 30
     }
   }
 }

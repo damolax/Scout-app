@@ -20,7 +20,7 @@ export async function GET() {
       success: true,
       ready: true,
       confirmedMissing: false,
-      requiredVersion: '10.42.5',
+      requiredVersion: '10.42.6',
       installedVersion: null,
       missing: [],
       degraded: [detail],

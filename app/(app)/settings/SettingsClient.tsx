@@ -610,7 +610,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           ? 'Degraded'
           : 'Good';
       const installed = schemaResult.installedVersion || 'not confirmed';
-      const required = schemaResult.requiredVersion || schemaResult.contractVersion || '10.42.5';
+      const required = schemaResult.requiredVersion || schemaResult.contractVersion || '10.42.6';
 
       const environmentStatus: HealthRow['status'] = !healthResult
         ? 'Degraded'
@@ -625,7 +625,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           name: 'Supabase schema',
           status: schemaStatus,
           detail: schemaResult.confirmedMissing
-            ? `${schemaResult.missing?.length || 1} confirmed database object(s) are missing. Run RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql.`
+            ? `${schemaResult.missing?.length || 1} confirmed database object(s) are missing. Run RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql.`
             : schemaResult.degraded?.length
               ? `Required ${required}; installed ${installed}. Schema objects are present, but ${schemaResult.degraded.length} non-blocking check(s) were temporarily degraded.`
               : `Required ${required}; installed ${installed}. Required tables, columns and functions are present.`
@@ -748,7 +748,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         <div className="card kpi">
           <div className="title">Database</div>
           <div className="num">{schema === null ? '…' : schemaBlocking ? 'Fix' : schemaDegraded ? 'Degraded' : 'Ready'}</div>
-          <p className="muted">Required {schema?.requiredVersion || schema?.contractVersion || '10.42.5'} · Installed {schema?.installedVersion || 'checking'}</p>
+          <p className="muted">Required {schema?.requiredVersion || schema?.contractVersion || '10.42.6'} · Installed {schema?.installedVersion || 'checking'}</p>
         </div>
         <div className="card kpi">
           <div className="title">Active Senders</div>
@@ -781,7 +781,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         {schemaBlocking && schema ? (
           <div className="error" style={{ marginTop: 12 }}>
             <strong>Database update required.</strong>
-            <div style={{ marginTop: 6 }}>Run <code>RUN_THIS_V10_42_5_READINESS_STABILITY_FIX_IN_CURRENT_SUPABASE.sql</code>, then return here and click <strong>Run fast check</strong>.</div>
+            <div style={{ marginTop: 6 }}>Run <code>RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql</code>, then return here and click <strong>Run fast check</strong>.</div>
             {schema.missing?.length ? (
               <details style={{ marginTop: 8 }}>
                 <summary>Show confirmed missing database requirements</summary>

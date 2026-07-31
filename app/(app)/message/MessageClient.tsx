@@ -100,7 +100,7 @@ const LOCATION_RAW_KEYS = [
 const READY_PAGE_SIZE = 100;
 const LOCATION_SCAN_PAGE_SIZE = 1000;
 const COUNTRY_SCAN_PAGE_SIZE = 1000;
-const SCHEDULE_RUNNER_INTERVAL_MS = 1000;
+const SCHEDULE_RUNNER_INTERVAL_MS = 30_000;
 const MESSAGE_REQUEST_TIMEOUT_MS = 90000;
 const MAX_MESSAGE_BATCH_SIZE = 50000;
 const SHORTCODES = [
@@ -155,6 +155,19 @@ function formatError(error: unknown) {
   } catch {
     return String(error);
   }
+}
+
+
+function isStatementTimeoutError(error: unknown) {
+  const text = formatError(error).toLowerCase();
+  return text.includes('57014') || text.includes('statement timeout') || text.includes('query canceled');
+}
+
+function followUpQueueWarning(error: unknown) {
+  if (isStatementTimeoutError(error)) {
+    return 'The follow-up preview took too long to refresh. Sending is not stopped; Scout kept the last confirmed queue and will retry when you refresh.';
+  }
+  return `Follow-up queue refresh warning: ${formatError(error)}`;
 }
 
 async function fetchJsonWithTimeout(
@@ -413,6 +426,9 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
   const [recentSent, setRecentSent] = useState<SendLogRow[]>([]);
   const [dueFollowUps, setDueFollowUps] = useState<DueFollowUp[]>([]);
   const [dueFollowUpTotal, setDueFollowUpTotal] = useState(0);
+  const [dueFollowUpTotalExact, setDueFollowUpTotalExact] = useState(false);
+  const [dueFollowUpLoading, setDueFollowUpLoading] = useState(false);
+  const [dueFollowUpWarning, setDueFollowUpWarning] = useState("");
   const [dueFollowUpBusinesses, setDueFollowUpBusinesses] = useState<Business[]>([]);
   const [selectedDueFollowUps, setSelectedDueFollowUps] = useState<Record<string, boolean>>({});
   const [dueFollowUpSearch, setDueFollowUpSearch] = useState("");
@@ -787,7 +803,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     setRecentSent((data || []) as SendLogRow[]);
   }
 
-  async function fetchDueFollowUps(limitRows = 1000) {
+  async function fetchDueFollowUps(limitRows = 250) {
     const { data, error: dueError } = await supabase.rpc("get_due_followups", {
       target_workspace: workspace.id,
       limit_rows: limitRows,
@@ -799,43 +815,80 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     });
     if (dueError) {
       if (isMissingRpcFunction(dueError)) {
-        setStatus(
-          "The staged follow-up RPC is missing in Supabase. Run RUN_THIS_ONE_SQL_IN_CURRENT_SUPABASE.sql once; the rest of Message page will still load.",
-        );
-        return [];
+        throw new Error("The staged follow-up RPC is missing. Run the current Scout SQL setup once, then refresh this section.");
       }
       throw dueError;
     }
     return (data || []) as DueFollowUp[];
   }
 
-  async function loadDueFollowUps() {
-    const [rows, countResult] = await Promise.all([
-      fetchDueFollowUps(1000),
-      supabase.rpc("count_due_followups", {
-        target_workspace: workspace.id,
-        followup_segment: followUpSegment,
-        requested_stage: followUpStage,
-        followup_after_hours: followUpAfterHours,
-        target_category_id: audienceCategoryId || null,
-        target_country: countryFilter || "",
-      }),
-    ]);
-    if (countResult.error) throw countResult.error;
-    setDueFollowUps(rows);
-    setDueFollowUpTotal(Math.max(0, Number(countResult.data || 0)));
-    setSelectedDueFollowUps({});
-    if (!rows.length) {
-      setDueFollowUpBusinesses([]);
-      return;
+  async function fetchDueFollowUpCount() {
+    const { data, error } = await supabase.rpc("count_due_followups", {
+      target_workspace: workspace.id,
+      followup_segment: followUpSegment,
+      requested_stage: followUpStage,
+      followup_after_hours: followUpAfterHours,
+      target_category_id: audienceCategoryId || null,
+      target_country: countryFilter || "",
+    });
+    if (error) throw error;
+    return Math.max(0, Number(data || 0));
+  }
+
+  async function loadDueFollowUps(options?: { previewLimit?: number; preserveSelection?: boolean }) {
+    const previewLimit = Math.max(50, Math.min(1000, Number(options?.previewLimit || 250)));
+    setDueFollowUpLoading(true);
+    setDueFollowUpWarning("");
+    try {
+      const warnings: string[] = [];
+      let rows: DueFollowUp[] | null = null;
+      let exactTotal: number | null = null;
+
+      // Keep the two history-heavy RPCs sequential. Running preview and exact
+      // count together doubled the same workspace scan and caused 57014 under
+      // an active sending job.
+      try {
+        rows = await fetchDueFollowUps(previewLimit);
+      } catch (rowsError) {
+        warnings.push(followUpQueueWarning(rowsError));
+      }
+
+      try {
+        exactTotal = await fetchDueFollowUpCount();
+      } catch (countError) {
+        warnings.push(followUpQueueWarning(countError));
+      }
+
+      if (exactTotal !== null) {
+        setDueFollowUpTotal(exactTotal);
+        setDueFollowUpTotalExact(true);
+      } else if (rows !== null) {
+        setDueFollowUpTotal((current) => Math.max(current, rows?.length || 0));
+        setDueFollowUpTotalExact(false);
+      }
+
+      if (rows !== null) {
+        setDueFollowUps(rows);
+        if (!options?.preserveSelection) setSelectedDueFollowUps({});
+        if (!rows.length) {
+          setDueFollowUpBusinesses([]);
+        } else {
+          const { data, error: businessesError } = await supabase
+            .from("businesses")
+            .select("*")
+            .eq("workspace_id", workspace.id)
+            .in("id", rows.map((row) => row.business_id));
+          if (businessesError) warnings.push(followUpQueueWarning(businessesError));
+          else setDueFollowUpBusinesses((data || []) as Business[]);
+        }
+      }
+
+      const uniqueWarnings = Array.from(new Set(warnings));
+      setDueFollowUpWarning(uniqueWarnings.join(" "));
+      return { rowsLoaded: rows?.length || 0, exactTotal, warning: uniqueWarnings.join(" ") };
+    } finally {
+      setDueFollowUpLoading(false);
     }
-    const { data, error: businessesError } = await supabase
-      .from("businesses")
-      .select("*")
-      .eq("workspace_id", workspace.id)
-      .in("id", rows.map((row) => row.business_id));
-    if (businessesError) throw businessesError;
-    setDueFollowUpBusinesses((data || []) as Business[]);
   }
 
   async function loadSchedules() {
@@ -879,12 +932,20 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     try {
       const critical = await Promise.allSettled([loadCategories(), loadTemplates(), loadAccounts()]);
       const secondary = await Promise.allSettled([loadReadyContacts(), loadRecentSent(), loadDueFollowUps(), loadSchedules()]);
-      const failures = [...critical, ...secondary]
-        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      const rejected = [...critical, ...secondary]
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      const timeoutWarnings = rejected.filter((result) => isStatementTimeoutError(result.reason));
+      const fatalFailures = rejected
+        .filter((result) => !isStatementTimeoutError(result.reason))
         .map((result) => formatError(result.reason));
-      if (failures.length) {
-        setStatus(`Message page loaded with ${failures.length} temporary data warning${failures.length === 1 ? "" : "s"}. Sending controls remain available.`);
-        setError(failures.slice(0, 2).join(" | "));
+      if (timeoutWarnings.length) {
+        setDueFollowUpWarning('A background data refresh took too long. Sending remains active and Scout will retry the delayed panel on refresh.');
+      }
+      if (fatalFailures.length) {
+        setStatus(`Message page loaded with ${fatalFailures.length} data warning${fatalFailures.length === 1 ? "" : "s"}. Sending controls remain available.`);
+        setError(fatalFailures.slice(0, 2).join(" | "));
+      } else if (timeoutWarnings.length) {
+        setStatus('Message page loaded. One background panel refresh was delayed, but sending remains active.');
       } else setStatus("Loaded Message workspace.");
     } finally { refreshInFlightRef.current = false; setLoading(false); }
   }
@@ -896,7 +957,10 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
 
   useEffect(() => {
     if (!workspace.id) return;
-    const timer = window.setTimeout(() => loadAvailableLocations().catch((err) => setError(formatError(err))), 350);
+    const timer = window.setTimeout(() => loadAvailableLocations().catch((err) => {
+      if (isStatementTimeoutError(err)) setStatus('Location counts are temporarily delayed. Sending controls remain available.');
+      else setError(formatError(err));
+    }), 350);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace.id, audienceCategoryId, businessCategoryFilter]);
@@ -926,7 +990,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
 
   useEffect(() => {
     if (!workspace.id) return;
-    loadDueFollowUps().catch((err) => setError(formatError(err)));
+    loadDueFollowUps().catch((err) => setDueFollowUpWarning(followUpQueueWarning(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followUpSegment, followUpStage, followUpTemplateId, audienceCategoryId, countryFilter]);
 
@@ -1012,7 +1076,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     if (typeof window === "undefined" || !("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
     const notification = new Notification("Scout schedule is due", {
-      body: `${scheduleLabel(schedule)} is ready. Open Scout and click Run Due Sends Now.`,
+      body: `${scheduleLabel(schedule)} is ready. Scout will start it automatically through the central worker.`,
       icon: "/icon-192.png",
       tag: `scout-schedule-${schedule.id}`,
     });
@@ -1639,7 +1703,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
       startState === 'sending'
         ? `Sending started · ${startMessage} Job: ${scheduleId}`
         : startState === 'warning'
-          ? `Message sent, but action is required · ${startMessage} Job: ${scheduleId}`
+          ? `Job queued, but the central worker needs attention · ${startMessage} Job: ${scheduleId}`
           : `Job queued · ${startMessage || `Scout will continue ${targetCount.toLocaleString()} contact(s) in the background.`} Job: ${scheduleId}`,
     );
     await Promise.allSettled([loadSchedules(), loadRecentSent(), loadAccounts()]);
@@ -2326,17 +2390,6 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
       if (!currentFollowUpTemplate) {
         throw new Error(`Create an active Follow-up ${followUpStage} template first.`);
       }
-      const { data: dueCountRaw, error: dueCountError } = await supabase.rpc("count_due_followups", {
-        target_workspace: workspace.id,
-        followup_segment: followUpSegment,
-        requested_stage: followUpStage,
-        followup_after_hours: followUpAfterHours,
-        target_category_id: audienceCategoryId || null,
-        target_country: countryFilter || "",
-      });
-      if (dueCountError) throw dueCountError;
-      const dueCount = Math.max(0, Number(dueCountRaw || 0));
-      if (!dueCount) throw new Error("No due follow-up contacts found.");
       const selectedRows = dueFollowUps.filter((row) => selectedDueFollowUps[row.business_id]);
       if (selectedRows.length) {
         const selectedBusinesses = await getDueFollowUpBusinesses(selectedRows.length, selectedRows);
@@ -2352,6 +2405,19 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
         setStatus(`${selectedBusinesses.length.toLocaleString()} selected Follow-up ${followUpStage} message(s) were added to one background job.`);
         return;
       }
+
+      let dueCount = dueFollowUpTotal;
+      if (!dueFollowUpTotalExact || dueCount <= 0) {
+        try {
+          dueCount = await fetchDueFollowUpCount();
+          setDueFollowUpTotal(dueCount);
+          setDueFollowUpTotalExact(true);
+        } catch (countError) {
+          if (!isStatementTimeoutError(countError) || dueCount <= 0 || followUpSendAll) throw countError;
+          setDueFollowUpWarning(followUpQueueWarning(countError));
+        }
+      }
+      if (!dueCount) throw new Error("No due follow-up contacts found.");
 
       const targetCount = followUpSendAll
         ? dueCount
@@ -2383,41 +2449,24 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     }
     try {
       const { response, json } = await fetchJsonWithTimeout(
-        "/api/message/run-schedules",
+        "/api/message/wake-schedules",
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ limit: 1, workspaceId: workspace.id, source: "open_app_parallel_sender_runner" }),
+          body: JSON.stringify({ workspaceId: workspace.id, source: "message_page_manual_wake" }),
         },
       );
       if (!response.ok || json?.success === false)
         throw new Error(
           json?.error || `Due schedule run failed with HTTP ${response.status}`,
         );
-      const results = Array.isArray(json.results) ? json.results : [];
-      const sent = results.reduce(
-        (sum: number, row: any) => sum + Number(row.sent || 0),
-        0,
-      );
-      const failed = results.reduce(
-        (sum: number, row: any) => sum + Number(row.failed || 0),
-        0,
-      );
-      const skipped = results.reduce(
-        (sum: number, row: any) => sum + Number(row.skipped || 0),
-        0,
-      );
-      if (Number(json.ran || 0) > 0 || !options?.silent) {
-        setStatus(
-          Number(json.ran || 0) > 0
-            ? `Due send processed ${Number(json.ran || 0)} schedule(s). Sent ${sent}, failed ${failed}, skipped ${skipped}. Keep Scout open while it sends.`
-            : "No due schedules right now.",
-        );
+      if (!options?.silent) {
+        setStatus(String(json?.message || (json?.due
+          ? "The due schedule is queued. The central worker will start it automatically within about 30 seconds."
+          : "No due schedules right now.")));
       }
+      if (json?.warning) setDueFollowUpWarning(String(json.warning));
       await Promise.allSettled([loadSchedules(), loadRecentSent(), loadAccounts()]);
-      if (results.some((row: any) => ["sent", "failed"].includes(String(row?.status || "")))) {
-        void Promise.allSettled([loadReadyContacts(), loadDueFollowUps()]);
-      }
       return json;
     } catch (err) {
       if (!options?.silent) setError(formatError(err));
@@ -3117,7 +3166,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
               <h3 id="send-follow-ups" style={{ marginTop: 0, marginBottom: 6 }}>Follow-ups</h3>
               <p className="muted" style={{ margin: 0 }}>Oldest eligible prospects are selected first. The sequence ends after Follow-up 2.</p>
             </div>
-            <button className="btn secondary mini" type="button" onClick={loadDueFollowUps}>Refresh</button>
+            <button className="btn secondary mini" type="button" onClick={() => void loadDueFollowUps({ previewLimit: 250 })}>{dueFollowUpLoading ? "Refreshing…" : "Refresh"}</button>
           </div>
 
           {!replySyncEnabled ? (
@@ -3127,7 +3176,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
           ) : null}
 
           <div className="success" style={{ marginTop: 12 }}>
-            <strong>{dueFollowUpTotal.toLocaleString()} need Follow-up {followUpStage}</strong>
+            <strong>{dueFollowUpTotalExact ? dueFollowUpTotal.toLocaleString() : dueFollowUpTotal ? `${dueFollowUpTotal.toLocaleString()}+` : "Queue count unavailable"} need Follow-up {followUpStage}</strong>
             <span className="muted"> · waited at least {followUpAfterHours} hours · {followUpSegment === "all_unanswered" ? "all unanswered" : followUpSegment === "auto_reply" ? "auto reply only" : "no reply"}</span>
           </div>
 
@@ -3182,21 +3231,26 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
                 onChange={(e) => setFollowUpLimit(Math.max(1, Math.round(Number(e.target.value || 100))))}
               />
               <label className="checkbox-row" style={{ marginBottom: 0 }}>
-                <input type="checkbox" checked={followUpSendAll} disabled={selectedDueFollowUpIds.length > 0} onChange={(e) => setFollowUpSendAll(e.target.checked)} />
-                <span>Send all {dueFollowUpTotal.toLocaleString()} due</span>
+                <input type="checkbox" checked={followUpSendAll} disabled={selectedDueFollowUpIds.length > 0 || !dueFollowUpTotalExact} onChange={(e) => setFollowUpSendAll(e.target.checked)} />
+                <span>{dueFollowUpTotalExact ? `Send all ${dueFollowUpTotal.toLocaleString()} due` : "Refresh exact count before Send all"}</span>
               </label>
             </div>
           </div>
 
           <div className="notice" style={{ marginTop: 12 }}>
-            {Object.entries(followUpLanguageSummary.counts).length
+            {dueFollowUpWarning ? <><strong>Queue refresh delayed.</strong> {dueFollowUpWarning}</> : null}
+            {!dueFollowUpWarning && Object.entries(followUpLanguageSummary.counts).length
               ? Object.entries(followUpLanguageSummary.counts).map(([language, count]) => `${language} ${count}`).join(" · ")
-              : "No eligible prospects loaded"}
-            {followUpLanguageSummary.missing
+              : !dueFollowUpWarning && dueFollowUpTotal > 0
+                ? "Translation preview is not loaded yet"
+                : !dueFollowUpWarning
+                  ? "No eligible prospects loaded"
+                  : null}
+            {!dueFollowUpWarning && followUpLanguageSummary.missing
               ? ` · ${followUpLanguageSummary.missing} missing reviewed translation in preview`
-              : followUpLanguageSummary.checked && followUpLanguageSummary.complete
+              : !dueFollowUpWarning && followUpLanguageSummary.checked && followUpLanguageSummary.complete
                 ? " · Translation coverage complete"
-                : followUpLanguageSummary.checked
+                : !dueFollowUpWarning && followUpLanguageSummary.checked
                   ? ` · Preview checked ${followUpLanguageSummary.checked.toLocaleString()} of ${followUpLanguageSummary.intended.toLocaleString()}`
                   : ""}
             {selectedDueFollowUpIds.length ? ` · ${selectedDueFollowUpIds.length} exact prospect(s) selected` : ""}
@@ -3213,7 +3267,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
             </button>
           </div>
 
-          <details className="card" style={{ padding: 14, marginTop: 12, background: "rgba(255,255,255,0.03)" }}>
+          <details className="card" style={{ padding: 14, marginTop: 12, background: "rgba(255,255,255,0.03)" }} onToggle={(event) => { if (event.currentTarget.open && dueFollowUps.length < Math.min(1000, dueFollowUpTotal || 1000)) void loadDueFollowUps({ previewLimit: 1000, preserveSelection: true }); }}> 
             <summary style={{ cursor: "pointer", fontWeight: 800 }}>Choose exact prospects</summary>
             <div className="actions" style={{ marginTop: 12 }}>
               <input className="input" style={{ flex: "1 1 260px" }} value={dueFollowUpSearch} onChange={(e) => setDueFollowUpSearch(e.target.value)} placeholder="Search business or email" />
@@ -3223,7 +3277,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
               }}>Select shown</button>
               <button className="btn secondary mini" type="button" onClick={() => setSelectedDueFollowUps({})}>Clear</button>
             </div>
-            <p className="muted">Showing the oldest {visibleDueFollowUps.length.toLocaleString()} loaded prospects. Selecting exact prospects overrides “How many”.</p>
+            <p className="muted">Showing the oldest {visibleDueFollowUps.length.toLocaleString()} loaded prospects{dueFollowUpTotal > visibleDueFollowUps.length ? ` from ${dueFollowUpTotalExact ? dueFollowUpTotal.toLocaleString() : `${dueFollowUpTotal.toLocaleString()}+`} due` : ""}. Selecting exact prospects overrides “How many”.</p>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Select</th><th>Business</th><th>Email</th><th>Next stage</th><th>Last message</th></tr></thead>
@@ -3281,11 +3335,11 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
 
         <div className="card" style={{ padding: 18 }}>
           <h3>Schedule Email</h3>
-          <p className="muted">Save a send for later. When it is due, open Scout and click Run Due Sends Now.</p>
+          <p className="muted">Save a send for later. The central worker starts it automatically when due, even after Scout is closed. Run Due Sends Now only confirms the worker immediately.</p>
           {dueSchedules.length ? (
             <div className="notice" style={{ marginBottom: 12 }}>
               <strong>{dueSchedules.length.toLocaleString()} schedule(s) due now.</strong>{" "}
-Click <strong>Run Due Sends Now</strong> to start.
+The central worker will start automatically. Click <strong>Run Due Sends Now</strong> only to confirm it immediately.
             </div>
           ) : null}
           {lastSavedSchedule ? (
@@ -3349,7 +3403,7 @@ Click <strong>Run Due Sends Now</strong> to start.
               disabled={busy || scheduleRunnerBusy}
               onClick={sendDueSchedulesNow}
             >
-              {scheduleRunnerBusy ? "Running Due Sends…" : "Run Due Sends Now"}
+              {scheduleRunnerBusy ? "Confirming Worker…" : "Run Due Sends Now"}
             </button>
           </div>
 

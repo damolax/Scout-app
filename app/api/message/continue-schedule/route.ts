@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase-server';
 import { createAppNotification } from '@/lib/notifications';
-import { ensureMessageWorker, workerSecret } from '@/lib/message-worker';
+import { ensureMessageWorker } from '@/lib/message-worker';
 
 function formatError(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -83,38 +83,15 @@ export async function POST(request: NextRequest) {
     });
 
     const workerSetup = await ensureMessageWorker(request.nextUrl.origin);
-    const secret = workerSecret();
-    const cookie = request.headers.get('cookie') || '';
-    let workerKick: any = null;
-    try {
-      const workerResponse = await fetch(`${request.nextUrl.origin}/api/message/run-schedules`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(cookie ? { cookie } : {}),
-          ...(secret ? { 'x-schedule-worker-secret': secret } : {}),
-        },
-        body: JSON.stringify({ limit: 1, scheduleId, workspaceId, token: secret }),
-        signal: AbortSignal.timeout(55_000),
-        cache: 'no-store',
-      });
-      workerKick = await workerResponse.json().catch(() => ({ success: workerResponse.ok }));
-      if (!workerResponse.ok && workerKick?.success !== false) {
-        workerKick = { ...workerKick, success: false, error: `Worker returned HTTP ${workerResponse.status}.` };
-      }
-    } catch (error) {
-      workerKick = { success: false, error: error instanceof Error ? error.message : String(error) };
-    }
-
-    const result = Array.isArray(workerKick?.results) ? workerKick.results[0] : null;
-    const failed = workerKick?.success === false || result?.status === 'failed';
     return NextResponse.json({
-      success: !failed,
-      error: failed ? String(result?.reason || workerKick?.error || 'The worker could not continue this job.') : undefined,
+      success: true,
+      warning: workerSetup.ready ? undefined : workerSetup.error,
+      accepted: true,
+      executionMode: 'central_worker',
       schedule: data,
-      workerKick,
       workerSetup,
-    }, { status: failed ? 503 : 200 });
+    });
+
   } catch (error) {
     return NextResponse.json({ success: false, error: formatError(error) }, { status: 500 });
   }
