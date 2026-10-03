@@ -14,8 +14,21 @@ const SCOUT_TYPES: Array<{ id: ScoutType; title: string; description: string; ic
   { id: 'custom', title: 'Custom Scout', description: 'Define any niche or prospect type without creating another app.', icon: SlidersHorizontal, niche: '' },
 ];
 
+const DURATIONS = [
+  [10, '10 minutes'], [30, '30 minutes'], [60, '1 hour'], [360, '6 hours'],
+  [720, '12 hours'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'],
+] as const;
+
 function csv(value: string) {
   return value.split(/[,\n]+/).map((item) => item.trim()).filter(Boolean);
+}
+
+function elapsedLabel(run: any) {
+  const started = new Date(String(run?.started_at || run?.created_at || '')).getTime();
+  if (!Number.isFinite(started)) return 'Queued';
+  const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  if (seconds >= 3600) return Math.floor(seconds / 3600) + 'h ' + Math.floor((seconds % 3600) / 60) + 'm';
+  return Math.floor(seconds / 60) + 'm';
 }
 
 function durationLabel(seconds: number) {
@@ -37,23 +50,31 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
   const [genders, setGenders] = useState('any');
   const [requireWebsite, setRequireWebsite] = useState(true);
   const [requireEmail, setRequireEmail] = useState(true);
-  const [maxPages, setMaxPages] = useState(35);
-  const [maxQueries, setMaxQueries] = useState(5);
+  const [background, setBackground] = useState(true);
+  const [maxPages, setMaxPages] = useState(7);
+  const [maxQueries, setMaxQueries] = useState(3);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [authorJobs, setAuthorJobs] = useState<any[]>([]);
   const [activeAuthorJob, setActiveAuthorJob] = useState<any>(null);
+  const [genericRuns, setGenericRuns] = useState<any[]>([]);
   const [quickResult, setQuickResult] = useState<any>(null);
 
   const selectedType = useMemo(() => SCOUT_TYPES.find((item) => item.id === type) || SCOUT_TYPES[0], [type]);
+  const activeGenericRun = useMemo(
+    () => genericRuns.find((run) => run.scout_type === type && ['queued','running','paused'].includes(String(run.status))),
+    [genericRuns, type],
+  );
 
   function chooseType(next: ScoutType) {
     setType(next);
     const config = SCOUT_TYPES.find((item) => item.id === next);
     if (config && next !== 'custom') setNiche(config.niche);
     if (next === 'author') setNiche('authors');
-    setQuickResult(null); setNotice(''); setError('');
+    setQuickResult(null);
+    setNotice('');
+    setError('');
   }
 
   const loadAuthorJobs = useCallback(async () => {
@@ -64,12 +85,9 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
       if (!response.ok) throw new Error(json.error || json.detail || 'Could not load Author Scout jobs.');
       setAuthorJobs(json.jobs || []);
       const active = (json.jobs || []).find((job: any) => ['queued','starting','running'].includes(String(job.status)));
-      if (active) {
-        const detailResponse = await fetch('/api/scout/authors?workspace_id=' + encodeURIComponent(workspaceId) + '&job_id=' + encodeURIComponent(active.id), { cache: 'no-store' });
-        const detail = await detailResponse.json();
-        if (detailResponse.ok) setActiveAuthorJob(detail);
-      } else if (activeAuthorJob?.job?.id) {
-        const detailResponse = await fetch('/api/scout/authors?workspace_id=' + encodeURIComponent(workspaceId) + '&job_id=' + encodeURIComponent(activeAuthorJob.job.id), { cache: 'no-store' });
+      const jobId = active?.id || activeAuthorJob?.job?.id;
+      if (jobId) {
+        const detailResponse = await fetch('/api/scout/authors?workspace_id=' + encodeURIComponent(workspaceId) + '&job_id=' + encodeURIComponent(jobId), { cache: 'no-store' });
         const detail = await detailResponse.json();
         if (detailResponse.ok) setActiveAuthorJob(detail);
       }
@@ -78,6 +96,18 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
     }
   }, [type, workspaceId, activeAuthorJob?.job?.id]);
 
+  const loadGenericRuns = useCallback(async () => {
+    if (type === 'author') return;
+    try {
+      const response = await fetch('/api/scout/runs?workspace_id=' + encodeURIComponent(workspaceId), { cache: 'no-store' });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || 'Could not load background Scout runs.');
+      setGenericRuns(json.runs || []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [type, workspaceId]);
+
   useEffect(() => {
     if (type !== 'author') return;
     loadAuthorJobs();
@@ -85,9 +115,30 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
     return () => window.clearInterval(timer);
   }, [type, loadAuthorJobs]);
 
+  useEffect(() => {
+    if (type === 'author') return;
+    loadGenericRuns();
+    const timer = window.setInterval(loadGenericRuns, 8000);
+    return () => window.clearInterval(timer);
+  }, [type, loadGenericRuns]);
+
+  function discoverySignals() {
+    return [
+      type === 'shopify' ? 'shopify store owner founder contact email' : '',
+      type === 'website_design' ? 'contact owner website book a call get a quote' : '',
+      type === 'automation' ? 'booking appointment quote enquiry contact' : '',
+      type === 'planner' ? 'digital planner shop creator contact email' : '',
+      instructions,
+    ].filter(Boolean);
+  }
+
   async function start(event: FormEvent) {
     event.preventDefault();
-    setBusy(true); setError(''); setNotice(''); setQuickResult(null);
+    setBusy(true);
+    setError('');
+    setNotice('');
+    setQuickResult(null);
+
     try {
       if (type === 'author') {
         const response = await fetch('/api/scout/authors', {
@@ -118,36 +169,56 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
         const detail = await fetch('/api/scout/authors?workspace_id=' + encodeURIComponent(workspaceId) + '&job_id=' + encodeURIComponent(json.job_id));
         const detailJson = await detail.json();
         if (detail.ok) setActiveAuthorJob(detailJson);
-      } else {
-        const response = await fetch('/api/source-scout/auto-run', {
+        return;
+      }
+
+      if (background) {
+        const response = await fetch('/api/scout/runs', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            workspaceId,
-            prospectType: type,
-            sourceMode: 'bing_dork',
+            workspace_id: workspaceId,
+            action: 'start',
+            scout_type: type,
             niche: niche || selectedType.niche,
             location,
             country,
-            maxPages,
-            maxSearchQueries: maxQueries,
-            directEmailsReady: true,
-            enqueueWebsiteAutoScout: true,
-            scoutSignals: [
-              type === 'shopify' ? 'shopify store owner founder contact email' : '',
-              type === 'website_design' ? 'contact owner website book a call get a quote' : '',
-              type === 'automation' ? 'booking appointment quote enquiry contact' : '',
-              type === 'planner' ? 'digital planner shop creator contact email' : '',
-              instructions,
-            ].filter(Boolean).join('\n'),
-            audienceCategoryName: selectedType.title,
+            category: selectedType.title,
+            signals: discoverySignals(),
+            max_pages: maxPages,
+            max_search_queries: maxQueries,
+            duration_minutes: duration,
           }),
         });
         const json = await response.json();
-        if (!response.ok || json.success === false) throw new Error(json.error || 'Scout run failed.');
-        setQuickResult(json);
-        setNotice('Scout found and imported prospects. Website-only prospects are now in the background email-enrichment queue.');
+        if (!response.ok) throw new Error(json.error || 'Could not start background Scout.');
+        setNotice(json.warning || 'Background Scout started. You can close this page; the server worker will keep scouting and queue website-only prospects for email enrichment.');
+        await loadGenericRuns();
+        return;
       }
+
+      const response = await fetch('/api/source-scout/auto-run', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId,
+          prospectType: type,
+          sourceMode: 'bing_dork',
+          niche: niche || selectedType.niche,
+          location,
+          country,
+          maxPages,
+          maxSearchQueries: maxQueries,
+          directEmailsReady: true,
+          enqueueWebsiteAutoScout: true,
+          scoutSignals: discoverySignals().join('\n'),
+          audienceCategoryName: selectedType.title,
+        }),
+      });
+      const json = await response.json();
+      if (!response.ok || json.success === false) throw new Error(json.error || 'Scout run failed.');
+      setQuickResult(json);
+      setNotice('Quick Scout finished. Website-only prospects are now in the background email-enrichment queue.');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -169,8 +240,31 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
       if (!response.ok) throw new Error(json.error || json.detail || 'Could not stop Author Scout.');
       setNotice('Stop requested. Authors already found remain in Prospects.');
       await loadAuthorJobs();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stopGenericRun() {
+    if (!activeGenericRun?.id) return;
+    setBusy(true); setError('');
+    try {
+      const response = await fetch('/api/scout/runs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspace_id: workspaceId, action: 'stop', run_id: activeGenericRun.id }),
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error || 'Could not stop Scout.');
+      setNotice('Scout stopped. Prospects already found remain in Prospects.');
+      await loadGenericRuns();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -190,9 +284,9 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
         <div className="topbar" style={{ marginBottom: 16 }}>
           <div>
             <span className="badge">{selectedType.title}</span>
-            <h3 style={{ margin: '8px 0 0' }}>{type === 'author' ? 'Background Scout' : 'Quick Scout + background enrichment'}</h3>
+            <h3 style={{ margin: '8px 0 0' }}>{type === 'author' || background ? 'Background Scout' : 'Quick Scout'}</h3>
           </div>
-          {type === 'author' && <span className="muted">Runs on the Author Scout worker even after you close this page.</span>}
+          <span className="muted">{type === 'author' || background ? 'Runs on a server worker after you close this page.' : 'Runs once while this request is open, then enrichment continues in the background.'}</span>
         </div>
 
         <form onSubmit={start} className="stack">
@@ -208,26 +302,34 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
             <label><span>Languages</span><input value={languages} onChange={(e) => setLanguages(e.target.value)} placeholder="English, Spanish" /></label>
             <label><span>Gender routes</span><input value={genders} onChange={(e) => setGenders(e.target.value)} placeholder="any, male, female" /></label>
             <label><span>Run for</span><select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              <option value={10}>10 minutes</option><option value={30}>30 minutes</option><option value={60}>1 hour</option>
-              <option value={360}>6 hours</option><option value={720}>12 hours</option><option value={1440}>1 day</option>
-              <option value={4320}>3 days</option><option value={10080}>7 days</option>
+              {DURATIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select></label>
           </div>}
 
           {type === 'author' ? <div className="actions">
             <label className="checkbox-row"><input type="checkbox" checked={requireWebsite} onChange={(e) => setRequireWebsite(e.target.checked)} /> Require website signal</label>
             <label className="checkbox-row"><input type="checkbox" checked={requireEmail} onChange={(e) => setRequireEmail(e.target.checked)} /> Require public professional email signal</label>
-          </div> : <div className="grid two">
-            <label><span>Search queries</span><input type="number" min={1} max={8} value={maxQueries} onChange={(e) => setMaxQueries(Number(e.target.value))} /></label>
-            <label><span>Pages to inspect</span><input type="number" min={5} max={60} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value))} /></label>
-          </div>}
+          </div> : <>
+            <div className="actions">
+              <label className="checkbox-row"><input type="checkbox" checked={background} onChange={(e) => setBackground(e.target.checked)} /> Keep scouting in the background</label>
+            </div>
+            <div className="grid grid-3">
+              <label><span>Search queries per cycle</span><input type="number" min={1} max={5} value={maxQueries} onChange={(e) => setMaxQueries(Number(e.target.value))} /></label>
+              <label><span>Pages per cycle</span><input type="number" min={4} max={10} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value))} /></label>
+              {background && <label><span>Run for</span><select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
+                {DURATIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select></label>}
+            </div>
+          </>}
 
           <label><span>Additional instructions</span><textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={3} placeholder={type === 'author' ? 'Avoid celebrity authors. Prefer current work and direct public contacts.' : 'Describe the type of prospect or public signals you care about.'} /></label>
 
           <div className="actions">
-            <button className="btn" disabled={busy}>{busy ? 'Working…' : type === 'author' ? 'Start Background Scout' : 'Run Scout'}</button>
+            <button className="btn" disabled={busy}>{busy ? 'Working…' : type === 'author' || background ? 'Start Background Scout' : 'Run Quick Scout'}</button>
             {type === 'author' && activeAuthorJob?.job && ['queued','starting','running'].includes(String(activeAuthorJob.job.status)) &&
               <button className="btn secondary" type="button" disabled={busy} onClick={stopAuthorJob}>Stop Scout</button>}
+            {type !== 'author' && activeGenericRun &&
+              <button className="btn secondary" type="button" disabled={busy} onClick={stopGenericRun}>Stop Scout</button>}
           </div>
         </form>
       </div>
@@ -254,6 +356,20 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
             <td>{row.email || 'Researching'}</td><td>{row.website ? <a href={row.website} target="_blank" rel="noreferrer">Open ↗</a> : '—'}</td>
           </tr>)}</tbody>
         </table></div>}
+      </div>}
+
+      {type !== 'author' && activeGenericRun && <div className="card" style={{ padding: 18 }}>
+        <div className="topbar">
+          <div><span className="badge">{activeGenericRun.status}</span><h3 style={{ margin: '8px 0 0' }}>{selectedType.title} Background Scout</h3></div>
+          <strong>{Number(activeGenericRun.qualified_count || 0).toLocaleString()} saved</strong>
+        </div>
+        <p className="muted">{activeGenericRun.progress_text || 'Waiting for the background worker.'}</p>
+        <div className="grid grid-4">
+          <div><strong>{Number(activeGenericRun.discovered_count || 0).toLocaleString()}</strong><div className="muted">Discovered</div></div>
+          <div><strong>{Number(activeGenericRun.qualified_count || 0).toLocaleString()}</strong><div className="muted">New prospects</div></div>
+          <div><strong>{Number(activeGenericRun.email_count || 0).toLocaleString()}</strong><div className="muted">Emails found</div></div>
+          <div><strong>{elapsedLabel(activeGenericRun)}</strong><div className="muted">Elapsed</div></div>
+        </div>
       </div>}
 
       {type !== 'author' && quickResult && <div className="grid grid-4">
