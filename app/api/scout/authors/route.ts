@@ -108,6 +108,7 @@ export async function POST(request: NextRequest) {
     }
 
     const countries = Array.isArray(body.countries) ? body.countries : [];
+    const presetId = cleanText(body.preset_id || 'custom').slice(0, 80) || 'custom';
     const genres = Array.isArray(body.genres) ? body.genres : [];
     const positions = Array.isArray(body.positions) ? body.positions : [];
     const languages = Array.isArray(body.languages) ? body.languages : [];
@@ -115,6 +116,21 @@ export async function POST(request: NextRequest) {
     const sourceTypes = Array.isArray(body.source_types) ? body.source_types : ['general'];
     const genders = Array.isArray(body.genders) && body.genders.length ? body.genders : ['any'];
     const duration = Math.max(1, Math.min(Number(body.duration_minutes || 10), 10080));
+
+    const supabase = createAdminClient();
+    const { data: recentRuns } = await supabase
+      .from('scout_runs')
+      .select('raw,created_at')
+      .eq('workspace_id', workspaceId)
+      .eq('scout_type', 'author')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    const presetRunsToday = (recentRuns || []).filter((run: any) => {
+      const raw = run.raw && typeof run.raw === 'object' ? run.raw : {};
+      return String(raw.preset_id || '') === presetId
+        && String(run.created_at || '').slice(0, 10) === new Date().toISOString().slice(0, 10);
+    }).length;
+    const rotationSeed = presetId + ':' + new Date().toISOString().slice(0, 10) + ':' + String(presetRunsToday);
 
     const requestBody = {
       query: cleanText(body.instructions),
@@ -136,6 +152,8 @@ export async function POST(request: NextRequest) {
         require_public_email: body.require_public_email !== false,
       },
       duration_minutes: duration,
+      rotation_seed: rotationSeed,
+      preset_id: presetId,
     };
 
     const json = await authorScoutRequest(workspace, '/api/v1/research/jobs', {
@@ -143,19 +161,18 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(requestBody),
     });
 
-    const supabase = createAdminClient();
     const { data: run } = await supabase.from('scout_runs').insert({
       workspace_id: workspaceId,
       scout_type: 'author',
       status: 'queued',
       target_count: Number(json.requested_count || 0) || null,
       filters: requestBody,
-      raw: { author_job_id: json.job_id, author_scout: true },
+      raw: { author_job_id: json.job_id, author_scout: true, preset_id: presetId, rotation_seed: rotationSeed },
       requested_by: user.id,
       progress_text: 'Author Scout queued',
     }).select('id').single();
 
-    return NextResponse.json({ ...json, scout_run_id: run?.id || null });
+    return NextResponse.json({ ...json, scout_run_id: run?.id || null, preset_id: presetId, rotation_seed: rotationSeed });
   } catch (error) {
     return NextResponse.json({ error: err(error) }, { status: Number((error as any)?.status || 400) });
   }
