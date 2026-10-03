@@ -53,7 +53,7 @@ class SmtpSession {
     this.socket.write(command + '\r\n');
     const result = await wait;
     const allowed = Array.isArray(expected) ? expected : [expected];
-    if (!allowed.includes(result.code)) throw new Error('SMTP ' + result.code + ': ' + result.text);
+    if (!allowed.includes(result.code)) throw smtpError(result.code, result.text);
     return result;
   }
 }
@@ -89,6 +89,33 @@ function parseResponse(buffer: string) {
     }
   }
   return null;
+}
+
+function smtpError(code: number, text: string) {
+  const message = 'SMTP ' + code + ': ' + text;
+  const lower = String(text || '').toLowerCase();
+  const error = new Error(message) as Error & { status?: number; limitHit?: boolean; blocked?: boolean };
+  error.status = code;
+  error.limitHit =
+    code === 421 ||
+    code === 450 ||
+    code === 451 ||
+    code === 452 ||
+    lower.includes('daily') ||
+    lower.includes('quota') ||
+    lower.includes('rate') ||
+    lower.includes('limit');
+  error.blocked =
+    code === 550 ||
+    code === 551 ||
+    code === 552 ||
+    code === 553 ||
+    code === 554 ||
+    lower.includes('blocked') ||
+    lower.includes('spam') ||
+    lower.includes('policy') ||
+    lower.includes('rejected');
+  return error;
 }
 
 function normalizeRaw(raw: string) {
@@ -143,7 +170,7 @@ export async function sendRawSmtp(options: SendOptions) {
     const wait = session.response();
     session.socket.write(normalizeRaw(options.raw) + '\r\n.\r\n');
     const result = await wait;
-    if (result.code !== 250) throw new Error('SMTP ' + result.code + ': ' + result.text);
+    if (result.code !== 250) throw smtpError(result.code, result.text);
     await session.command('QUIT', 221).catch(() => null);
     return { id: '', threadId: '', response: result.text };
   } finally {
