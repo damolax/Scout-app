@@ -595,9 +595,13 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     return Math.max(0, daily - Math.max(0, used));
   }
   function senderAvailable(account: GmailAccount) {
+    const authMode = String(account.auth_mode || "oauth").toLowerCase();
+    const connected = authMode === "smtp"
+      ? Boolean(account.smtp_verified_at)
+      : Boolean(account.access_token || account.refresh_token);
     return ["connected", "ready"].includes(String(account.status || "")) &&
       !isPaused(account) &&
-      Boolean(account.access_token || account.refresh_token) &&
+      connected &&
       senderRemainingToday(account) > 0;
   }
   const connectedAccounts = accounts.filter(senderAvailable);
