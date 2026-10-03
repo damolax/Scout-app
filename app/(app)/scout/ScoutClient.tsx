@@ -14,6 +14,49 @@ const SCOUT_TYPES: Array<{ id: ScoutType; title: string; description: string; ic
   { id: 'custom', title: 'Custom Scout', description: 'Define any niche or prospect type without creating another app.', icon: SlidersHorizontal, niche: '' },
 ];
 
+const AUTHOR_PRESETS = [
+  {
+    id: 'emerging-fiction',
+    name: 'Emerging fiction authors',
+    description: 'Under-the-radar fiction authors with current activity, an official website and a public professional email.',
+    positions: 'emerging author, mid-list author',
+    genres: 'Literary Fiction, Historical Fiction, Contemporary Fiction, Mystery, Romance, Fantasy, Science Fiction',
+    instructions: 'Prefer non-celebrity authors with recent books, events, newsletters, works in progress, publisher notes or other current activity.',
+  },
+  {
+    id: 'recent-release',
+    name: 'Authors with recent releases',
+    description: 'Authors with a recent book, launch, event or active work signal.',
+    positions: 'emerging author, mid-list author',
+    genres: '',
+    instructions: 'Prioritize authors with a recent release, book launch, event, newsletter, interview, work in progress or publisher update. Avoid celebrities.',
+  },
+  {
+    id: 'self-published-active',
+    name: 'Active self-published authors',
+    description: 'Independent authors who are actively publishing and have their own web presence.',
+    positions: 'independent author, self-published author',
+    genres: '',
+    instructions: 'Prefer active independent/self-published authors with an official website and public professional email. Avoid authors with no current activity.',
+  },
+  {
+    id: 'association-members',
+    name: 'Writers association & festival authors',
+    description: 'Find authors through associations, literature centres, festivals, fairs and author directories.',
+    positions: 'emerging author, mid-list author',
+    genres: '',
+    instructions: 'Use writers associations, literature centres, festivals, book fairs and reputable author directories as discovery routes, then verify the author independently.',
+  },
+  {
+    id: 'custom',
+    name: 'Custom author search',
+    description: 'Choose the country, genre, stage and instructions yourself.',
+    positions: 'emerging author, mid-list author',
+    genres: '',
+    instructions: '',
+  },
+] as const;
+
 const DURATIONS = [
   [10, '10 minutes'], [30, '30 minutes'], [60, '1 hour'], [360, '6 hours'],
   [720, '12 hours'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'],
@@ -44,7 +87,8 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
   const [niche, setNiche] = useState('authors');
   const [instructions, setInstructions] = useState('');
   const [duration, setDuration] = useState(30);
-  const [genres, setGenres] = useState('');
+  const [authorPreset, setAuthorPreset] = useState('emerging-fiction');
+  const [genres, setGenres] = useState('Literary Fiction, Historical Fiction, Contemporary Fiction, Mystery, Romance, Fantasy, Science Fiction');
   const [positions, setPositions] = useState('emerging author, mid-list author');
   const [languages, setLanguages] = useState('');
   const [genders, setGenders] = useState('any');
@@ -66,6 +110,15 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
     () => genericRuns.find((run) => run.scout_type === type && ['queued','running','paused'].includes(String(run.status))),
     [genericRuns, type],
   );
+
+  function applyAuthorPreset(id: string) {
+    setAuthorPreset(id);
+    const preset = AUTHOR_PRESETS.find((item) => item.id === id);
+    if (!preset) return;
+    setPositions(preset.positions);
+    setGenres(preset.genres);
+    setInstructions(preset.instructions);
+  }
 
   function chooseType(next: ScoutType) {
     setType(next);
@@ -147,6 +200,7 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
           body: JSON.stringify({
             workspace_id: workspaceId,
             action: 'start',
+            preset_id: authorPreset,
             countries: csv(country),
             genres: csv(genres),
             positions: csv(positions),
@@ -298,13 +352,24 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
             {type === 'author' && <label><span>Career stage</span><input value={positions} onChange={(e) => setPositions(e.target.value)} placeholder="emerging author, mid-list author" /></label>}
           </div>
 
-          {type === 'author' && <div className="grid grid-3">
+          {type === 'author' && <>
+            <div className="card" style={{ padding: 14 }}>
+              <div className="grid two">
+                <label><span>Author search preset</span><select value={authorPreset} onChange={(e) => applyAuthorPreset(e.target.value)}>
+                  {AUTHOR_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                </select></label>
+                <div className="notice">
+                  <strong>Auto-rotating query:</strong> {AUTHOR_PRESETS.find((item) => item.id === authorPreset)?.description || 'Custom search'} Scout rotates the underlying route order each day and again after this preset is run, so repeated searches explore different sources instead of restarting from the same query order.
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-3">
             <label><span>Languages</span><input value={languages} onChange={(e) => setLanguages(e.target.value)} placeholder="English, Spanish" /></label>
             <label><span>Gender routes</span><input value={genders} onChange={(e) => setGenders(e.target.value)} placeholder="any, male, female" /></label>
             <label><span>Run for</span><select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
               {DURATIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select></label>
-          </div>}
+          </div></>}
 
           {type === 'author' ? <div className="actions">
             <label className="checkbox-row"><input type="checkbox" checked={requireWebsite} onChange={(e) => setRequireWebsite(e.target.checked)} /> Require website signal</label>
