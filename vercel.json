@@ -25,6 +25,12 @@
     },
     "app/api/message/wake-schedules/route.ts": {
       "maxDuration": 30
+    },
+    "app/api/cron/scout-worker/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/intelligence/analyze/route.ts": {
+      "maxDuration": 300
     }
   }
 }
