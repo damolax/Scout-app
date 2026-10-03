@@ -13,6 +13,8 @@ import { businessIdentityKeys } from "@/lib/normalize";
 import { normalizeEmailAddress, verifyEmailBasic } from "@/lib/email-verification";
 import { effectiveDailyLimit, effectiveRunLimit, recordSenderHealthEvent } from "@/lib/sender-health";
 import { featureFlags } from "@/lib/feature-flags";
+import { decryptSenderSecret } from "@/lib/smtp-credentials";
+import { sendRawSmtp } from "@/lib/smtp-client";
 
 type AnyRow = Record<string, any>;
 
@@ -545,10 +547,19 @@ async function loadAccounts(
     .order("next_eligible_at", { ascending: true, nullsFirst: true })
     .order("created_at", { ascending: true });
   if (error) throw error;
-  return (data || []).filter(
-    (account) =>
-      !isPaused(account) && (account.access_token || account.refresh_token),
-  );
+  return (data || []).filter((account) => {
+    if (isPaused(account)) return false;
+    const authMode = String(account.auth_mode || "oauth").toLowerCase();
+    if (authMode === "smtp") {
+      return Boolean(
+        account.smtp_verified_at &&
+        account.smtp_secret_ciphertext &&
+        account.smtp_secret_iv &&
+        account.smtp_secret_tag,
+      );
+    }
+    return Boolean(account.access_token || account.refresh_token);
+  });
 }
 
 async function guardTeamBusinessForSend(
@@ -1161,18 +1172,46 @@ async function runOneSchedule(
           let gmailMessageId = "";
           let gmailThreadId = "";
           if (!dryRun) {
-            const accessToken = await ensureAccessToken(supabase, account);
-            const result = await sendWithGmail(
-              accessToken,
-              String(account.email),
-              toEmail,
-              subject,
-              body,
-              account,
-              attachments,
-            );
-            gmailMessageId = result.id || "";
-            gmailThreadId = result.threadId || "";
+            const authMode = String(account.auth_mode || "oauth").toLowerCase();
+            if (authMode === "smtp") {
+              const appPassword = decryptSenderSecret({
+                ciphertext: String(account.smtp_secret_ciphertext || ""),
+                iv: String(account.smtp_secret_iv || ""),
+                tag: String(account.smtp_secret_tag || ""),
+              });
+              const message = buildMimeMessage({
+                from: String(account.email),
+                to: toEmail,
+                subject,
+                body,
+                identity: account,
+                attachments,
+              });
+              const result = await sendRawSmtp({
+                host: String(account.smtp_host || "smtp.gmail.com"),
+                port: Number(account.smtp_port || 465),
+                username: String(account.email),
+                password: appPassword,
+                from: String(account.email),
+                to: toEmail,
+                raw: message.raw,
+              });
+              gmailMessageId = result.id || "";
+              gmailThreadId = result.threadId || "";
+            } else {
+              const accessToken = await ensureAccessToken(supabase, account);
+              const result = await sendWithGmail(
+                accessToken,
+                String(account.email),
+                toEmail,
+                subject,
+                body,
+                account,
+                attachments,
+              );
+              gmailMessageId = result.id || "";
+              gmailThreadId = result.threadId || "";
+            }
           }
 
           const statusText = dryRun ? "dry_run" : "sent";
