@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { requireWorkspaceAccess } from '@/lib/require-workspace-access';
+import { ensureUnifiedScoutWorker } from '@/lib/scout-worker';
 
 const TYPES = new Set(['shopify','website_design','automation','planner','custom','business']);
 
@@ -76,7 +77,13 @@ export async function POST(request: NextRequest) {
       progress_text: 'Queued for background scouting.',
     }).select('*').single();
     if (error) throw error;
-    return NextResponse.json({ success: true, run: data });
+    const worker = await ensureUnifiedScoutWorker(request.nextUrl.origin);
+    return NextResponse.json({
+      success: true,
+      run: data,
+      worker,
+      warning: worker.ready ? null : 'Scout was queued, but the background worker still needs setup: ' + String(worker.error || 'unknown worker error'),
+    });
   } catch (error) {
     return NextResponse.json({ error: message(error) }, { status: Number((error as any)?.status || 400) });
   }
