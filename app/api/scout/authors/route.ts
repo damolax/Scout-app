@@ -2,6 +2,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { requireWorkspaceAccess } from '@/lib/require-workspace-access';
 import { authorScoutRequest } from '@/lib/author-scout-bridge';
@@ -40,7 +41,7 @@ async function syncAuthorResults(workspaceId: string, userId: string, results: a
       status: email ? 'ready' : 'found',
       score: Number(row.discovery_confidence || 0) || null,
       qualification_score: Number(row.discovery_confidence || 0) || null,
-      normalized_key: normalizedKey || ('author:' + String(row.id || crypto.randomUUID())),
+      normalized_key: normalizedKey || ('author:' + String(row.id || randomUUID())),
       raw: {
         authorScout: true,
         authorScoutProspectId: row.id || null,
