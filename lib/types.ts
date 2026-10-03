@@ -185,6 +185,11 @@ export type GmailAccount = {
   email: string;
   display_name: string | null;
   status: string;
+  auth_mode?: 'oauth' | 'smtp' | string | null;
+  smtp_host?: string | null;
+  smtp_port?: number | null;
+  smtp_secure?: boolean | null;
+  smtp_verified_at?: string | null;
   access_token?: string | null;
   refresh_token?: string | null;
   client_id?: string | null;
