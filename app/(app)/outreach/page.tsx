@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { getCurrentWorkspace } from '@/lib/workspace';
 import { featureFlags } from '@/lib/feature-flags';
-import MessageClient from '../message/MessageClient';
+import OutreachModesClient from './OutreachModesClient';
 
 export default async function OutreachPage() {
   const { workspace, error } = await getCurrentWorkspace();
@@ -10,14 +10,14 @@ export default async function OutreachPage() {
     <div className="stack">
       <div className="page-title">
         <h2>Outreach</h2>
-        <p>Prepare campaigns, rotate authorized senders, schedule messages, and let Scout's server-side worker continue after you close the browser.</p>
+        <p>Send one message at a time after review, or schedule an automatic campaign that continues from the server after you leave.</p>
       </div>
       <div className="quick-links">
-        <Link href="/sending-accounts" className="quick-link-card"><strong>Sending Accounts</strong><span>Connect Gmail with an App Password for automatic SMTP sending.</span></Link>
-        <Link href="/templates" className="quick-link-card"><strong>Templates</strong><span>Create first-touch and follow-up messages.</span></Link>
+        <Link href="/sending-accounts" className="quick-link-card"><strong>Sending Accounts</strong><span>Connect Gmail with an App Password for SMTP sending.</span></Link>
+        <Link href="/upload" className="quick-link-card"><strong>Upload Author File</strong><span>Import authors with email, research details, subject and prepared message columns.</span></Link>
         <Link href="/intelligence" className="quick-link-card"><strong>Use Intelligence</strong><span>Build outreach from public evidence.</span></Link>
       </div>
-      <MessageClient workspace={workspace} replySyncEnabled={featureFlags.gmailReplySync} />
+      <OutreachModesClient workspace={workspace} replySyncEnabled={featureFlags.gmailReplySync} />
     </div>
   );
 }
