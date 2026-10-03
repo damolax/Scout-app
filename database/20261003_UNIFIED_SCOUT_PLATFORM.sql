@@ -220,3 +220,125 @@ drop trigger if exists touch_scout_candidates_updated_at on public.scout_candida
 create trigger touch_scout_candidates_updated_at
 before update on public.scout_candidates
 for each row execute function public.touch_updated_at();
+
+
+-- Durable background worker for non-author Scout runs.
+-- Uses the same Supabase Cron + pg_net pattern as the existing message worker.
+create extension if not exists pg_net with schema extensions;
+create extension if not exists pg_cron;
+
+create or replace function public.configure_unified_scout_worker(
+  target_app_url text,
+  target_worker_secret text,
+  target_seconds integer default 60
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions, vault, cron, net
+as $$
+declare
+  clean_url text;
+  safe_seconds integer;
+  url_secret_id uuid;
+  worker_secret_id uuid;
+  scheduled_job_id bigint;
+  worker_command text;
+begin
+  clean_url := regexp_replace(trim(coalesce(target_app_url, '')), '/+$', '');
+  safe_seconds := greatest(30, least(300, coalesce(target_seconds, 60)));
+
+  if clean_url !~ '^https://[^[:space:]]+$' then
+    raise exception 'Scout worker app URL must be a valid HTTPS URL.';
+  end if;
+  if length(trim(coalesce(target_worker_secret, ''))) < 24 then
+    raise exception 'Scout worker secret must contain at least 24 characters.';
+  end if;
+
+  select id into url_secret_id
+  from vault.secrets
+  where name = 'scout_background_worker_app_url'
+  order by created_at desc
+  limit 1;
+
+  if url_secret_id is null then
+    perform vault.create_secret(clean_url, 'scout_background_worker_app_url', 'Scout app URL used by the background prospect worker.');
+  else
+    perform vault.update_secret(url_secret_id, clean_url, 'scout_background_worker_app_url', 'Scout app URL used by the background prospect worker.');
+  end if;
+
+  select id into worker_secret_id
+  from vault.secrets
+  where name = 'scout_background_worker_secret'
+  order by created_at desc
+  limit 1;
+
+  if worker_secret_id is null then
+    perform vault.create_secret(trim(target_worker_secret), 'scout_background_worker_secret', 'Private authorization secret for the background prospect worker.');
+  else
+    perform vault.update_secret(worker_secret_id, trim(target_worker_secret), 'scout_background_worker_secret', 'Private authorization secret for the background prospect worker.');
+  end if;
+
+  worker_command := $worker$
+    select net.http_post(
+      url := (select decrypted_secret from vault.decrypted_secrets where name = 'scout_background_worker_app_url' order by created_at desc limit 1)
+        || '/api/cron/scout-worker',
+      body := jsonb_build_object(
+        'limit', 1,
+        'token', (select decrypted_secret from vault.decrypted_secrets where name = 'scout_background_worker_secret' order by created_at desc limit 1)
+      ),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'scout_background_worker_secret' order by created_at desc limit 1)
+      ),
+      timeout_milliseconds := 55000
+    ) as request_id;
+  $worker$;
+
+  for scheduled_job_id in
+    select jobid from cron.job where jobname = 'scout-background-worker'
+  loop
+    perform cron.unschedule(scheduled_job_id);
+  end loop;
+
+  select cron.schedule(
+    'scout-background-worker',
+    safe_seconds::text || ' seconds',
+    worker_command
+  ) into scheduled_job_id;
+
+  return jsonb_build_object(
+    'ready', true,
+    'job_id', scheduled_job_id,
+    'job_name', 'scout-background-worker',
+    'schedule', safe_seconds::text || ' seconds',
+    'app_url', clean_url
+  );
+end;
+$$;
+
+revoke all on function public.configure_unified_scout_worker(text, text, integer) from public, anon, authenticated;
+grant execute on function public.configure_unified_scout_worker(text, text, integer) to service_role;
+
+create or replace function public.unified_scout_worker_status()
+returns jsonb
+language sql
+security definer
+set search_path = public, cron
+as $$
+  select coalesce((
+    select jsonb_build_object(
+      'ready', active,
+      'job_id', jobid,
+      'job_name', jobname,
+      'schedule', schedule
+    )
+    from cron.job
+    where jobname = 'scout-background-worker'
+    order by jobid desc
+    limit 1
+  ), jsonb_build_object('ready', false, 'job_name', 'scout-background-worker'));
+$$;
+
+revoke all on function public.unified_scout_worker_status() from public, anon, authenticated;
+grant execute on function public.unified_scout_worker_status() to service_role;
