@@ -212,6 +212,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   const [percent, setPercent] = useState(0);
   const [importing, setImporting] = useState(false);
   const [enqueueResearch, setEnqueueResearch] = useState(false);
+  const [listType, setListType] = useState<'business' | 'author'>('business');
   const [result, setResult] = useState<ImportResult | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -535,7 +536,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
             headers,
             category_id: category.id || null,
             category_name: category.name || null,
-            source_mode: 'csv_upload',
+            source_mode: listType === 'author' ? 'author_file_upload' : 'csv_upload',
             created_by: userData.user.id
           }, { onConflict: 'id' })
           .select('id')
@@ -545,7 +546,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       }, { retries: 2 });
 
       batchId = String(batch.id);
-      const compactRaw = deduped.length >= COMPACT_RAW_THRESHOLD;
+      const compactRaw = deduped.length >= COMPACT_RAW_THRESHOLD && listType !== 'author';
       const parts = makeImportChunks(deduped, compactRaw);
       const laneCount = Math.min(IMPORT_CONCURRENCY, Math.max(parts.length, 1));
       setPhase('importing');
@@ -612,6 +613,22 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         }
       }
 
+      if (inserted > 0) {
+        const prospectPatch: Record<string, unknown> = {
+          prospect_type: listType === 'author' ? 'author' : 'business',
+          updated_at: new Date().toISOString(),
+        };
+        if (listType === 'author') prospectPatch.category = category.name || 'Author';
+        const { error: typeError } = await supabase
+          .from('businesses')
+          .update(prospectPatch)
+          .eq('workspace_id', workspace.id)
+          .eq('import_batch_id', batchId);
+        if (typeError) {
+          setWarnings((current) => [...current, 'The file imported, but Scout could not tag every row with its list type: ' + formatImportError(typeError)]);
+        }
+      }
+
       const skippedTotal = skippedExistingQueue + skippedScouted + skippedTeam + duplicateRows.length + invalidRows.length;
 
       if (skippedTeam > 0) {
@@ -631,7 +648,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       const seconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
       setPercent(100);
       setPhase('done');
-      setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new business(es), skipped ${skippedTotal.toLocaleString()}.${skippedTeam ? ` ${skippedTeam.toLocaleString()} were already scouted by a team member and removed.` : ''} Rows with email were saved as Ready; no-email rows were saved as Pending for Auto Scout.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
+      setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new ${listType === 'author' ? 'author' : 'business'} prospect(s), skipped ${skippedTotal.toLocaleString()}.${skippedTeam ? ` ${skippedTeam.toLocaleString()} were already scouted by a team member and removed.` : ''} Rows with email were saved as Ready; no-email rows were saved as Pending for Auto Scout.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
     } catch (error) {
       const message = formatImportError(error);
       console.error('Scout reliable import failed:', error);
@@ -787,6 +804,17 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
 
   return (
     <div className="stack">
+      <div className="card" style={{ padding: 18 }}>
+        <h3 style={{ marginTop: 0 }}>What are you uploading?</h3>
+        <div className="actions">
+          <label className="checkbox-row"><input type="radio" name="list-type" checked={listType === 'business'} onChange={() => setListType('business')} /> General prospects</label>
+          <label className="checkbox-row"><input type="radio" name="list-type" checked={listType === 'author'} onChange={() => setListType('author')} /> Author file</label>
+        </div>
+        {listType === 'author' ? <div className="notice" style={{ marginTop: 12 }}>
+          Author files can include normal contact/research columns plus <strong>Subject</strong>, <strong>First Message</strong> or <strong>Message</strong>, personalization hook, books, evidence, language and source URLs. Scout preserves those columns so Manual Outreach can load the exact prepared message when you click an author.
+        </div> : null}
+      </div>
+
       <div className="card" style={{ padding: 18 }}>
         <label className="label">Upload CSV</label>
         <input className="input" type="file" accept=".csv,text/csv" onChange={onFile} />
