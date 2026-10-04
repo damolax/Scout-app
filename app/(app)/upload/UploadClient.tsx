@@ -67,6 +67,47 @@ function formatImportError(error: unknown) {
   return errorMessage(error, 'Unknown import error.');
 }
 
+const SHEETJS_BROWSER_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+
+async function loadSheetJs(): Promise<any> {
+  const existing = (window as any).XLSX;
+  if (existing) return existing;
+  await new Promise<void>((resolve, reject) => {
+    const prior = document.querySelector('script[data-scout-sheetjs="true"]') as HTMLScriptElement | null;
+    if (prior) {
+      prior.addEventListener('load', () => resolve(), { once: true });
+      prior.addEventListener('error', () => reject(new Error('Spreadsheet reader could not load. Save the workbook as CSV and retry.')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = SHEETJS_BROWSER_URL;
+    script.async = true;
+    script.crossOrigin = 'anonymous';
+    script.dataset.scoutSheetjs = 'true';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Spreadsheet reader could not load. Save the workbook as CSV and retry.'));
+    document.head.appendChild(script);
+  });
+  const loaded = (window as any).XLSX;
+  if (!loaded) throw new Error('Spreadsheet reader loaded without exposing XLSX. Save the workbook as CSV and retry.');
+  return loaded;
+}
+
+async function fileToCsvText(file: File): Promise<{ text: string; sheetName?: string }> {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith('.csv') || lower.endsWith('.txt')) return { text: await file.text() };
+  if (!lower.endsWith('.xlsx')) throw new Error('Scout currently accepts CSV and XLSX files.');
+  const XLSX = await loadSheetJs();
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false, dense: true });
+  const firstSheetName = String(workbook.SheetNames?.[0] || '');
+  if (!firstSheetName) throw new Error('The workbook does not contain a readable worksheet.');
+  const sheet = workbook.Sheets[firstSheetName];
+  const text = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+  if (!String(text || '').trim()) throw new Error('The first worksheet is empty.');
+  return { text, sheetName: firstSheetName };
+}
+
 function csvEscape(value: unknown) {
   const text = String(value ?? '');
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -431,17 +472,22 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     setFileName(file.name);
     if (file.size > MAX_IMPORT_FILE_BYTES) {
       setPhase('failed');
-      setProgress(`This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The safe browser limit is ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)} MB. Split it into smaller CSV files while keeping each file under 100,000 usable rows.`);
+      setProgress(`This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The safe browser limit is ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)} MB. Split it into smaller CSV/XLSX files while keeping each file under 100,000 usable rows.`);
       setErrors([`File is too large for a reliable browser upload (${(file.size / 1024 / 1024).toFixed(1)} MB).`]);
       event.target.value = '';
       return;
     }
 
     setPhase('reading');
-    setProgress('Reading CSV locally. The app only renders a 25-row preview, so large files should not freeze the page...');
+    setProgress(file.name.toLowerCase().endsWith('.xlsx')
+      ? 'Reading the first Excel worksheet locally. The workbook itself is not uploaded to Scout.'
+      : 'Reading CSV locally. The app only renders a 25-row preview, so large files should not freeze the page...');
     try {
-      const text = await file.text();
-      const parsed = await parseCsvText(text);
+      const converted = await fileToCsvText(file);
+      const parsed = await parseCsvText(converted.text);
+      if (converted.sheetName) {
+        setWarnings((current) => [...current, 'Imported worksheet: ' + converted.sheetName + '. Scout uses the first worksheet in an XLSX file.']);
+      }
       setHeaders(parsed.headers);
       setInvalidRows(parsed.invalidRows);
       setErrors(parsed.errors);
@@ -458,7 +504,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         await checkTargetMismatch(parsed.headers);
       } catch (warningError) {
         console.warn('Target comparison skipped because Supabase was temporarily unavailable:', warningError);
-        setWarnings((current) => [...current, 'The target comparison could not be completed, but the CSV is ready and can still be imported.']);
+        setWarnings((current) => [...current, 'The target comparison could not be completed, but the file is ready and can still be imported.']);
       }
       setRows(parsed.rows);
       setPhase('ready');
@@ -468,7 +514,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     } catch (error) {
       setPhase('failed');
       setErrors([formatImportError(error)]);
-      setProgress('File could not be read. Confirm it is a valid CSV and try again.');
+      setProgress('File could not be read. Confirm it is a valid CSV/XLSX file and try again.');
     } finally {
       event.target.value = '';
     }
@@ -817,7 +863,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
 
       <div className="card" style={{ padding: 18 }}>
         <label className="label">Upload CSV</label>
-        <input className="input" type="file" accept=".csv,text/csv" onChange={onFile} />
+        <input className="input" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onFile} />
         <div className="grid grid-2" style={{ marginTop: 12 }}>
           <div>
             <label className="label">Audience category for this upload</label>
@@ -851,7 +897,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
 
         <div className="actions">
           <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : rows.length ? `Import ${rows.length.toLocaleString()} business(es)` : 'Choose CSV to enable import'}</button>
-          {!rows.length ? <span className="muted">Select the CSV again after a refresh or cancelled legacy job; browsers do not retain access to local files.</span> : null}
+          {!rows.length ? <span className="muted">Select the file again after a refresh or cancelled legacy job; browsers do not retain access to local files.</span> : null}
           <button className="btn secondary" type="button" disabled={importing} onClick={repairEmailRouting}>Repair: Email → Ready / No Email → Pending</button>
           <button className="btn secondary" type="button" disabled={importing} onClick={exportPendingNoEmailForScout}>Export Pending No-Email for Auto Scout</button>
           <button className="btn danger" type="button" disabled={importing} onClick={deletePendingNoEmailBusinesses}>Delete Pending No-Email</button>
