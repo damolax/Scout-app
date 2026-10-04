@@ -3,7 +3,7 @@ import { CsvBusinessInput, CsvInvalidRow } from './types';
 import { cleanText, displayDomain, extractEmail, makeNormalizedKey, normalizeEmail, normalizePhone, normalizeWebsite } from './normalize';
 
 const FIELD_ALIASES = {
-  name: ['business name', 'business', 'company', 'company name', 'name', 'title', 'place name', 'organization', 'organisation', 'store', 'shop', 'merchant', 'brand'],
+  name: ['author', 'author name', 'writer', 'writer name', 'business name', 'business', 'company', 'company name', 'name', 'title', 'place name', 'organization', 'organisation', 'store', 'shop', 'merchant', 'brand'],
   email: ['email', 'emails', 'email1', 'email2', 'email3', 'email 1', 'email 2', 'email 3', 'validatedemail1', 'validatedemail2', 'validatedemail3', 'validated email 1', 'validated email 2', 'validated email 3', 'email address', 'email addresses', 'e-mail', 'e-mail address', 'mail', 'contact email', 'contact emails', 'verified email', 'verified emails', 'found email', 'found emails', 'personal email', 'personal emails', 'business email', 'business emails', 'owner email', 'owner emails', 'primary email', 'primary emails', 'work email', 'work emails', 'inbox email', 'valid email'],
   phone: ['phone', 'phones', 'phone number', 'telephone', 'mobile', 'contact number', 'tel', 'whatsapp'],
   website: ['website', 'websites', 'site', 'url', 'web', 'domain url', 'business website', 'website url', 'store url', 'shop url', 'profile url'],
@@ -90,7 +90,7 @@ function firstPhoneFromRow(row: RawRow): string {
 }
 
 function firstNameFromRow(row: RawRow, headers: string[]): string {
-  const preferred = ['business', 'business name', 'company', 'company name', 'name', 'store', 'shop', 'title', 'merchant', 'brand'];
+  const preferred = ['author', 'author name', 'writer', 'writer name', 'business', 'business name', 'company', 'company name', 'name', 'store', 'shop', 'title', 'merchant', 'brand'];
   for (const header of headers) {
     if (preferred.includes(cleanHeader(header))) {
       const value = cleanText(row[header]);
