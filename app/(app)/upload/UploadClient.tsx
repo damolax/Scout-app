@@ -737,7 +737,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       setPhase('failed');
       setPercent(Math.min(96, Math.round((processed / Math.max(deduped.length, 1)) * 96)));
       setProgress(partialInserted > 0
-        ? `The connection stopped after ${partialInserted.toLocaleString()} row(s) were safely saved. Select the same CSV and import again; Scout's database deduplication will continue without creating duplicate leads.`
+        ? `The connection stopped after ${partialInserted.toLocaleString()} row(s) were safely saved. Select the same file and import again; Scout's database deduplication will continue without creating duplicate leads.`
         : 'The import did not complete. Scout retried and reduced the chunk size before stopping. Check the error below and try the same file again.');
     } finally {
       setImporting(false);
@@ -772,7 +772,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       setPhase(rows.length ? 'ready' : 'idle');
       setProgress(rows.length
         ? `Previous background job cancelled. The CSV currently loaded in this browser is ready for a new fast direct import.`
-        : 'Previous background job cancelled. Choose a CSV file above to enable a new fast direct import. Browsers cannot retain a local file after a refresh.');
+        : 'Previous background job cancelled. Choose a CSV/XLSX file above to enable a new fast direct import. Browsers cannot retain a local file after a refresh.');
     }
     await loadImportJobs();
   }
@@ -887,7 +887,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       </div>
 
       <div className="card" style={{ padding: 18 }}>
-        <label className="label">Upload CSV</label>
+        <label className="label">Upload CSV or XLSX</label>
         <input className="input" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onFile} />
         <div className="grid grid-2" style={{ marginTop: 12 }}>
           <div>
@@ -921,7 +921,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         </label>
 
         <div className="actions">
-          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : rows.length ? `Import ${rows.length.toLocaleString()} ${listType === 'author' ? 'author(s)' : 'business(es)'}` : 'Choose CSV to enable import'}</button>
+          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : rows.length ? `Import ${rows.length.toLocaleString()} ${listType === 'author' ? 'author(s)' : 'business(es)'}` : 'Choose file to enable import'}</button>
           {!rows.length ? <span className="muted">Select the file again after a refresh or cancelled legacy job; browsers do not retain access to local files.</span> : null}
           <button className="btn secondary" type="button" disabled={importing} onClick={repairEmailRouting}>Repair: Email → Ready / No Email → Pending</button>
           <button className="btn secondary" type="button" disabled={importing} onClick={exportPendingNoEmailForScout}>Export Pending No-Email for Auto Scout</button>
