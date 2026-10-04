@@ -172,34 +172,6 @@ export default function ManualOutreachClient({ workspace }: { workspace: Workspa
       const json = await response.json();
       if (!response.ok || json.success === false) throw new Error(json.error || 'Message could not be sent.');
 
-      const sender = senders.find((item) => item.id === senderId);
-      const now = new Date().toISOString();
-      await Promise.allSettled([
-        supabase.from('businesses').update({ status:'contacted', updated_at:now }).eq('workspace_id',workspace.id).eq('id',selected.id),
-        supabase.from('sent_messages').insert({
-          workspace_id:workspace.id,
-          business_id:selected.id,
-          template_id:templateId || null,
-          gmail_account_id:senderId,
-          to_email:selected.email,
-          from_email:sender?.email || null,
-          subject:subject.trim(),
-          body:message.trim(),
-          status:'sent',
-          delivery_status:'sent',
-          sent_at:now,
-          raw:{ manual_review_send:true, prepared_from_upload:Boolean(preparedFromFile(selected).message) },
-        }),
-        supabase.from('outreach_events').insert({
-          workspace_id:workspace.id,
-          business_id:selected.id,
-          gmail_account_id:senderId,
-          template_id:templateId || null,
-          type:'manual_sent',
-          message:'Manual review message sent to ' + selected.email,
-          raw:{ subject:subject.trim(), prepared_from_upload:Boolean(preparedFromFile(selected).message) },
-        }),
-      ]);
       setStatus('Sent to ' + selected.email + '. The prospect has been marked contacted.');
       setProspects((rows) => rows.filter((row) => row.id !== selected.id));
       setSelected(null); setSubject(''); setMessage('');
