@@ -883,6 +883,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         </div>
         {listType === 'author' ? <div className="notice" style={{ marginTop: 12 }}>
           Author files can include normal contact/research columns plus <strong>Subject</strong>, <strong>First Message</strong> or <strong>Message</strong>, personalization hook, books, evidence, language and source URLs. Scout preserves those columns so Manual Outreach can load the exact prepared message when you click an author.
+          <div className="actions" style={{ marginTop: 10 }}><button className="btn secondary" type="button" onClick={downloadAuthorTemplate}>Download author CSV template</button></div>
         </div> : null}
       </div>
 
