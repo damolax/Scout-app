@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase-admin';
 import { runAutoSourceScout } from '@/lib/source-scout-auto';
 import { businessIdentityKeys } from '@/lib/normalize';
+import { syncAuthorScoutRun } from '@/lib/author-scout-sync';
 
 type AnyRow = Record<string, any>;
 
@@ -223,16 +224,40 @@ export async function processUnifiedScoutRun(run: AnyRow) {
 export async function runUnifiedScoutWorker(limit = 1) {
   const supabase = createAdminClient();
   const safeLimit = Math.max(1, Math.min(3, Number(limit || 1)));
-  const { data: runs, error } = await supabase.from('scout_runs')
-    .select('*')
-    .in('status', ['queued','running'])
-    .neq('scout_type', 'author')
-    .order('updated_at', { ascending: true })
-    .limit(safeLimit);
-  if (error) throw error;
+  const [{ data: genericRuns, error: genericError }, { data: authorRuns, error: authorError }] = await Promise.all([
+    supabase.from('scout_runs')
+      .select('*')
+      .in('status', ['queued','running'])
+      .neq('scout_type', 'author')
+      .order('updated_at', { ascending: true })
+      .limit(safeLimit),
+    supabase.from('scout_runs')
+      .select('*')
+      .in('status', ['queued','running'])
+      .eq('scout_type', 'author')
+      .order('updated_at', { ascending: true })
+      .limit(1),
+  ]);
+  if (genericError) throw genericError;
+  if (authorError) throw authorError;
 
-  const results = [];
-  for (const run of runs || []) {
+  const results: Array<Record<string, unknown>> = [];
+
+  for (const run of authorRuns || []) {
+    try {
+      results.push(await syncAuthorScoutRun(run));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await supabase.from('scout_runs').update({
+        progress_text: 'Author Scout sync will retry: ' + message.slice(0, 240),
+        raw: { ...(run.raw || {}), last_sync_error: message.slice(0, 1200), last_sync_error_at: new Date().toISOString() },
+        updated_at: new Date().toISOString(),
+      }).eq('workspace_id', run.workspace_id).eq('id', run.id);
+      results.push({ runId: run.id, authorSyncError: message });
+    }
+  }
+
+  for (const run of genericRuns || []) {
     try {
       results.push(await processUnifiedScoutRun(run));
     } catch (error) {
