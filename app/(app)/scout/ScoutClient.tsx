@@ -121,6 +121,17 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
     [genericRuns, type],
   );
 
+  function dailyAuthorFocus() {
+    const day = Math.floor(Date.now() / 86400000);
+    return AUTHOR_DAILY_FOCUS[Math.abs(day) % AUTHOR_DAILY_FOCUS.length];
+  }
+
+  function effectiveAuthorInstructions() {
+    const base = instructions.trim();
+    if (authorPreset !== 'daily-rotating') return base;
+    return [dailyAuthorFocus(), base].filter(Boolean).join(' ');
+  }
+
   function applyAuthorPreset(id: string) {
     setAuthorPreset(id);
     const preset = AUTHOR_PRESETS.find((item) => item.id === id);
@@ -221,7 +232,7 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
             require_website: requireWebsite,
             require_public_email: requireEmail,
             duration_minutes: duration,
-            instructions,
+            instructions: effectiveAuthorInstructions(),
             saturation: 'low saturation emerging mid-list non-celebrity',
             year: '2026',
           }),
@@ -371,7 +382,9 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
                   {AUTHOR_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
                 </select></label>
                 <div className="notice">
-                  <strong>Auto-rotating query:</strong> {AUTHOR_PRESETS.find((item) => item.id === authorPreset)?.description || 'Custom search'} Scout rotates the underlying route order each day and again after this preset is run, so repeated searches explore different sources instead of restarting from the same query order.
+                  <strong>Auto-rotating query:</strong> {AUTHOR_PRESETS.find((item) => item.id === authorPreset)?.description || 'Custom search'}
+                  {authorPreset === 'daily-rotating' ? <><br /><strong>Today’s emphasis:</strong> {dailyAuthorFocus()}</> : null}
+                  {' '}Scout also rotates the underlying route order again after each run, so repeated searches explore a different slice of the target.
                 </div>
               </div>
             </div>
