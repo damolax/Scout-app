@@ -14,6 +14,16 @@ const SCOUT_TYPES: Array<{ id: ScoutType; title: string; description: string; ic
   { id: 'custom', title: 'Custom Scout', description: 'Define any niche or prospect type without creating another app.', icon: SlidersHorizontal, niche: '' },
 ];
 
+const AUTHOR_DAILY_FOCUS = [
+  'Recent releases, publisher announcements and launch pages',
+  'Writers associations, literature centres and member directories',
+  'Festivals, book fairs, readings and event programmes',
+  'Author newsletters, blogs and works-in-progress updates',
+  'Recent interviews, podcasts and literary-media features',
+  'Independent/self-published authors with active websites and new editions',
+  'Mid-list/backlist authors with new formats, translations or current events',
+] as const;
+
 const AUTHOR_PRESETS = [
   {
     id: 'auto-daily',
@@ -128,8 +138,8 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
 
   function effectiveAuthorInstructions() {
     const base = instructions.trim();
-    if (authorPreset !== 'daily-rotating') return base;
-    return [dailyAuthorFocus(), base].filter(Boolean).join(' ');
+    if (authorPreset !== 'auto-daily') return base;
+    return ['Today\'s discovery emphasis: ' + dailyAuthorFocus() + '.', base].filter(Boolean).join(' ');
   }
 
   function applyAuthorPreset(id: string) {
