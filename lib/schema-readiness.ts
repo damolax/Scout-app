@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.42.6';
+export const SCOUT_SCHEMA_CONTRACT_VERSION = '10.43.0';
 
 type TableContract = {
   table: string;
@@ -73,7 +73,9 @@ const TABLE_CONTRACTS: TableContract[] = [
       'health_recommended_limit', 'health_score', 'health_reliability',
       'owner_override_limit', 'owner_override_active', 'owner_override_until',
       'owner_override_locked', 'harmful_override_streak', 'recovery_step', 'last_recovery_progress_day',
-      'strict_disabled_at', 'last_health_metrics', 'raw'
+      'strict_disabled_at', 'last_health_metrics', 'raw',
+      'auth_mode', 'smtp_host', 'smtp_port', 'smtp_secure',
+      'smtp_secret_ciphertext', 'smtp_secret_iv', 'smtp_secret_tag', 'smtp_verified_at'
     ]
   },
   {
@@ -83,7 +85,9 @@ const TABLE_CONTRACTS: TableContract[] = [
       'category_id', 'raw', 'reply_state', 'last_reply_classification',
       'last_inbound_at', 'last_auto_reply_at', 'last_real_reply_at',
       'email_verification_status', 'email_verification_level', 'email_verified_at',
-      'email_verification_reason', 'email_role_label', 'email_mx_hosts'
+      'email_verification_reason', 'email_role_label', 'email_mx_hosts',
+      'prospect_type', 'qualification_score', 'opportunity_score',
+      'person_name', 'role_title', 'import_batch_id'
     ]
   },
   {
@@ -159,6 +163,31 @@ const TABLE_CONTRACTS: TableContract[] = [
   {
     table: 'scouting_xp_events',
     columns: ['id','workspace_id','event_type','points','unique_event_key','metadata','created_at']
+  },
+  {
+    table: 'scout_profiles',
+    columns: ['id','workspace_id','name','scout_type','config','active','background_enabled','created_by','created_at','updated_at']
+  },
+  {
+    table: 'scout_runs',
+    columns: [
+      'id','workspace_id','profile_id','scout_type','status','target_count',
+      'discovered_count','checked_count','qualified_count','email_count',
+      'duplicate_count','progress_text','filters','raw','requested_by',
+      'started_at','completed_at','created_at','updated_at'
+    ]
+  },
+  {
+    table: 'scout_candidates',
+    columns: ['id','workspace_id','run_id','prospect_type','candidate_key','name','website','email','country','source_url','status','score','evidence','raw','created_at','updated_at']
+  },
+  {
+    table: 'opportunity_scans',
+    columns: [
+      'id','workspace_id','business_id','website','hostname','prospect_name','status',
+      'industry','subindustry','opportunity_score','readiness_score','prospect_priority',
+      'confidence','analysis','source_snapshot','error','created_by','created_at'
+    ]
   },
   {
     table: 'sender_send_reservations',
@@ -292,6 +321,22 @@ export async function checkScoutSchema(
       state: 'degraded',
       detail: 'Workspace ID is unavailable, so the workspace-specific readiness probe was skipped.'
     });
+  }
+
+  try {
+    const { data, error } = await client.rpc('unified_scout_worker_status');
+    if (error) {
+      checks.push(failedCheck('rpc:unified_scout_worker_status', 'Unified background Scout worker RPC', error));
+    } else {
+      const state = normalizeProbe(data);
+      checks.push(goodCheck(
+        'rpc:unified_scout_worker_status',
+        'Unified background Scout worker RPC',
+        state?.ready ? 'Background Scout cron is configured.' : 'Background Scout worker RPC is installed; cron will be configured when a background Scout starts.'
+      ));
+    }
+  } catch (error) {
+    checks.push(failedCheck('rpc:unified_scout_worker_status', 'Unified background Scout worker RPC', error));
   }
 
   let installedVersion: string | null = typeof probe?.installedVersion === 'string'

@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
     const audienceCategoryName = String(body.audienceCategoryName || body.categoryName || body.category || '').trim() || null;
     const directEmailsReady = body.directEmailsReady !== false;
     const enqueueWebsiteAutoScout = body.enqueueWebsiteAutoScout !== false;
+    const prospectType = String(body.prospectType || body.prospect_type || 'business').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').slice(0, 40) || 'business';
     const maxPages = Math.max(1, Math.min(Number(body.maxPages || 20), 60));
     const maxSearchQueries = Math.max(0, Math.min(Number(body.maxSearchQueries ?? 3), 8));
     const startUrls = String(body.startUrls || '')
@@ -118,10 +119,12 @@ export async function POST(request: NextRequest) {
       category_name: audienceCategoryName || lead.category || null,
       location: lead.location || null,
       source: `${lead.source}_auto_fetch`,
+      prospect_type: prospectType,
+      qualification_score: lead.confidence || null,
       status: lead.email && directEmailsReady ? 'ready' : 'pending',
       score: lead.email ? Math.max(72, lead.confidence) : null,
       normalized_key: lead.normalized_key,
-      raw: { ...lead.raw, autoFetched: true, sourceTextSample: auto.sourceText.slice(0, 800) },
+      raw: { ...lead.raw, prospectType, autoFetched: true, sourceTextSample: auto.sourceText.slice(0, 800) },
       created_by: user.id
     }));
 

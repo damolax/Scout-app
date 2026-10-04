@@ -6,6 +6,8 @@ import { buildMimeMessage, EmailAttachment } from '@/lib/email-signature';
 import { requireWorkspaceAccess } from '@/lib/require-workspace-access';
 import { normalizeEmailAddress, verifyEmailBasic } from '@/lib/email-verification';
 import { recordSenderHealthEvent } from '@/lib/sender-health';
+import { decryptSenderSecret } from '@/lib/smtp-credentials';
+import { sendRawSmtp } from '@/lib/smtp-client';
 
 function b64url(input: string) {
   return Buffer.from(input, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -146,6 +148,9 @@ export async function POST(request: NextRequest) {
     const subject = String(input.subject || '').trim();
     const body = String(input.body || input.message || '').trim();
     const dryRun = Boolean(input.dryRun || input.dry_run);
+    const businessId = String(input.business_id || '').trim();
+    const templateId = String(input.template_id || '').trim();
+    const logOutreach = Boolean(input.log_outreach);
     if (!workspaceId || !accountId) throw new Error('workspace_id and gmail_account_id are required.');
     await requireWorkspaceAccess(workspaceId);
     if (!to || !subject || !body) throw new Error('to, subject, and body are required.');
@@ -167,7 +172,14 @@ export async function POST(request: NextRequest) {
     const { data: account, error: accountError } = await supabase.from('gmail_accounts').select('*').eq('workspace_id', workspaceId).eq('id', accountId).single();
     if (accountError || !account) throw new Error(accountError?.message || 'Gmail sender account not found.');
     if (account.status && !['connected', 'ready'].includes(String(account.status))) throw new Error(`Sender is not connected. Current status: ${account.status}`);
-    if (!account.refresh_token && !account.access_token) throw new Error('Sender has no Gmail OAuth token. Reconnect Gmail in Settings.');
+    const authMode = String(account.auth_mode || 'oauth').toLowerCase();
+    if (authMode === 'smtp') {
+      if (!account.smtp_secret_ciphertext || !account.smtp_secret_iv || !account.smtp_secret_tag) {
+        throw new Error('This SMTP sender is missing its encrypted App Password. Reconnect it in Sending Accounts.');
+      }
+    } else if (!account.refresh_token && !account.access_token) {
+      throw new Error('Sender has no Gmail OAuth token. Reconnect Gmail in Settings.');
+    }
 
     const attachments = await prepareAttachments(input.attachments);
     if (dryRun) {
@@ -192,33 +204,89 @@ export async function POST(request: NextRequest) {
     reservationId = String(reservation.reservation_id);
 
     let accessToken = String(account.access_token || '');
-    const expiresAt = account.expires_at ? new Date(account.expires_at).getTime() : 0;
-    if (!accessToken || expiresAt < Date.now() + 60_000) {
-      if (!account.refresh_token) throw new Error('Access token expired and no refresh token is stored. Reconnect Gmail.');
-      const refreshed = await refreshAccessToken(String(account.refresh_token));
-      accessToken = refreshed.access_token;
-      await supabase.from('gmail_accounts').update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), last_error: null }).eq('workspace_id', workspaceId).eq('id', accountId);
-    }
 
     try {
       await waitForDispatchSlot(reservation.dispatch_at);
-      let result;
-      try {
-        result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account, attachments);
-      } catch (sendError) {
-        const err = sendError as Error & { status?: number };
-        if (err.status !== 401 || !account.refresh_token) throw sendError;
-        const refreshed = await refreshAccessToken(String(account.refresh_token));
-        accessToken = refreshed.access_token;
-        await supabase.from('gmail_accounts').update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), last_error: null }).eq('workspace_id', workspaceId).eq('id', accountId);
-        result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account, attachments);
+      let result: { id?: string; threadId?: string; response?: string };
+
+      if (authMode === 'smtp') {
+        const appPassword = decryptSenderSecret({
+          ciphertext: String(account.smtp_secret_ciphertext || ''),
+          iv: String(account.smtp_secret_iv || ''),
+          tag: String(account.smtp_secret_tag || ''),
+        });
+        const message = buildMimeMessage({ from: String(account.email), to, subject, body, identity: account, attachments });
+        result = await sendRawSmtp({
+          host: String(account.smtp_host || 'smtp.gmail.com'),
+          port: Number(account.smtp_port || 465),
+          username: String(account.email),
+          password: appPassword,
+          from: String(account.email),
+          to,
+          raw: message.raw,
+        });
+      } else {
+        const expiresAt = account.expires_at ? new Date(account.expires_at).getTime() : 0;
+        if (!accessToken || expiresAt < Date.now() + 60_000) {
+          if (!account.refresh_token) throw new Error('Access token expired and no refresh token is stored. Reconnect Gmail.');
+          const refreshed = await refreshAccessToken(String(account.refresh_token));
+          accessToken = refreshed.access_token;
+          await supabase.from('gmail_accounts').update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), last_error: null }).eq('workspace_id', workspaceId).eq('id', accountId);
+        }
+
+        try {
+          result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account, attachments);
+        } catch (sendError) {
+          const err = sendError as Error & { status?: number };
+          if (err.status !== 401 || !account.refresh_token) throw sendError;
+          const refreshed = await refreshAccessToken(String(account.refresh_token));
+          accessToken = refreshed.access_token;
+          await supabase.from('gmail_accounts').update({ access_token: accessToken, expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(), last_error: null }).eq('workspace_id', workspaceId).eq('id', accountId);
+          result = await sendWithGmail(accessToken, String(account.email), to, subject, body, account, attachments);
+        }
       }
 
       await supabase.rpc('finalize_sender_send', {
         target_reservation: reservationId,
         target_recipient: to,
-        event_raw: { source: 'gmail_send_route', gmail_message_id: result.id || '', gmail_thread_id: result.threadId || '' },
+        event_raw: { source: logOutreach ? 'manual_review_send' : 'gmail_send_route', gmail_message_id: result.id || '', gmail_thread_id: result.threadId || '' },
       });
+
+      if (logOutreach) {
+        const now = new Date().toISOString();
+        if (businessId) {
+          await supabase.from('businesses').update({
+            status: 'contacted',
+            updated_at: now,
+          }).eq('workspace_id', workspaceId).eq('id', businessId);
+        }
+        await supabase.from('sent_messages').insert({
+          workspace_id: workspaceId,
+          business_id: businessId || null,
+          template_id: templateId || null,
+          gmail_account_id: accountId,
+          to_email: to,
+          from_email: String(account.email),
+          subject,
+          body,
+          provider_message_id: result.id || null,
+          gmail_thread_id: result.threadId || null,
+          status: 'sent',
+          delivery_status: 'sent',
+          sent_at: now,
+          raw: { manual_review_send: true, transport: authMode },
+        });
+        await supabase.from('outreach_events').insert({
+          workspace_id: workspaceId,
+          business_id: businessId || null,
+          template_id: templateId || null,
+          gmail_account_id: accountId,
+          type: 'manual_sent',
+          message: 'Manual review message sent to ' + to,
+          raw: { subject, transport: authMode },
+        });
+      }
+
       reservationId = '';
       return NextResponse.json({
         success: true,

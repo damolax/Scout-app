@@ -82,14 +82,14 @@ export default function LoginClient() {
   const title = mode === 'login' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Reset password';
   const subtitle = mode === 'forgot'
     ? 'Enter your email. Scout will send a reset link so you can create a new password.'
-    : 'Private Scout account and workspace.';
+    : 'Find prospects, research the opportunity, and prepare outreach from one workspace.';
 
   return (
     <main className="container" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
       <section className="card" style={{ width: '100%', maxWidth: 460, padding: 28 }}>
         <div className="brand" style={{ marginBottom: 24 }}>
           <div className="logo" />
-          <div><h1>Scout App</h1><p>{subtitle}</p></div>
+          <div><h1>Scout</h1><p>{subtitle}</p></div>
         </div>
         <form onSubmit={submit} className="stack">
           {mode === 'signup' ? (

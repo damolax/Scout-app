@@ -44,15 +44,28 @@ export async function GET(request: Request) {
     supabaseUrl: has('NEXT_PUBLIC_SUPABASE_URL'),
     supabaseAnon: has('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
     supabaseServerSecret: has('SUPABASE_SECRET_KEY') || has('SUPABASE_SERVICE_ROLE_KEY'),
-    googleClientId: has('NEXT_PUBLIC_GOOGLE_CLIENT_ID') || has('GOOGLE_CLIENT_ID'),
-    googleClientSecret: has('GOOGLE_CLIENT_SECRET'),
+    appUrl: has('NEXT_PUBLIC_APP_URL'),
+    credentialEncryptionKey: has('SCOUT_CREDENTIAL_ENCRYPTION_KEY'),
+    authorScoutApi: has('AUTHOR_SCOUT_API_BASE'),
+    authorScoutSharedSecret: has('SCOUT_PLATFORM_SHARED_SECRET'),
     workerSecretsMatch:
       has('SCHEDULE_WORKER_SECRET') &&
       has('CRON_SECRET') &&
       process.env.SCHEDULE_WORKER_SECRET === process.env.CRON_SECRET,
+    legacyGoogleOauthConfigured:
+      (has('NEXT_PUBLIC_GOOGLE_CLIENT_ID') || has('GOOGLE_CLIENT_ID')) &&
+      has('GOOGLE_CLIENT_SECRET'),
   };
 
-  const environmentReady = Object.values(env).every(Boolean);
+  const environmentReady =
+    env.supabaseUrl &&
+    env.supabaseAnon &&
+    env.supabaseServerSecret &&
+    env.appUrl &&
+    env.credentialEncryptionKey &&
+    env.authorScoutApi &&
+    env.authorScoutSharedSecret &&
+    env.workerSecretsMatch;
   let schema: Awaited<ReturnType<typeof checkScoutSchema>> | null = null;
   let workerProbe: Record<string, unknown> | null = null;
   let databaseError: string | null = null;
@@ -88,8 +101,8 @@ export async function GET(request: Request) {
     success: ready,
     ready,
     app: 'ok',
-    version: '10.42.6',
-    build: 'sending-timeout-worker-collision-followup-preview-fix',
+    version: '10.43.0',
+    build: 'unified-scout-platform',
     requiredSchemaVersion: SCOUT_SCHEMA_CONTRACT_VERSION,
     bulkImportContract: SCOUT_SCHEMA_CONTRACT_VERSION,
     senderHealthContract: SCOUT_SCHEMA_CONTRACT_VERSION,

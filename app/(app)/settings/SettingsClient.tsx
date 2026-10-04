@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import type { GmailAccount, MessageCategory, Workspace } from '@/lib/types';
 
-const VERIFICATION_SEND_ONLY = false;
+const VERIFICATION_SEND_ONLY = true;
 
 type SenderDraft = {
   daily_limit: string;
@@ -238,11 +238,9 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
   }
 
   async function checkOauth() {
-    const response = await fetch('/api/gmail/oauth/status');
-    const json = await response.json().catch(() => ({}));
-    const ready = response.ok && json?.success === true;
-    setOauthReady(ready);
-    return { ready, detail: ready ? 'Google OAuth environment is ready.' : String(json?.error || 'Google OAuth environment is incomplete.') };
+    // OAuth is now optional legacy compatibility. SMTP/App Password is the preferred send transport.
+    setOauthReady(true);
+    return { ready: true, detail: 'Google OAuth is optional. Gmail App Password + SMTP is the preferred sending setup.' };
   }
 
   async function checkSchema() {
@@ -640,8 +638,8 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
               : formatHealthDetail(appHealth?.databaseError || appHealth?.workerProbe?.error || appHealth?.env || 'One or more environment or worker settings need attention.')
         },
         {
-          name: 'Google OAuth',
-          status: results[2].status === 'rejected' ? 'Degraded' : oauth.ready ? 'Good' : 'Fix needed',
+          name: 'Sending transport',
+          status: 'Good',
           detail: oauth.detail
         },
         {
@@ -756,9 +754,9 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
           <p className="muted">{pausedSenders.length} need attention</p>
         </div>
         <div className="card kpi">
-          <div className="title">Google OAuth</div>
-          <div className="num">{oauthReady === null ? '…' : oauthReady ? 'Ready' : 'Fix'}</div>
-          <p className="muted">Send + replies + Gmail signature scopes</p>
+          <div className="title">Sending Transport</div>
+          <div className="num">SMTP</div>
+          <p className="muted">Gmail App Password + encrypted SMTP credentials</p>
         </div>
       </div>
 
@@ -766,7 +764,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         <div className="topbar">
           <div>
             <h3>Setup Readiness</h3>
-            <p className="muted">The fast check confirms schema metadata, environment, OAuth, senders, cached lead totals and templates without executing worker queues. The deep worker test is separate.</p>
+            <p className="muted">The fast check confirms schema metadata, environment, senders, cached lead totals and templates without executing worker queues. Google OAuth is optional legacy compatibility. The deep worker test is separate.</p>
           </div>
           <div className="actions">
             <button className="btn" type="button" disabled={healthBusy || deepHealthBusy} onClick={runFastCheck}>
@@ -822,7 +820,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         )}
 
         <div className="warning" style={{ marginTop: 12 }}>
-          <strong>Replies in this build:</strong> automatic Gmail synchronization is active for reconnected accounts that granted Gmail read access. Scout classifies real replies, automatic responses, no-inbox notices, blocked messages, permanent bounces, Gmail sending-limit notices, and temporary failures.
+          <strong>Replies:</strong> SMTP sending does not require Gmail read access. Automatic Gmail reply synchronization remains an optional legacy OAuth feature; otherwise reply status can be managed from Outreach.
         </div>
       </div>
 
@@ -830,10 +828,11 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
         <div className="topbar">
           <div>
             <h3>Gmail Senders</h3>
-            <p className="muted">Connect Gmail, verify access, and set preferred limits. Scout still enforces the lower health and deployment limits automatically.</p>
+            <p className="muted">Add Gmail App Password senders, then set preferred limits. Scout still enforces the lower health and deployment limits automatically.</p>
           </div>
           <div className="actions">
-            <button className="btn" type="button" disabled={busy || schemaBlocking} onClick={connectGmail}>Connect Gmail</button>
+            <button className="btn" type="button" disabled={busy || schemaBlocking} onClick={() => window.location.assign('/sending-accounts')}>Add SMTP Sender</button>
+            <button className="btn secondary" type="button" disabled={busy || schemaBlocking} onClick={connectGmail}>Legacy Google OAuth</button>
             <button className="btn secondary" type="button" disabled={busy} onClick={() => loadAccounts().catch((err) => setError(formatError(err)))}>Refresh</button>
             <button className="btn secondary" type="button" disabled={busy || !accounts.length} onClick={prepareRecommendedDefaultsForAll}>Prepare recommended defaults</button>
           </div>
@@ -846,7 +845,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
             const draft = drafts[account.id] || senderDraft(account);
             const paused = isPaused(account);
             const hardRestricted = hasActiveHardRestriction(account);
-            const connection = String(account.connection_status || ((account.access_token || account.refresh_token) ? 'not checked' : 'needs reconnect'));
+            const connection = account.auth_mode === 'smtp' ? (account.smtp_verified_at ? 'verified' : 'needs reconnect') : String(account.connection_status || ((account.access_token || account.refresh_token) ? 'not checked' : 'needs reconnect'));
             const reason = account.hard_restriction_reason || account.paused_reason || account.health_reason || 'Adaptive sender health assessment.';
             return (
               <div className="card" key={account.id} style={{ padding: 14 }}>
@@ -860,7 +859,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
                     </div>
                   </div>
                   <div className="actions">
-                    <button className="btn secondary" type="button" disabled={busy} onClick={() => verifySender(account)}>Check Gmail</button>
+                    <button className="btn secondary" type="button" disabled={busy} onClick={() => account.auth_mode === 'smtp' ? window.location.assign('/sending-accounts') : verifySender(account)}>{account.auth_mode === 'smtp' ? 'SMTP settings' : 'Check Gmail'}</button>
                     <button className="btn secondary" type="button" disabled={busy || hardRestricted} onClick={() => pauseOrResume(account)}>{paused ? 'Resume' : 'Pause'}</button>
                   </div>
                 </div>
@@ -901,7 +900,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
                     {Number(account.harmful_override_streak || 0) > 0 ? <div><strong>Harmful override days:</strong> {Number(account.harmful_override_streak || 0)} of 3</div> : null}
                     <div><strong>Real replies recorded:</strong> {Number(account.real_replies || 0).toLocaleString()}</div>
                     {account.connection_verified_at ? <div><strong>Last Gmail check:</strong> {readableDate(account.connection_verified_at)}</div> : null}
-                    <div><strong>Permissions:</strong> {account.oauth_reconnect_required ? 'Reconnect required' : 'Send + Scout-thread replies + Gmail signature'}</div>
+                    <div><strong>Transport:</strong> {account.auth_mode === 'smtp' ? 'SMTP with encrypted Gmail App Password' : account.oauth_reconnect_required ? 'OAuth reconnect required' : 'Legacy Google OAuth'}</div>
                     {account.last_reply_sync_at ? <div><strong>Last reply sync:</strong> {readableDate(account.last_reply_sync_at)} · {account.last_reply_sync_status || 'ok'}</div> : <div><strong>Last reply sync:</strong> Not run yet</div>}
                     {account.last_reply_sync_error ? <div className="error"><strong>Reply sync:</strong> {account.last_reply_sync_error}</div> : null}
                     {account.gmail_signature_synced_at ? <div><strong>Gmail signature synced:</strong> {readableDate(account.gmail_signature_synced_at)}</div> : null}
@@ -916,7 +915,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
               </div>
             );
           })}
-          {!accounts.length ? <div className="notice">No Gmail accounts connected. Run the fast check, then click Connect Gmail.</div> : null}
+          {!accounts.length ? <div className="notice">No sending accounts connected. Add a Gmail sender with an App Password.</div> : null}
         </div>
       </div>
 
@@ -950,7 +949,7 @@ export default function SettingsClient({ workspace }: { workspace: Workspace }) 
             <button className="btn secondary" type="button" disabled={busy || logoBusy} onClick={() => saveIdentity(true)}>Save + sync to Gmail</button>
             {identity.signature_logo_url ? <button className="btn secondary" type="button" onClick={() => copyText(identity.signature_logo_url, 'Logo URL')}>Copy logo URL</button> : null}
           </div>
-          <div className="notice" style={{ marginTop: 10 }}>Signature saving is independent of the full database readiness gate. Save + sync to Gmail additionally updates the native Gmail signature for reconnected senders that granted Gmail signature permission.</div>
+          <div className="notice" style={{ marginTop: 10 }}>Scout can add the saved signature to SMTP-sent messages. Native Gmail signature synchronization is available only to legacy OAuth senders that granted the signature permission.</div>
         </div>
       </details>
 

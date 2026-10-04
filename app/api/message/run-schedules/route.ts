@@ -13,6 +13,8 @@ import { businessIdentityKeys } from "@/lib/normalize";
 import { normalizeEmailAddress, verifyEmailBasic } from "@/lib/email-verification";
 import { effectiveDailyLimit, effectiveRunLimit, recordSenderHealthEvent } from "@/lib/sender-health";
 import { featureFlags } from "@/lib/feature-flags";
+import { decryptSenderSecret } from "@/lib/smtp-credentials";
+import { sendRawSmtp } from "@/lib/smtp-client";
 
 type AnyRow = Record<string, any>;
 
@@ -238,6 +240,37 @@ function renderTemplate(text: string, business: AnyRow) {
     /\{([a-zA-Z0-9_]+)\}/g,
     (_match, key) => values[String(key).toLowerCase()] ?? "",
   );
+}
+
+const PREPARED_SUBJECT_KEYS = [
+  "subject","email subject","email_subject","message subject","message_subject",
+  "outreach subject","outreach_subject","subject line","subject_line"
+];
+const PREPARED_MESSAGE_KEYS = [
+  "first message","first_message","message","email message","email_message",
+  "outreach message","outreach_message","message to author","message_to_author",
+  "first message author language","first_message_author_language","body"
+];
+
+function preparedValue(raw: AnyRow, aliases: string[]) {
+  const entries = Object.entries(raw || {}).map(([key, value]) => [
+    String(key).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim(),
+    String(value ?? "").trim(),
+  ] as const);
+  for (const alias of aliases) {
+    const clean = alias.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    const hit = entries.find(([key, value]) => key === clean && value);
+    if (hit) return hit[1];
+  }
+  return "";
+}
+
+function preparedMessageForBusiness(business: AnyRow) {
+  const raw = business?.raw && typeof business.raw === "object" ? business.raw : {};
+  return {
+    subject: preparedValue(raw, PREPARED_SUBJECT_KEYS),
+    message: preparedValue(raw, PREPARED_MESSAGE_KEYS),
+  };
 }
 
 function senderCap(scheduleRaw: AnyRow, account: AnyRow, senderRunLimitOverride?: number) {
@@ -545,10 +578,19 @@ async function loadAccounts(
     .order("next_eligible_at", { ascending: true, nullsFirst: true })
     .order("created_at", { ascending: true });
   if (error) throw error;
-  return (data || []).filter(
-    (account) =>
-      !isPaused(account) && (account.access_token || account.refresh_token),
-  );
+  return (data || []).filter((account) => {
+    if (isPaused(account)) return false;
+    const authMode = String(account.auth_mode || "oauth").toLowerCase();
+    if (authMode === "smtp") {
+      return Boolean(
+        account.smtp_verified_at &&
+        account.smtp_secret_ciphertext &&
+        account.smtp_secret_iv &&
+        account.smtp_secret_tag,
+      );
+    }
+    return Boolean(account.access_token || account.refresh_token);
+  });
 }
 
 async function guardTeamBusinessForSend(
@@ -635,10 +677,13 @@ async function loadReadyBusinesses(
   const audienceCategoryId = String(
     schedule.audience_category_id || raw.audience_category_id || "",
   ).trim();
+  const preparedOnly =
+    String(raw.template_mode || "") === "prepared" ||
+    Boolean(raw.use_prepared_messages);
 
   const unique = new Map<string, AnyRow>();
 
-  if (selectedIds.length || !cleanLocation) {
+  if (selectedIds.length || (!cleanLocation && !preparedOnly)) {
     let query = supabase
       .from("businesses")
       .select("*")
@@ -660,6 +705,10 @@ async function loadReadyBusinesses(
     const { data, error } = await query;
     if (error) throw error;
     for (const row of applyLocationFilter((data || []) as AnyRow[], cleanLocation)) {
+      if (preparedOnly && !selectedIds.length) {
+        const prepared = preparedMessageForBusiness(row);
+        if (!prepared.subject || !prepared.message) continue;
+      }
       const email = normalizeEmail(row.email);
       if (email && !unique.has(email)) unique.set(email, row);
     }
@@ -688,6 +737,10 @@ async function loadReadyBusinesses(
       if (error) throw error;
       const pageRows = (data || []) as AnyRow[];
       for (const row of applyLocationFilter(pageRows, cleanLocation)) {
+        if (preparedOnly && !selectedIds.length) {
+          const prepared = preparedMessageForBusiness(row);
+          if (!prepared.subject || !prepared.message) continue;
+        }
         const email = normalizeEmail(row.email);
         if (email && !unique.has(email)) unique.set(email, row);
         if (unique.size >= limit) break;
@@ -831,8 +884,11 @@ async function runOneSchedule(
     if (schedule.type === "follow_up" && !featureFlags.gmailReplySync) {
       throw new Error("Follow-up sending requires Gmail reply synchronization. Reconnect Gmail with reply-reading permission or enable the inbound worker.");
     }
-    const templates = await loadTemplates(supabase, schedule);
-    if (!templates.length)
+    const usePreparedMessages =
+      schedule.type !== "follow_up" &&
+      (String(raw.template_mode || "") === "prepared" || Boolean(raw.use_prepared_messages));
+    const templates = usePreparedMessages ? [] : await loadTemplates(supabase, schedule);
+    if (!usePreparedMessages && !templates.length)
       throw new Error("No active template found for this schedule.");
 
     const loadedAccounts = await loadAccounts(supabase, schedule);
@@ -874,24 +930,26 @@ async function runOneSchedule(
       location: "",
       source: "Scout",
     };
-    const sampleTemplate = templates[0];
-    const sampleLocalized = resolveTemplateContent(sampleTemplate, sampleBusiness);
-    const sampleSubject = renderTemplate(
-      splitSubjects(
-        sampleLocalized.subject,
-        sampleLocalized.subjectVariants,
-      )[0] || sampleLocalized.subject,
-      sampleBusiness,
-    );
-    const sampleBody = renderTemplate(
-      sampleLocalized.message,
-      sampleBusiness,
-    );
-    const guard = analyzeSpamRisk(sampleSubject, sampleBody);
-    if (guard.level === "High" && !allowHighRiskSend && !dryRun)
-      throw new Error(
-        `Spam Guard blocked scheduled send. Template risk is HIGH (${guard.score}/100).`,
+    if (!usePreparedMessages) {
+      const sampleTemplate = templates[0];
+      const sampleLocalized = resolveTemplateContent(sampleTemplate, sampleBusiness);
+      const sampleSubject = renderTemplate(
+        splitSubjects(
+          sampleLocalized.subject,
+          sampleLocalized.subjectVariants,
+        )[0] || sampleLocalized.subject,
+        sampleBusiness,
       );
+      const sampleBody = renderTemplate(
+        sampleLocalized.message,
+        sampleBusiness,
+      );
+      const guard = analyzeSpamRisk(sampleSubject, sampleBody);
+      if (guard.level === "High" && !allowHighRiskSend && !dryRun)
+        throw new Error(
+          `Spam Guard blocked scheduled send. Template risk is HIGH (${guard.score}/100).`,
+        );
+    }
 
     const contacts =
       schedule.type === "follow_up"
@@ -922,7 +980,7 @@ async function runOneSchedule(
       .insert({
         id: batchId,
         workspace_id: workspaceId,
-        template_id: templates[0].id,
+        template_id: usePreparedMessages ? null : templates[0].id,
         requested_count: contacts.length,
         selected_sender_count: laneAccounts.length,
         status: dryRun ? "scheduled_dry_run" : "scheduled_running",
@@ -1000,25 +1058,42 @@ async function runOneSchedule(
         if (!task) break;
         const { business, index } = task;
         const toEmail = normalizeEmail(business.email);
-        const template =
-          templateMode === "specific"
+        const template = usePreparedMessages
+          ? null
+          : templateMode === "specific"
             ? templates[0]
             : templates[index % templates.length];
-        const localized = resolveTemplateContent(template, business);
+        const localized = template ? resolveTemplateContent(template, business) : null;
+        const prepared = usePreparedMessages ? preparedMessageForBusiness(business) : null;
 
-        if (schedule.type === "follow_up" && localized.usedFallback && missingTranslationAction === "exclude") {
+        if (usePreparedMessages && (!prepared?.subject || !prepared?.message)) {
           skipped += 1;
           await supabase.from("outreach_events").insert({
             workspace_id: workspaceId,
             batch_id: batchId,
             business_id: business.id,
-            template_id: template.id,
+            gmail_account_id: account.id,
+            type: "prepared_message_missing",
+            message: `${toEmail}: skipped because uploaded Subject or First Message is missing.`,
+            raw: { schedule_id: scheduleId, prepared_message_mode: true },
+          });
+          await queueProgressWrite();
+          continue;
+        }
+
+        if (schedule.type === "follow_up" && localized?.usedFallback && missingTranslationAction === "exclude") {
+          skipped += 1;
+          await supabase.from("outreach_events").insert({
+            workspace_id: workspaceId,
+            batch_id: batchId,
+            business_id: business.id,
+            template_id: template?.id || null,
             type: "missing_translation_excluded",
-            message: `${toEmail}: excluded because the selected follow-up template has no complete ${localized.detectedLanguage.label} translation.`,
+            message: `${toEmail}: excluded because the selected follow-up template has no complete ${localized?.detectedLanguage?.label || "required"} translation.`,
             raw: {
               schedule_id: scheduleId,
-              detected_language: localized.detectedLanguage.code,
-              template_language: localized.language,
+              detected_language: localized?.detectedLanguage?.code || null,
+              template_language: localized?.language || (usePreparedMessages ? "uploaded_prepared_message" : null),
             },
           });
           await queueProgressWrite();
@@ -1121,15 +1196,40 @@ async function runOneSchedule(
         attempted += 1;
         laneAttempts += 1;
 
-        const subjects = splitSubjects(
-          localized.subject,
-          localized.subjectVariants,
-        );
+        const subjects = usePreparedMessages
+          ? [String(prepared?.subject || "")]
+          : splitSubjects(
+              String(localized?.subject || ""),
+              localized?.subjectVariants,
+            );
         const subject = renderTemplate(
-          subjects[index % Math.max(1, subjects.length)] || localized.subject,
+          subjects[index % Math.max(1, subjects.length)] || String(localized?.subject || ""),
           business,
         );
-        const body = renderTemplate(localized.message, business);
+        const body = renderTemplate(
+          usePreparedMessages ? String(prepared?.message || "") : String(localized?.message || ""),
+          business,
+        );
+        const preparedGuard = usePreparedMessages ? analyzeSpamRisk(subject, body) : null;
+        if (preparedGuard?.level === "High" && !allowHighRiskSend && !dryRun) {
+          failed += 1;
+          await supabase.from("outreach_events").insert({
+            workspace_id: workspaceId,
+            batch_id: batchId,
+            business_id: business.id,
+            gmail_account_id: account.id,
+            type: "prepared_message_spam_guard_blocked",
+            message: `${toEmail}: prepared message blocked by Spam Guard (${preparedGuard.score}/100).`,
+            raw: { schedule_id: scheduleId, prepared_message_mode: true, spam_guard: preparedGuard },
+          });
+          await supabase.rpc("release_sender_send", {
+            target_reservation: reservationId,
+            release_reason: "Prepared message blocked by Spam Guard.",
+            event_raw: { source: "scheduled_worker", schedule_id: scheduleId },
+          });
+          await queueProgressWrite();
+          continue;
+        }
         const finalBody = appendSignatureToText(body, account);
         const nowIso = new Date().toISOString();
 
@@ -1137,7 +1237,7 @@ async function runOneSchedule(
           workspace_id: workspaceId,
           batch_id: batchId,
           business_id: business.id,
-          template_id: template.id,
+          template_id: template?.id || null,
           gmail_account_id: account.id,
           type: "sending",
           message: `Sending message to ${toEmail}`,
@@ -1150,36 +1250,65 @@ async function runOneSchedule(
             target: totalTarget,
             safety: reservation,
             verification,
-            template_language: localized.language,
-            detected_business_language: localized.detectedLanguage,
-            used_language_fallback: localized.usedFallback,
+            prepared_message_mode: usePreparedMessages,
+            template_language: localized?.language || (usePreparedMessages ? "uploaded_prepared_message" : null),
+            detected_business_language: localized?.detectedLanguage || null,
+            used_language_fallback: localized?.usedFallback || false,
           },
         });
 
         try {
-          const attachments = await preparedAttachmentsFor(template);
+          const attachments = template ? await preparedAttachmentsFor(template) : [];
           let gmailMessageId = "";
           let gmailThreadId = "";
           if (!dryRun) {
-            const accessToken = await ensureAccessToken(supabase, account);
-            const result = await sendWithGmail(
-              accessToken,
-              String(account.email),
-              toEmail,
-              subject,
-              body,
-              account,
-              attachments,
-            );
-            gmailMessageId = result.id || "";
-            gmailThreadId = result.threadId || "";
+            const authMode = String(account.auth_mode || "oauth").toLowerCase();
+            if (authMode === "smtp") {
+              const appPassword = decryptSenderSecret({
+                ciphertext: String(account.smtp_secret_ciphertext || ""),
+                iv: String(account.smtp_secret_iv || ""),
+                tag: String(account.smtp_secret_tag || ""),
+              });
+              const message = buildMimeMessage({
+                from: String(account.email),
+                to: toEmail,
+                subject,
+                body,
+                identity: account,
+                attachments,
+              });
+              const result = await sendRawSmtp({
+                host: String(account.smtp_host || "smtp.gmail.com"),
+                port: Number(account.smtp_port || 465),
+                username: String(account.email),
+                password: appPassword,
+                from: String(account.email),
+                to: toEmail,
+                raw: message.raw,
+              });
+              gmailMessageId = result.id || "";
+              gmailThreadId = result.threadId || "";
+            } else {
+              const accessToken = await ensureAccessToken(supabase, account);
+              const result = await sendWithGmail(
+                accessToken,
+                String(account.email),
+                toEmail,
+                subject,
+                body,
+                account,
+                attachments,
+              );
+              gmailMessageId = result.id || "";
+              gmailThreadId = result.threadId || "";
+            }
           }
 
           const statusText = dryRun ? "dry_run" : "sent";
           await supabase.from("sent_messages").insert({
             workspace_id: workspaceId,
             business_id: business.id,
-            template_id: template.id,
+            template_id: template?.id || null,
             gmail_account_id: account.id,
             batch_id: batchId,
             to_email: toEmail,
@@ -1198,12 +1327,12 @@ async function runOneSchedule(
               followup_segment: raw.followup_segment || schedule.followup_segment || null,
               signature_applied: account.signature_enabled !== false && Boolean(account.signature_text || account.signature_html),
               signature_application_count: 1,
-              template_language: localized.language,
-              detected_business_language: localized.detectedLanguage,
-              used_language_fallback: localized.usedFallback,
+              template_language: localized?.language || (usePreparedMessages ? "uploaded_prepared_message" : null),
+              detected_business_language: localized?.detectedLanguage || null,
+              used_language_fallback: localized?.usedFallback || false,
               verification,
               safety: reservation,
-              attachments: templateAttachments(template).map((a: AnyRow) => ({
+              attachments: (template ? templateAttachments(template) : []).map((a: AnyRow) => ({
                 name: a.name || a.filename,
                 url: a.public_url || a.url,
               })),
@@ -1252,7 +1381,7 @@ async function runOneSchedule(
             workspace_id: workspaceId,
             batch_id: batchId,
             business_id: business.id,
-            template_id: template.id,
+            template_id: template?.id || null,
             gmail_account_id: account.id,
             type: statusText,
             message: statusText === "sent" ? `Message sent to ${toEmail}` : `Scheduled ${statusText}: ${toEmail}`,
@@ -1288,7 +1417,7 @@ async function runOneSchedule(
           await supabase.from("sent_messages").insert({
             workspace_id: workspaceId,
             business_id: business.id,
-            template_id: template.id,
+            template_id: template?.id || null,
             gmail_account_id: account.id,
             batch_id: batchId,
             to_email: toEmail,
@@ -1306,9 +1435,9 @@ async function runOneSchedule(
               followup_segment: raw.followup_segment || schedule.followup_segment || null,
               signature_applied: account.signature_enabled !== false && Boolean(account.signature_text || account.signature_html),
               signature_application_count: 1,
-              template_language: localized.language,
-              detected_business_language: localized.detectedLanguage,
-              used_language_fallback: localized.usedFallback,
+              template_language: localized?.language || (usePreparedMessages ? "uploaded_prepared_message" : null),
+              detected_business_language: localized?.detectedLanguage || null,
+              used_language_fallback: localized?.usedFallback || false,
               verification,
             },
           });
@@ -1316,7 +1445,7 @@ async function runOneSchedule(
             workspace_id: workspaceId,
             batch_id: batchId,
             business_id: business.id,
-            template_id: template.id,
+            template_id: template?.id || null,
             gmail_account_id: account.id,
             type: failedStatus,
             message: `${toEmail}: ${reason}`,

@@ -73,7 +73,7 @@ type Summary = {
   skipped: number;
   stopped: boolean;
 };
-type TemplateMode = "specific" | "rotate";
+type TemplateMode = "specific" | "rotate" | "prepared";
 type SenderMode = "specific" | "rotate";
 type MessageKind = "initial" | "follow_up";
 type MissingTranslationAction = "stop" | "exclude" | "english";
@@ -290,6 +290,36 @@ function renderTemplate(text: string, business: Business) {
     /\{([a-zA-Z0-9_]+)\}/g,
     (_match, key) => values[String(key).toLowerCase()] ?? "",
   );
+}
+
+const PREPARED_SUBJECT_KEYS = [
+  "subject","email subject","email_subject","message subject","message_subject",
+  "outreach subject","outreach_subject","subject line","subject_line"
+];
+const PREPARED_MESSAGE_KEYS = [
+  "first message","first_message","message","email message","email_message",
+  "outreach message","outreach_message","message to author","message_to_author",
+  "first message author language","first_message_author_language","body"
+];
+
+function preparedValue(raw: Record<string, unknown> | null | undefined, aliases: string[]) {
+  const entries = Object.entries(raw || {}).map(([key, value]) => [
+    key.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim(),
+    String(value ?? "").trim(),
+  ] as const);
+  for (const alias of aliases) {
+    const clean = alias.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    const hit = entries.find(([key, value]) => key === clean && value);
+    if (hit) return hit[1];
+  }
+  return "";
+}
+
+function preparedMessageForBusiness(business: Partial<Business>) {
+  return {
+    subject: preparedValue(business.raw || {}, PREPARED_SUBJECT_KEYS),
+    message: preparedValue(business.raw || {}, PREPARED_MESSAGE_KEYS),
+  };
 }
 
 function csvEscape(value: unknown) {
@@ -595,9 +625,13 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     return Math.max(0, daily - Math.max(0, used));
   }
   function senderAvailable(account: GmailAccount) {
+    const authMode = String(account.auth_mode || "oauth").toLowerCase();
+    const connected = authMode === "smtp"
+      ? Boolean(account.smtp_verified_at)
+      : Boolean(account.access_token || account.refresh_token);
     return ["connected", "ready"].includes(String(account.status || "")) &&
       !isPaused(account) &&
-      Boolean(account.access_token || account.refresh_token) &&
+      connected &&
       senderRemainingToday(account) > 0;
   }
   const connectedAccounts = accounts.filter(senderAvailable);
@@ -1171,6 +1205,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     // Initial-message sending must never rotate or select follow-up/reply templates.
     const scoped = categoryTemplates;
     const allAllowed = sendableTemplates;
+    if (templateMode === "prepared") return [];
     if (templateMode === "rotate") return scoped.length ? scoped : allAllowed;
     if (currentTemplate && currentTemplate.active !== false) return [currentTemplate];
     return scoped.length ? scoped.slice(0, 1) : allAllowed.slice(0, 1);
@@ -1567,9 +1602,10 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
   ) {
     const messageKind: MessageKind =
       options?.messageKind || (options?.isFollowUp ? "follow_up" : "initial");
+    const usePreparedMessages = messageKind === "initial" && templateMode === "prepared";
     const templatePool = templatesForSend(messageKind);
     const senders = accountsForSend();
-    if (!templatePool.length)
+    if (!usePreparedMessages && !templatePool.length)
       throw new Error(
         messageKind === "follow_up"
           ? "Create/select at least one follow-up template first. Initial-message templates are no longer used for follow-ups."
@@ -1589,18 +1625,20 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
         location: "",
         source: "Scout",
       } as Business);
-    const guardTemplate = templatePool[0];
-    const guardSubject = renderTemplate(
-      splitSubjects(guardTemplate.subject, guardTemplate.subject_variants)[0] ||
-        guardTemplate.subject,
-      guardBusiness,
-    );
-    const guardBody = renderTemplate(guardTemplate.message, guardBusiness);
-    const guard = analyzeSpamRisk(guardSubject, guardBody);
-    if (guard.level === "High" && !allowHighRiskSend && !dryRun)
-      throw new Error(
-        `Safety Check blocked this send because the template risk is HIGH (${guard.score}/100). Fix the template or tick the override checkbox.`,
+    if (!usePreparedMessages) {
+      const guardTemplate = templatePool[0];
+      const guardSubject = renderTemplate(
+        splitSubjects(guardTemplate.subject, guardTemplate.subject_variants)[0] ||
+          guardTemplate.subject,
+        guardBusiness,
       );
+      const guardBody = renderTemplate(guardTemplate.message, guardBusiness);
+      const guard = analyzeSpamRisk(guardSubject, guardBody);
+      if (guard.level === "High" && !allowHighRiskSend && !dryRun)
+        throw new Error(
+          `Safety Check blocked this send because the template risk is HIGH (${guard.score}/100). Fix the template or tick the override checkbox.`,
+        );
+    }
 
     const selectedBusinessIds = options?.allDueFollowUps
       ? []
@@ -2221,9 +2259,10 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
     setBusy(true);
     setError("");
     try {
+      const usePreparedMessages = scheduleType === "initial" && templateMode === "prepared";
       const templatePool = templatesForSend(scheduleType);
       const senders = accountsForSend();
-      if (!templatePool.length)
+      if (!usePreparedMessages && !templatePool.length)
         throw new Error("Create/select at least one template first.");
       if (!senders.length)
         throw new Error("Select at least one connected sender first.");
@@ -2259,6 +2298,7 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
             followup_segment:
               scheduleType === "follow_up" ? followUpSegment : null,
             template_mode: templateMode,
+          use_prepared_messages: usePreparedMessages,
             sender_mode: senderMode,
             selected_sender_ids: senders.map((s) => s.id),
             selected_sender_emails: senders.map((s) => s.email),
@@ -2320,7 +2360,8 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
             followup_segment: followUpSegment,
             followup_after_hours: 72,
             due_business_ids: dueFollowUps.map((d) => d.business_id),
-            template_mode: templateMode,
+            template_mode: "specific",
+            use_prepared_messages: false,
             sender_mode: senderMode,
             selected_sender_ids: senders.map((s) => s.id),
             selected_sender_emails: senders.map((s) => s.email),
@@ -2790,11 +2831,24 @@ export default function MessageClient({ workspace, replySyncEnabled }: { workspa
               />{" "}
               Rotate initial templates in this category
             </label>
+            <label className="checkbox-row">
+              <input
+                type="radio"
+                checked={templateMode === "prepared"}
+                onChange={() => setTemplateMode("prepared")}
+              />{" "}
+              Use each prospect&apos;s uploaded Subject + First Message
+            </label>
+            {templateMode === "prepared" ? (
+              <div className="notice" style={{ marginBottom: 10 }}>
+                Best for uploaded author files. Each prospect keeps their own prepared subject and message. Rows missing either field are skipped instead of receiving a generic template.
+              </div>
+            ) : null}
             <select
               className="select"
               value={templateId}
               onChange={(e) => setTemplateId(e.target.value)}
-              disabled={templateMode === "rotate"}
+              disabled={templateMode !== "specific"}
             >
               <option value="">Select template</option>
               {(categoryId ? categoryTemplates : sendableTemplates).map((t) => (

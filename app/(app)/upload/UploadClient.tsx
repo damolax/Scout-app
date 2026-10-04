@@ -67,6 +67,47 @@ function formatImportError(error: unknown) {
   return errorMessage(error, 'Unknown import error.');
 }
 
+const SHEETJS_BROWSER_URL = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+
+async function loadSheetJs(): Promise<any> {
+  const existing = (window as any).XLSX;
+  if (existing) return existing;
+  await new Promise<void>((resolve, reject) => {
+    const prior = document.querySelector('script[data-scout-sheetjs="true"]') as HTMLScriptElement | null;
+    if (prior) {
+      prior.addEventListener('load', () => resolve(), { once: true });
+      prior.addEventListener('error', () => reject(new Error('Spreadsheet reader could not load. Save the workbook as CSV and retry.')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = SHEETJS_BROWSER_URL;
+    script.async = true;
+    script.crossOrigin = 'anonymous';
+    script.dataset.scoutSheetjs = 'true';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Spreadsheet reader could not load. Save the workbook as CSV and retry.'));
+    document.head.appendChild(script);
+  });
+  const loaded = (window as any).XLSX;
+  if (!loaded) throw new Error('Spreadsheet reader loaded without exposing XLSX. Save the workbook as CSV and retry.');
+  return loaded;
+}
+
+async function fileToCsvText(file: File): Promise<{ text: string; sheetName?: string }> {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith('.csv') || lower.endsWith('.txt')) return { text: await file.text() };
+  if (!lower.endsWith('.xlsx')) throw new Error('Scout currently accepts CSV and XLSX files.');
+  const XLSX = await loadSheetJs();
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false, dense: true });
+  const firstSheetName = String(workbook.SheetNames?.[0] || '');
+  if (!firstSheetName) throw new Error('The workbook does not contain a readable worksheet.');
+  const sheet = workbook.Sheets[firstSheetName];
+  const text = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+  if (!String(text || '').trim()) throw new Error('The first worksheet is empty.');
+  return { text, sheetName: firstSheetName };
+}
+
 function csvEscape(value: unknown) {
   const text = String(value ?? '');
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -101,6 +142,30 @@ function downloadBusinessRows(name: string, businesses: Business[]) {
   const a = document.createElement('a');
   a.href = url;
   a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadAuthorTemplate() {
+  const headers = [
+    'Author','Country','Website','Email','Genre','Recent Activity','Books',
+    'Email Source URL','Evidence','Personalization Hook','Language','Subject','First Message','Status'
+  ];
+  const example = [
+    'Example Author','United Kingdom','https://example.com','author@example.com','Historical Fiction',
+    'Recent release / newsletter / event','Book One; Book Two','https://example.com/contact',
+    'Specific public evidence used for personalization','Concise evidence-backed hook','English',
+    'A thoughtful question about {{author}}','Hello {{author}},\n\nI noticed...','Ready'
+  ];
+  const blob = new Blob([
+    [headers, example].map((row) => row.map(csvEscape).join(',')).join('\n')
+  ], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'scout-author-upload-template.csv';
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -212,6 +277,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   const [percent, setPercent] = useState(0);
   const [importing, setImporting] = useState(false);
   const [enqueueResearch, setEnqueueResearch] = useState(false);
+  const [listType, setListType] = useState<'business' | 'author'>('business');
   const [result, setResult] = useState<ImportResult | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -430,17 +496,22 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     setFileName(file.name);
     if (file.size > MAX_IMPORT_FILE_BYTES) {
       setPhase('failed');
-      setProgress(`This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The safe browser limit is ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)} MB. Split it into smaller CSV files while keeping each file under 100,000 usable rows.`);
+      setProgress(`This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The safe browser limit is ${Math.round(MAX_IMPORT_FILE_BYTES / 1024 / 1024)} MB. Split it into smaller CSV/XLSX files while keeping each file under 100,000 usable rows.`);
       setErrors([`File is too large for a reliable browser upload (${(file.size / 1024 / 1024).toFixed(1)} MB).`]);
       event.target.value = '';
       return;
     }
 
     setPhase('reading');
-    setProgress('Reading CSV locally. The app only renders a 25-row preview, so large files should not freeze the page...');
+    setProgress(file.name.toLowerCase().endsWith('.xlsx')
+      ? 'Reading the first Excel worksheet locally. The workbook itself is not uploaded to Scout.'
+      : 'Reading CSV locally. The app only renders a 25-row preview, so large files should not freeze the page...');
     try {
-      const text = await file.text();
-      const parsed = await parseCsvText(text);
+      const converted = await fileToCsvText(file);
+      const parsed = await parseCsvText(converted.text);
+      if (converted.sheetName) {
+        setWarnings((current) => [...current, 'Imported worksheet: ' + converted.sheetName + '. Scout uses the first worksheet in an XLSX file.']);
+      }
       setHeaders(parsed.headers);
       setInvalidRows(parsed.invalidRows);
       setErrors(parsed.errors);
@@ -457,7 +528,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         await checkTargetMismatch(parsed.headers);
       } catch (warningError) {
         console.warn('Target comparison skipped because Supabase was temporarily unavailable:', warningError);
-        setWarnings((current) => [...current, 'The target comparison could not be completed, but the CSV is ready and can still be imported.']);
+        setWarnings((current) => [...current, 'The target comparison could not be completed, but the file is ready and can still be imported.']);
       }
       setRows(parsed.rows);
       setPhase('ready');
@@ -467,7 +538,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
     } catch (error) {
       setPhase('failed');
       setErrors([formatImportError(error)]);
-      setProgress('File could not be read. Confirm it is a valid CSV and try again.');
+      setProgress('File could not be read. Confirm it is a valid CSV/XLSX file and try again.');
     } finally {
       event.target.value = '';
     }
@@ -535,7 +606,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
             headers,
             category_id: category.id || null,
             category_name: category.name || null,
-            source_mode: 'csv_upload',
+            source_mode: listType === 'author' ? 'author_file_upload' : 'csv_upload',
             created_by: userData.user.id
           }, { onConflict: 'id' })
           .select('id')
@@ -545,7 +616,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       }, { retries: 2 });
 
       batchId = String(batch.id);
-      const compactRaw = deduped.length >= COMPACT_RAW_THRESHOLD;
+      const compactRaw = deduped.length >= COMPACT_RAW_THRESHOLD && listType !== 'author';
       const parts = makeImportChunks(deduped, compactRaw);
       const laneCount = Math.min(IMPORT_CONCURRENCY, Math.max(parts.length, 1));
       setPhase('importing');
@@ -612,6 +683,22 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         }
       }
 
+      if (inserted > 0) {
+        const prospectPatch: Record<string, unknown> = {
+          prospect_type: listType === 'author' ? 'author' : 'business',
+          updated_at: new Date().toISOString(),
+        };
+        if (listType === 'author') prospectPatch.category = category.name || 'Author';
+        const { error: typeError } = await supabase
+          .from('businesses')
+          .update(prospectPatch)
+          .eq('workspace_id', workspace.id)
+          .eq('import_batch_id', batchId);
+        if (typeError) {
+          setWarnings((current) => [...current, 'The file imported, but Scout could not tag every row with its list type: ' + formatImportError(typeError)]);
+        }
+      }
+
       const skippedTotal = skippedExistingQueue + skippedScouted + skippedTeam + duplicateRows.length + invalidRows.length;
 
       if (skippedTeam > 0) {
@@ -631,7 +718,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       const seconds = Math.max(0.1, (performance.now() - startedAt) / 1000);
       setPercent(100);
       setPhase('done');
-      setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new business(es), skipped ${skippedTotal.toLocaleString()}.${skippedTeam ? ` ${skippedTeam.toLocaleString()} were already scouted by a team member and removed.` : ''} Rows with email were saved as Ready; no-email rows were saved as Pending for Auto Scout.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
+      setProgress(`Done in ${seconds.toFixed(1)}s. Imported ${inserted.toLocaleString()} new ${listType === 'author' ? 'author' : 'business'} prospect(s), skipped ${skippedTotal.toLocaleString()}.${skippedTeam ? ` ${skippedTeam.toLocaleString()} were already scouted by a team member and removed.` : ''} Rows with email were saved as Ready; no-email rows were saved as Pending for Auto Scout.${queuedResearch ? ` Queued ${queuedResearch.toLocaleString()} research job(s).` : ''}`);
     } catch (error) {
       const message = formatImportError(error);
       console.error('Scout reliable import failed:', error);
@@ -650,7 +737,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       setPhase('failed');
       setPercent(Math.min(96, Math.round((processed / Math.max(deduped.length, 1)) * 96)));
       setProgress(partialInserted > 0
-        ? `The connection stopped after ${partialInserted.toLocaleString()} row(s) were safely saved. Select the same CSV and import again; Scout's database deduplication will continue without creating duplicate leads.`
+        ? `The connection stopped after ${partialInserted.toLocaleString()} row(s) were safely saved. Select the same file and import again; Scout's database deduplication will continue without creating duplicate leads.`
         : 'The import did not complete. Scout retried and reduced the chunk size before stopping. Check the error below and try the same file again.');
     } finally {
       setImporting(false);
@@ -685,7 +772,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
       setPhase(rows.length ? 'ready' : 'idle');
       setProgress(rows.length
         ? `Previous background job cancelled. The CSV currently loaded in this browser is ready for a new fast direct import.`
-        : 'Previous background job cancelled. Choose a CSV file above to enable a new fast direct import. Browsers cannot retain a local file after a refresh.');
+        : 'Previous background job cancelled. Choose a CSV/XLSX file above to enable a new fast direct import. Browsers cannot retain a local file after a refresh.');
     }
     await loadImportJobs();
   }
@@ -788,8 +875,21 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
   return (
     <div className="stack">
       <div className="card" style={{ padding: 18 }}>
-        <label className="label">Upload CSV</label>
-        <input className="input" type="file" accept=".csv,text/csv" onChange={onFile} />
+        <h3 style={{ marginTop: 0 }}>What are you uploading?</h3>
+        <div className="actions">
+          <label className="checkbox-row"><input type="radio" name="list-type" checked={listType === 'business'} onChange={() => setListType('business')} /> General prospects</label>
+          <label className="checkbox-row"><input type="radio" name="list-type" checked={listType === 'author'} onChange={() => setListType('author')} /> Author file</label>
+          <button className="btn secondary" type="button" onClick={downloadAuthorTemplate}>Download author template</button>
+        </div>
+        {listType === 'author' ? <div className="notice" style={{ marginTop: 12 }}>
+          Author files can include normal contact/research columns plus <strong>Subject</strong>, <strong>First Message</strong> or <strong>Message</strong>, personalization hook, books, evidence, language and source URLs. Scout preserves those columns so Manual Outreach can load the exact prepared message when you click an author.
+          <div className="actions" style={{ marginTop: 10 }}><button className="btn secondary" type="button" onClick={downloadAuthorTemplate}>Download author CSV template</button></div>
+        </div> : null}
+      </div>
+
+      <div className="card" style={{ padding: 18 }}>
+        <label className="label">Upload CSV or XLSX</label>
+        <input className="input" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onFile} />
         <div className="grid grid-2" style={{ marginTop: 12 }}>
           <div>
             <label className="label">Audience category for this upload</label>
@@ -822,8 +922,8 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         </label>
 
         <div className="actions">
-          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : rows.length ? `Import ${rows.length.toLocaleString()} business(es)` : 'Choose CSV to enable import'}</button>
-          {!rows.length ? <span className="muted">Select the CSV again after a refresh or cancelled legacy job; browsers do not retain access to local files.</span> : null}
+          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : rows.length ? `Import ${rows.length.toLocaleString()} ${listType === 'author' ? 'author(s)' : 'business(es)'}` : 'Choose file to enable import'}</button>
+          {!rows.length ? <span className="muted">Select the file again after a refresh or cancelled legacy job; browsers do not retain access to local files.</span> : null}
           <button className="btn secondary" type="button" disabled={importing} onClick={repairEmailRouting}>Repair: Email → Ready / No Email → Pending</button>
           <button className="btn secondary" type="button" disabled={importing} onClick={exportPendingNoEmailForScout}>Export Pending No-Email for Auto Scout</button>
           <button className="btn danger" type="button" disabled={importing} onClick={deletePendingNoEmailBusinesses}>Delete Pending No-Email</button>
