@@ -4,7 +4,9 @@ import IntelligenceClient from './IntelligenceClient';
 
 export const dynamic = 'force-dynamic';
 
-export default async function IntelligencePage() {
+export default async function IntelligencePage({ searchParams }: { searchParams: Promise<{ business?: string }> }) {
+  const query = await searchParams;
+  const initialBusinessId = String(query?.business || '').trim();
   const { workspace, error } = await getCurrentWorkspace();
   if (!workspace) return <div className="error">Workspace error: {error}</div>;
   const supabase = createAdminClient();
@@ -35,6 +37,7 @@ export default async function IntelligencePage() {
         workspaceId={workspace.id}
         prospects={(prospects || []) as any[]}
         recentScans={(scans || []) as any[]}
+        initialBusinessId={initialBusinessId}
       />
     </div>
   );
