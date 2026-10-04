@@ -1,22 +1,17 @@
 import Link from 'next/link';
-import BusinessQueueClient from '../businesses/BusinessQueueClient';
 import { getCurrentWorkspace } from '@/lib/workspace';
+import ProspectsClient from './ProspectsClient';
 
 export default async function ProspectsPage() {
   const { workspace, error } = await getCurrentWorkspace();
   if (!workspace) return <div className="error">{error || 'No workspace found.'}</div>;
-  return (
-    <div className="stack">
-      <div className="page-title">
-        <h2>Prospects</h2>
-        <p>Authors, stores, businesses and other prospects found by every Scout source live in one workspace.</p>
+  return <div className="stack">
+    <div className="page-title">
+      <div className="actions" style={{justifyContent:'space-between',alignItems:'flex-start'}}>
+        <div><h2>Prospects</h2><p>Every author, store, person and business found by Scout lives here, regardless of how it was discovered.</p></div>
+        <Link className="btn secondary" href="/upload">Upload list</Link>
       </div>
-      <div className="quick-links">
-        <Link href="/scout" className="quick-link-card"><strong>Scout more prospects</strong><span>Choose a prospect type and search.</span></Link>
-        <Link href="/intelligence" className="quick-link-card"><strong>Opportunity Intelligence</strong><span>Analyze a prospect website before outreach.</span></Link>
-        <Link href="/verify" className="quick-link-card"><strong>Clean emails</strong><span>Review bad or missing email records.</span></Link>
-      </div>
-      <BusinessQueueClient workspace={workspace} />
     </div>
-  );
+    <ProspectsClient workspace={workspace} />
+  </div>;
 }
