@@ -8,8 +8,8 @@ function LoginFallback() {
         <div className="brand" style={{ marginBottom: 24 }}>
           <div className="logo" />
           <div>
-            <h1>Scout v10.38</h1>
-            <p>Loading secure login...</p>
+            <h1>Scout</h1>
+            <p>Loading your prospecting workspace...</p>
           </div>
         </div>
       </section>
