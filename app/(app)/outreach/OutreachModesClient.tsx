@@ -5,7 +5,7 @@ import ManualOutreachClient from './ManualOutreachClient';
 import MessageClient from '../message/MessageClient';
 import type { Workspace } from '@/lib/types';
 
-export default function OutreachModesClient({ workspace, replySyncEnabled }: { workspace: Workspace; replySyncEnabled: boolean }) {
+export default function OutreachModesClient({ workspace, replySyncEnabled, initialProspectId = '' }: { workspace: Workspace; replySyncEnabled: boolean; initialProspectId?: string }) {
   const [mode,setMode] = useState<'manual'|'automatic'>('manual');
   return <>
     <div className="card" style={{padding:10}}>
@@ -20,7 +20,7 @@ export default function OutreachModesClient({ workspace, replySyncEnabled }: { w
       </p>
     </div>
     {mode === 'manual'
-      ? <ManualOutreachClient workspace={workspace} />
+      ? <ManualOutreachClient workspace={workspace} initialProspectId={initialProspectId} />
       : <MessageClient workspace={workspace} replySyncEnabled={replySyncEnabled} />}
   </>;
 }
