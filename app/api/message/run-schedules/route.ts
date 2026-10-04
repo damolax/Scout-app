@@ -254,11 +254,11 @@ const PREPARED_MESSAGE_KEYS = [
 
 function preparedValue(raw: AnyRow, aliases: string[]) {
   const entries = Object.entries(raw || {}).map(([key, value]) => [
-    String(key).trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " "),
+    String(key).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim(),
     String(value ?? "").trim(),
   ] as const);
   for (const alias of aliases) {
-    const clean = alias.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+    const clean = alias.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
     const hit = entries.find(([key, value]) => key === clean && value);
     if (hit) return hit[1];
   }
