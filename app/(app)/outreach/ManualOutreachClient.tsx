@@ -19,7 +19,7 @@ const MESSAGE_KEYS = [
 
 function normalizedEntries(raw: Record<string, unknown> | null | undefined) {
   return Object.entries(raw || {}).map(([key, value]) => [
-    key.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' '),
+    key.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim(),
     String(value ?? '').trim(),
   ] as const);
 }
@@ -27,7 +27,7 @@ function normalizedEntries(raw: Record<string, unknown> | null | undefined) {
 function valueFor(raw: Record<string, unknown> | null | undefined, aliases: string[]) {
   const rows = normalizedEntries(raw);
   for (const alias of aliases) {
-    const clean = alias.replace(/[_-]+/g, ' ').toLowerCase();
+    const clean = alias.replace(/[^a-z0-9]+/g, ' ').toLowerCase().trim();
     const hit = rows.find(([key, value]) => key === clean && value);
     if (hit) return hit[1];
   }
