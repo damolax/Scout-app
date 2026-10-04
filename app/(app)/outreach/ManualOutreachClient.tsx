@@ -67,7 +67,7 @@ function preparedFromFile(business: Business): Prepared {
   };
 }
 
-export default function ManualOutreachClient({ workspace }: { workspace: Workspace }) {
+export default function ManualOutreachClient({ workspace, initialProspectId = '' }: { workspace: Workspace; initialProspectId?: string }) {
   const supabase = useMemo(() => createClient(), []);
   const [prospects,setProspects] = useState<Business[]>([]);
   const [senders,setSenders] = useState<GmailAccount[]>([]);
@@ -140,6 +140,15 @@ export default function ManualOutreachClient({ workspace }: { workspace: Workspa
         ? 'No prepared message was found in the file, so Scout populated the active template. Review before sending.'
         : 'No prepared message or active template was found. Enter the message before sending.');
   }
+
+  useEffect(() => {
+    if (!initialProspectId || selected?.id === initialProspectId) return;
+    const row = prospects.find((item) => item.id === initialProspectId);
+    if (!row) return;
+    const rawType = String(row.prospect_type || (row.raw as any)?.prospectType || 'business').toLowerCase();
+    setType(rawType || 'all');
+    chooseProspect(row);
+  }, [initialProspectId, prospects, templates, selected?.id]);
 
   function applyTemplate(id: string) {
     setTemplateId(id);
