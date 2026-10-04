@@ -148,6 +148,9 @@ export async function POST(request: NextRequest) {
     const subject = String(input.subject || '').trim();
     const body = String(input.body || input.message || '').trim();
     const dryRun = Boolean(input.dryRun || input.dry_run);
+    const businessId = String(input.business_id || '').trim();
+    const templateId = String(input.template_id || '').trim();
+    const logOutreach = Boolean(input.log_outreach);
     if (!workspaceId || !accountId) throw new Error('workspace_id and gmail_account_id are required.');
     await requireWorkspaceAccess(workspaceId);
     if (!to || !subject || !body) throw new Error('to, subject, and body are required.');
@@ -246,8 +249,44 @@ export async function POST(request: NextRequest) {
       await supabase.rpc('finalize_sender_send', {
         target_reservation: reservationId,
         target_recipient: to,
-        event_raw: { source: 'gmail_send_route', gmail_message_id: result.id || '', gmail_thread_id: result.threadId || '' },
+        event_raw: { source: logOutreach ? 'manual_review_send' : 'gmail_send_route', gmail_message_id: result.id || '', gmail_thread_id: result.threadId || '' },
       });
+
+      if (logOutreach) {
+        const now = new Date().toISOString();
+        if (businessId) {
+          await supabase.from('businesses').update({
+            status: 'contacted',
+            updated_at: now,
+          }).eq('workspace_id', workspaceId).eq('id', businessId);
+        }
+        await supabase.from('sent_messages').insert({
+          workspace_id: workspaceId,
+          business_id: businessId || null,
+          template_id: templateId || null,
+          gmail_account_id: accountId,
+          to_email: to,
+          from_email: String(account.email),
+          subject,
+          body,
+          provider_message_id: result.id || null,
+          gmail_thread_id: result.threadId || null,
+          status: 'sent',
+          delivery_status: 'sent',
+          sent_at: now,
+          raw: { manual_review_send: true, transport: authMode },
+        });
+        await supabase.from('outreach_events').insert({
+          workspace_id: workspaceId,
+          business_id: businessId || null,
+          template_id: templateId || null,
+          gmail_account_id: accountId,
+          type: 'manual_sent',
+          message: 'Manual review message sent to ' + to,
+          raw: { subject, transport: authMode },
+        });
+      }
+
       reservationId = '';
       return NextResponse.json({
         success: true,
