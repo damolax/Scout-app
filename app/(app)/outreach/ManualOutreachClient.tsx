@@ -181,7 +181,55 @@ export default function ManualOutreachClient({ workspace, initialProspectId = ''
       const json = await response.json();
       if (!response.ok || json.success === false) throw new Error(json.error || 'Message could not be sent.');
 
-      setStatus('Sent to ' + selected.email + '. The prospect has been marked contacted.');
+      const sender = senders.find((item) => item.id === senderId);
+      const result = Array.isArray(json.results) ? json.results[0] || {} : {};
+      const now = new Date().toISOString();
+      const prepared = preparedFromFile(selected);
+
+      const historyWrites = await Promise.allSettled([
+        supabase.from('businesses').update({
+          status: 'contacted',
+          updated_at: now,
+        }).eq('workspace_id', workspace.id).eq('id', selected.id),
+        supabase.from('sent_messages').insert({
+          workspace_id: workspace.id,
+          business_id: selected.id,
+          template_id: templateId || null,
+          gmail_account_id: senderId,
+          to_email: selected.email,
+          from_email: sender?.email || null,
+          subject: subject.trim(),
+          body: message.trim(),
+          provider_message_id: result.gmailMessageId || null,
+          gmail_thread_id: result.gmailThreadId || null,
+          status: 'sent',
+          delivery_status: 'sent',
+          sent_at: now,
+          is_follow_up: false,
+          raw: {
+            manual_review_send: true,
+            prepared_from_upload: Boolean(prepared.message),
+          },
+        }),
+        supabase.from('outreach_events').insert({
+          workspace_id: workspace.id,
+          business_id: selected.id,
+          gmail_account_id: senderId,
+          template_id: templateId || null,
+          type: 'manual_sent',
+          message: 'Manual review message sent to ' + selected.email,
+          raw: {
+            subject: subject.trim(),
+            prepared_from_upload: Boolean(prepared.message),
+          },
+        }),
+      ]);
+      const failedHistory = historyWrites.find((item) => item.status === 'rejected');
+      if (failedHistory) {
+        setStatus('Message sent, but Scout could not save every history record. Refresh the prospect Activity before relying on its status.');
+      } else {
+        setStatus('Sent to ' + selected.email + '. The prospect has been marked contacted.');
+      }
       setProspects((rows) => rows.filter((row) => row.id !== selected.id));
       setSelected(null); setSubject(''); setMessage('');
     } catch(e) {
