@@ -342,3 +342,14 @@ $$;
 
 revoke all on function public.unified_scout_worker_status() from public, anon, authenticated;
 grant execute on function public.unified_scout_worker_status() to service_role;
+
+
+-- Record the unified platform contract only after all objects above are installed.
+insert into public.scout_schema_versions(version, notes)
+values (
+  '10.43.0',
+  'Unified Scout: multi-type background scouting, Opportunity Intelligence, SMTP/App-Password sending, author bridge, unified Prospects and Outreach.'
+)
+on conflict (version) do update
+set applied_at = now(),
+    notes = excluded.notes;
