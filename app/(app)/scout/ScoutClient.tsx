@@ -16,6 +16,14 @@ const SCOUT_TYPES: Array<{ id: ScoutType; title: string; description: string; ic
 
 const AUTHOR_PRESETS = [
   {
+    id: 'auto-daily',
+    name: 'Smart daily author discovery',
+    description: 'A broad author-search preset whose underlying source/query order changes each day and again after every run.',
+    positions: 'emerging author, mid-list author, independent author',
+    genres: 'Literary Fiction, Historical Fiction, Contemporary Fiction, Mystery, Romance, Fantasy, Science Fiction, Memoir',
+    instructions: 'Find active under-the-radar authors with current publishing or writing activity, official web presence and public professional contact details. Avoid celebrity-level authors.',
+  },
+  {
     id: 'emerging-fiction',
     name: 'Emerging fiction authors',
     description: 'Under-the-radar fiction authors with current activity, an official website and a public professional email.',
@@ -85,11 +93,11 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
   const [country, setCountry] = useState('');
   const [location, setLocation] = useState('');
   const [niche, setNiche] = useState('authors');
-  const [instructions, setInstructions] = useState('');
+  const [instructions, setInstructions] = useState('Find active under-the-radar authors with current publishing or writing activity, official web presence and public professional contact details. Avoid celebrity-level authors.');
   const [duration, setDuration] = useState(30);
-  const [authorPreset, setAuthorPreset] = useState('emerging-fiction');
-  const [genres, setGenres] = useState('Literary Fiction, Historical Fiction, Contemporary Fiction, Mystery, Romance, Fantasy, Science Fiction');
-  const [positions, setPositions] = useState('emerging author, mid-list author');
+  const [authorPreset, setAuthorPreset] = useState('auto-daily');
+  const [genres, setGenres] = useState('Literary Fiction, Historical Fiction, Contemporary Fiction, Mystery, Romance, Fantasy, Science Fiction, Memoir');
+  const [positions, setPositions] = useState('emerging author, mid-list author, independent author');
   const [languages, setLanguages] = useState('');
   const [genders, setGenders] = useState('any');
   const [requireWebsite, setRequireWebsite] = useState(true);
@@ -102,6 +110,8 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
   const [error, setError] = useState('');
   const [authorJobs, setAuthorJobs] = useState<any[]>([]);
   const [activeAuthorJob, setActiveAuthorJob] = useState<any>(null);
+  const [authorPlanSamples, setAuthorPlanSamples] = useState<string[]>([]);
+  const [authorRotationSeed, setAuthorRotationSeed] = useState('');
   const [genericRuns, setGenericRuns] = useState<any[]>([]);
   const [quickResult, setQuickResult] = useState<any>(null);
 
@@ -219,6 +229,8 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
         const json = await response.json();
         if (!response.ok) throw new Error(json.error || json.detail || 'Could not start Author Scout.');
         setNotice('Background Author Scout started. You can close Scout; the Author Scout worker will keep running.');
+        setAuthorPlanSamples(Array.isArray(json.search_plan_samples) ? json.search_plan_samples : []);
+        setAuthorRotationSeed(String(json.rotation_seed || ''));
         await loadAuthorJobs();
         const detail = await fetch('/api/scout/authors?workspace_id=' + encodeURIComponent(workspaceId) + '&job_id=' + encodeURIComponent(json.job_id));
         const detailJson = await detail.json();
@@ -401,6 +413,19 @@ export default function ScoutClient({ workspaceId }: { workspaceId: string }) {
 
       {notice && <div className="notice">{notice}</div>}
       {error && <div className="error">{error}</div>}
+
+      {type === 'author' && authorPlanSamples.length > 0 && <div className="card" style={{ padding: 18 }}>
+        <div className="topbar">
+          <div>
+            <h3 style={{ margin: 0 }}>Search routes for this run</h3>
+            <p className="muted" style={{ marginBottom: 0 }}>These are samples from the rotated plan. The next run of the same preset receives a new rotation seed.</p>
+          </div>
+          {authorRotationSeed && <span className="badge">{authorRotationSeed.split(':').slice(-2).join(' · ')}</span>}
+        </div>
+        <ol>
+          {authorPlanSamples.slice(0, 5).map((query) => <li key={query} style={{ marginBottom: 8 }}>{query}</li>)}
+        </ol>
+      </div>}
 
       {type === 'author' && activeAuthorJob?.job && <div className="card" style={{ padding: 18 }}>
         <div className="topbar">
