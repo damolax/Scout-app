@@ -1201,7 +1201,7 @@ async function runOneSchedule(
         );
         const preparedGuard = usePreparedMessages ? analyzeSpamRisk(subject, body) : null;
         if (preparedGuard?.level === "High" && !allowHighRiskSend && !dryRun) {
-          skipped += 1;
+          failed += 1;
           await supabase.from("outreach_events").insert({
             workspace_id: workspaceId,
             batch_id: batchId,
