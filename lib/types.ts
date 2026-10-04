@@ -46,6 +46,12 @@ export type Business = {
   source: string | null;
   status: BusinessStatus;
   score: number | null;
+  prospect_type?: string | null;
+  qualification_score?: number | null;
+  opportunity_score?: number | null;
+  person_name?: string | null;
+  role_title?: string | null;
+  import_batch_id?: string | null;
   normalized_key: string;
   raw: Record<string, unknown> | null;
   reply_state?: string | null;
