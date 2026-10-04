@@ -148,6 +148,30 @@ function downloadBusinessRows(name: string, businesses: Business[]) {
   URL.revokeObjectURL(url);
 }
 
+function downloadAuthorTemplate() {
+  const headers = [
+    'Author','Country','Website','Email','Genre','Recent Activity','Books',
+    'Email Source URL','Evidence','Personalization Hook','Language','Subject','First Message','Status'
+  ];
+  const example = [
+    'Example Author','United Kingdom','https://example.com','author@example.com','Historical Fiction',
+    'Recent release / newsletter / event','Book One; Book Two','https://example.com/contact',
+    'Specific public evidence used for personalization','Concise evidence-backed hook','English',
+    'A thoughtful question about {{author}}','Hello {{author}},\n\nI noticed...','Ready'
+  ];
+  const blob = new Blob([
+    [headers, example].map((row) => row.map(csvEscape).join(',')).join('\n')
+  ], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'scout-author-upload-template.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function downloadInvalidRows(name: string, rows: CsvInvalidRow[]) {
   if (!rows.length) return;
   const rawHeaders = Array.from(rows.reduce((set, row) => {
@@ -855,6 +879,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         <div className="actions">
           <label className="checkbox-row"><input type="radio" name="list-type" checked={listType === 'business'} onChange={() => setListType('business')} /> General prospects</label>
           <label className="checkbox-row"><input type="radio" name="list-type" checked={listType === 'author'} onChange={() => setListType('author')} /> Author file</label>
+          <button className="btn secondary" type="button" onClick={downloadAuthorTemplate}>Download author template</button>
         </div>
         {listType === 'author' ? <div className="notice" style={{ marginTop: 12 }}>
           Author files can include normal contact/research columns plus <strong>Subject</strong>, <strong>First Message</strong> or <strong>Message</strong>, personalization hook, books, evidence, language and source URLs. Scout preserves those columns so Manual Outreach can load the exact prepared message when you click an author.
@@ -896,7 +921,7 @@ export default function UploadClient({ workspace }: { workspace: Workspace }) {
         </label>
 
         <div className="actions">
-          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : rows.length ? `Import ${rows.length.toLocaleString()} business(es)` : 'Choose CSV to enable import'}</button>
+          <button className="btn" disabled={!rows.length || importing || rows.length > MAX_IMPORT_ROWS} onClick={importRows}>{importing ? 'Importing...' : rows.length ? `Import ${rows.length.toLocaleString()} ${listType === 'author' ? 'author(s)' : 'business(es)'}` : 'Choose CSV to enable import'}</button>
           {!rows.length ? <span className="muted">Select the file again after a refresh or cancelled legacy job; browsers do not retain access to local files.</span> : null}
           <button className="btn secondary" type="button" disabled={importing} onClick={repairEmailRouting}>Repair: Email → Ready / No Email → Pending</button>
           <button className="btn secondary" type="button" disabled={importing} onClick={exportPendingNoEmailForScout}>Export Pending No-Email for Auto Scout</button>
