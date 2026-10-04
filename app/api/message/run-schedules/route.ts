@@ -677,10 +677,13 @@ async function loadReadyBusinesses(
   const audienceCategoryId = String(
     schedule.audience_category_id || raw.audience_category_id || "",
   ).trim();
+  const preparedOnly =
+    String(raw.template_mode || "") === "prepared" ||
+    Boolean(raw.use_prepared_messages);
 
   const unique = new Map<string, AnyRow>();
 
-  if (selectedIds.length || !cleanLocation) {
+  if (selectedIds.length || (!cleanLocation && !preparedOnly)) {
     let query = supabase
       .from("businesses")
       .select("*")
@@ -702,6 +705,10 @@ async function loadReadyBusinesses(
     const { data, error } = await query;
     if (error) throw error;
     for (const row of applyLocationFilter((data || []) as AnyRow[], cleanLocation)) {
+      if (preparedOnly && !selectedIds.length) {
+        const prepared = preparedMessageForBusiness(row);
+        if (!prepared.subject || !prepared.message) continue;
+      }
       const email = normalizeEmail(row.email);
       if (email && !unique.has(email)) unique.set(email, row);
     }
@@ -730,6 +737,10 @@ async function loadReadyBusinesses(
       if (error) throw error;
       const pageRows = (data || []) as AnyRow[];
       for (const row of applyLocationFilter(pageRows, cleanLocation)) {
+        if (preparedOnly && !selectedIds.length) {
+          const prepared = preparedMessageForBusiness(row);
+          if (!prepared.subject || !prepared.message) continue;
+        }
         const email = normalizeEmail(row.email);
         if (email && !unique.has(email)) unique.set(email, row);
         if (unique.size >= limit) break;
