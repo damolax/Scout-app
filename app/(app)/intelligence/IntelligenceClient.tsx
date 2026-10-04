@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 type Prospect = {
   id: string;
@@ -36,10 +36,12 @@ export default function IntelligenceClient({
   workspaceId,
   prospects,
   recentScans,
+  initialBusinessId = '',
 }: {
   workspaceId: string;
   prospects: Prospect[];
   recentScans: Scan[];
+  initialBusinessId?: string;
 }) {
   const [businessId, setBusinessId] = useState('');
   const [website, setWebsite] = useState('');
@@ -61,6 +63,12 @@ export default function IntelligenceClient({
     setProspectName(item.name || '');
     setCountry(item.location || '');
   }
+
+  useEffect(() => {
+    if (!initialBusinessId || businessId === initialBusinessId) return;
+    const item = prospects.find((prospect) => prospect.id === initialBusinessId);
+    if (item) chooseProspect(initialBusinessId);
+  }, [initialBusinessId, prospects, businessId]);
 
   async function analyze(event: FormEvent) {
     event.preventDefault();
